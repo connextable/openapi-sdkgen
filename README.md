@@ -20,7 +20,9 @@ openapi-sdkgen generate \
 
 `--package-name` is optional; the output directory name becomes the package name when it is omitted.
 
-The output is an independent package source tree. It includes the generated client, public entrypoint, `package.json`, TypeScript build configuration, README, and contract manifest. Compile that output and publish the resulting package from the output directory; `test/typescript` is never part of the package to publish.
+The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
+
+The output is an independent package source tree. It includes the generated client, public entrypoint, `package.json`, TypeScript build configuration, README, and contract manifest. It also declares its own `build` script and TypeScript build dependency. Run the emitted package's package-manager install and `build` command, then publish that package; `test/typescript` is never part of the package to publish.
 
 Generate separate packages by invoking the command once per OpenAPI document and output directory.
 

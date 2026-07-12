@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+"$ROOT/scripts/agent/prepare-conformance"
 agent_run "TypeScript typecheck" ts_pnpm run typecheck

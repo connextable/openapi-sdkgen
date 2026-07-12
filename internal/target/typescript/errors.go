@@ -67,7 +67,7 @@ func emitErrors(document *ir.Document) ([]byte, error) {
 			description = "Server error `" + contract.Code + "`."
 		}
 		fmt.Fprintf(&output, "/**\n * %s\n *\n * Code: `%s`. Details: %s\n */\n", sanitizeComment(description), contract.Code, jsDocTypeReference(contract.Details))
-		fmt.Fprintf(&output, "export type %s = APIError<%s>\n", contract.TypeName, quoteTS(contract.Code))
+		fmt.Fprintf(&output, "export type %s = APIError<%s, ServerErrorDetailsByCode[%s]>\n", contract.TypeName, quoteTS(contract.Code), quoteTS(contract.Code))
 		fmt.Fprintf(&output, "/**\n * Checks whether an unknown value is a {@link %s}.\n *\n * @param error Value caught from an SDK call.\n * @returns `true` when the error code is `%s`.\n */\n", contract.TypeName, contract.Code)
 		fmt.Fprintf(&output, "export function is%s(error: unknown): error is %s {\n", contract.TypeName, contract.TypeName)
 		fmt.Fprintf(&output, "  return isErrorCode(error, %s)\n", quoteTS(contract.Code))

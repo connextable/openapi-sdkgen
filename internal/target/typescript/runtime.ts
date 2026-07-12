@@ -22,7 +22,7 @@ export interface RequestMetadata {
 }
 
 /** Values used to construct an {@link APIError}. */
-export interface APIErrorOptions<Code extends string> {
+export interface APIErrorOptions<Code extends string, Details = unknown> {
   /** Stable server or transport error code. */
   readonly code: Code;
   /** Human-readable error message. Do not branch application logic on this value. */
@@ -32,6 +32,8 @@ export interface APIErrorOptions<Code extends string> {
   /** HTTP status code when the server returned a response. */
   readonly status?: number;
   /** Structured server validation or domain-error details, when provided. */
+  readonly details?: Details;
+  /** Legacy structured server validation fields, when provided. */
   readonly fields?: unknown;
   /** Original Fetch API response, when one was received. */
   readonly response?: Response;
@@ -44,7 +46,7 @@ export interface APIErrorOptions<Code extends string> {
  *
  * Use generated error guards or {@link isErrorCode} instead of matching messages.
  */
-export class APIError<Code extends string = string> extends Error {
+export class APIError<Code extends string = string, Details = unknown> extends Error {
   /** Standard JavaScript error name. */
   readonly name = "APIError";
   /** Stable server or transport error code. */
@@ -54,6 +56,8 @@ export class APIError<Code extends string = string> extends Error {
   /** HTTP status code, absent when no response was received. */
   readonly status?: number;
   /** Structured server validation or domain-error details. */
+  readonly details?: Details;
+  /** Legacy structured server validation fields. */
   readonly fields?: unknown;
   /** Original Fetch API response, when available. */
   readonly response?: Response;
@@ -61,11 +65,12 @@ export class APIError<Code extends string = string> extends Error {
   readonly cause?: unknown;
 
   /** Creates a normalized API or transport error. */
-  constructor(options: APIErrorOptions<Code>) {
+  constructor(options: APIErrorOptions<Code, Details>) {
     super(options.message);
     this.code = options.code;
     this.request = options.request ?? {};
     if (options.status !== undefined) this.status = options.status;
+    if (options.details !== undefined) this.details = options.details;
     if (options.fields !== undefined) this.fields = options.fields;
     if (options.response !== undefined) this.response = options.response;
     if (options.cause !== undefined) this.cause = options.cause;
@@ -1049,9 +1054,6 @@ function normalizeBaseURL(value: string): string {
   if ((url.protocol !== "http:" && url.protocol !== "https:") || url.search || url.hash) {
     throw new TypeError("baseURL must be an absolute http(s) URL without query or fragment");
   }
-  if (!/\/v\d+\/?$/.test(url.pathname)) {
-    throw new TypeError("baseURL must end in an API version path such as /v1");
-  }
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url.href.replace(/\/$/, "");
 }
@@ -1138,6 +1140,7 @@ function serverError(response: Response, request: RequestMetadata, body: unknown
     message,
     request,
     status: response.status,
+    details: error.details ?? error.fields,
     fields: error.fields,
     response,
   });

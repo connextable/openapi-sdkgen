@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
 func TestGenerateWritesSelfContainedTypeScriptPackage(t *testing.T) {
@@ -26,7 +28,7 @@ func TestGenerateWritesSelfContainedTypeScriptPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(packageJSON), `"name": "@example/client"`) || strings.Contains(string(packageJSON), `"dependencies"`) {
+	if !strings.Contains(string(packageJSON), `"name": "@example/client"`) || !strings.Contains(string(packageJSON), `"build": "tsc --project tsconfig.json"`) || strings.Contains(string(packageJSON), `"dependencies"`) {
 		t.Fatalf("package.json = %s", packageJSON)
 	}
 }
@@ -41,6 +43,22 @@ func TestGenerateRejectsUnknownTarget(t *testing.T) {
 func TestSafeArtifactPathRejectsTraversal(t *testing.T) {
 	if _, err := safeArtifactPath("../outside.ts"); err == nil {
 		t.Fatal("traversal path was accepted")
+	}
+}
+
+func TestWriteArtifactsRejectsSymlinkOutput(t *testing.T) {
+	directory := t.TempDir()
+	outside := t.TempDir()
+	output := filepath.Join(directory, "output")
+	if err := os.Symlink(outside, output); err != nil {
+		t.Fatal(err)
+	}
+	err := writeArtifacts(output, []generator.Artifact{{Path: "generated/client.ts", Data: []byte("export {}\n")}})
+	if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("writeArtifacts error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "generated", "client.ts")); !os.IsNotExist(err) {
+		t.Fatalf("outside artifact stat error = %v", err)
 	}
 }
 

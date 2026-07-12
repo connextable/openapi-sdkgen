@@ -130,6 +130,12 @@ func emitPackageJSON(manifest Manifest) ([]byte, error) {
 		"sideEffects": false,
 		"main":        "./dist/src/index.js",
 		"types":       "./dist/src/index.d.ts",
+		"scripts": map[string]string{
+			"build": "tsc --project tsconfig.json",
+		},
+		"devDependencies": map[string]string{
+			"typescript": "7.0.2",
+		},
 		"exports": map[string]any{
 			".": map[string]string{
 				"types":  "./dist/src/index.d.ts",

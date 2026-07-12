@@ -2,18 +2,14 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  createClient,
-  getRequestID,
-  isValidationFailedError,
-} from "../fixtures/generated/client/dist/src/index.js";
+import { createClient, getRequestID, isValidationFailedError } from "@example/conformance-client";
 
 describe("generated TypeScript package", () => {
   it("exports a nested resource client that serializes request inputs", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const url = new URL(String(input));
       expect(`${init?.method} ${url.pathname}${url.search}`).toBe(
-        "POST /v1/widgets?tag=one&tag=two",
+        "POST /api/widgets?tag=one&tag=two",
       );
       expect(new Headers(init?.headers).get("x-trace-id")).toBe("trace-1");
       expect(init?.body).toBe('{"name":"first","requestId":"request-1"}');
@@ -22,7 +18,7 @@ describe("generated TypeScript package", () => {
         headers: { "content-type": "application/json" },
       });
     });
-    const api = createClient({ baseURL: "https://api.example.test/v1", fetch });
+    const api = createClient({ baseURL: "https://api.example.test/api", fetch });
 
     await expect(
       api.widgets.create({
@@ -36,10 +32,10 @@ describe("generated TypeScript package", () => {
 
   it("preserves path parameters through the nested resource tree", async () => {
     const api = createClient({
-      baseURL: "https://api.example.test/v1",
+      baseURL: "https://api.example.test/api",
       fetch: async (input, init) => {
         expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
-          "GET /v1/customers/customer%2F1/widgets/widget%2F2",
+          "GET /api/customers/customer%2F1/widgets/widget%2F2",
         );
         return new Response('{"data":{"id":"widget/2","name":"nested"}}', {
           status: 200,
@@ -56,7 +52,7 @@ describe("generated TypeScript package", () => {
 
   it("exports generated error guards with documented error details", async () => {
     const api = createClient({
-      baseURL: "https://api.example.test/v1",
+      baseURL: "https://api.example.test/api",
       fetch: async () =>
         new Response(
           '{"error":{"code":"validation_failed","message":"invalid","details":{"field":"name"}}}',
@@ -72,6 +68,8 @@ describe("generated TypeScript package", () => {
       .catch((cause: unknown) => cause);
     expect(isValidationFailedError(error)).toBe(true);
     expect(getRequestID(error)).toBe("request-error");
+    if (!isValidationFailedError(error)) throw new Error("expected validation error");
+    expect(error.details).toEqual({ field: "name" });
   });
 
   it("keeps generated package metadata independent from the conformance harness", async () => {

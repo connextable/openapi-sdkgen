@@ -86,7 +86,7 @@ func TestPackageArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	packageJSON := string(artifacts["sdk/example/package.json"])
 	tsconfig := string(artifacts["sdk/example/tsconfig.json"])
 	publicIndex := string(artifacts["sdk/example/src/index.ts"])
-	if !strings.Contains(packageJSON, `"name": "@example/api"`) || !strings.Contains(packageJSON, `"./dist/src/index.js"`) || strings.Contains(packageJSON, `"dependencies"`) {
+	if !strings.Contains(packageJSON, `"name": "@example/api"`) || !strings.Contains(packageJSON, `"./dist/src/index.js"`) || !strings.Contains(packageJSON, `"build": "tsc --project tsconfig.json"`) || !strings.Contains(packageJSON, `"typescript": "7.0.2"`) || strings.Contains(packageJSON, `"dependencies"`) {
 		t.Fatalf("package manifest is not self-contained:\n%s", packageJSON)
 	}
 	if !strings.Contains(tsconfig, `"outDir": "dist"`) || !strings.Contains(publicIndex, `export * from "../generated/index.js"`) {
@@ -173,7 +173,7 @@ func TestPackageArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`export type ServerErrorCode = "validation_failed"`,
-		`export type ValidationFailedError = APIError<"validation_failed">`,
+		`export type ValidationFailedError = APIError<"validation_failed", ServerErrorDetailsByCode["validation_failed"]>`,
 		"export function isValidationFailedError",
 		"export function isValidationError",
 		"export type CreateProductServerError = ValidationFailedError",

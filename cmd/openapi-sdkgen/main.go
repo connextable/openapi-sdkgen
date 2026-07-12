@@ -98,9 +98,6 @@ func defaultPackageName(output string) string {
 }
 
 func writeArtifacts(output string, artifacts []generator.Artifact) error {
-	if err := os.MkdirAll(output, 0o755); err != nil {
-		return fmt.Errorf("create output directory: %w", err)
-	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	seen := make(map[string]bool, len(artifacts))
 	for _, artifact := range artifacts {
@@ -112,7 +109,30 @@ func writeArtifacts(output string, artifacts []generator.Artifact) error {
 			return fmt.Errorf("duplicate generated artifact %q", cleanPath)
 		}
 		seen[cleanPath] = true
-		path := filepath.Join(output, cleanPath)
+	}
+	if info, err := os.Lstat(output); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("output path %s must not be a symlink", output)
+		}
+		return fmt.Errorf("output path %s already exists; choose a fresh directory", output)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect output path %s: %w", output, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return fmt.Errorf("create output parent directory: %w", err)
+	}
+	staging, err := os.MkdirTemp(filepath.Dir(output), ".openapi-sdkgen-output-*")
+	if err != nil {
+		return fmt.Errorf("create output staging directory: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	for _, artifact := range artifacts {
+		path := filepath.Join(staging, filepath.Clean(filepath.FromSlash(artifact.Path)))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("create artifact directory %s: %w", filepath.Dir(path), err)
 		}
@@ -120,6 +140,10 @@ func writeArtifacts(output string, artifacts []generator.Artifact) error {
 			return err
 		}
 	}
+	if err := os.Rename(staging, output); err != nil {
+		return fmt.Errorf("publish generated output %s: %w", output, err)
+	}
+	committed = true
 	return nil
 }
 

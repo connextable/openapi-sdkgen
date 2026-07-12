@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+"$ROOT/scripts/agent/build"
+fixture="$TYPESCRIPT_ROOT/fixtures/generated/client"
+rm -rf "$fixture"
+agent_run "generate TypeScript fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/contract.openapi.json" \
+  --target typescript \
+  --output "$fixture" \
+  --package-name "@example/conformance-client"
+agent_run "install generated fixture" ts_pnpm --dir "$fixture" install
+agent_run "build generated fixture" ts_pnpm --dir "$fixture" run build
+mkdir -p "$TYPESCRIPT_ROOT/node_modules/@example"
+ln -sfn "$fixture" "$TYPESCRIPT_ROOT/node_modules/@example/conformance-client"
+agent_run "pack generated fixture" ts_node npm --prefix "$fixture" pack --dry-run
