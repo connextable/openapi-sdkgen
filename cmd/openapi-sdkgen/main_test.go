@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestGenerateWritesTypeScriptArtifacts(t *testing.T) {
+func TestGenerateWritesSelfContainedTypeScriptPackage(t *testing.T) {
 	directory := t.TempDir()
 	input := filepath.Join(directory, "contract.json")
 	if err := os.WriteFile(input, []byte(minimalDocument), 0o644); err != nil {
@@ -17,17 +17,17 @@ func TestGenerateWritesTypeScriptArtifacts(t *testing.T) {
 	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output, "--package-name", "@example/client"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"manifest.json", "README.md", "generated/client.ts", "generated/runtime.ts"} {
+	for _, expected := range []string{"package.json", "tsconfig.json", "src/index.ts", "manifest.json", "README.md", "generated/client.ts", "generated/runtime.ts"} {
 		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
 			t.Fatalf("missing %s: %v", expected, err)
 		}
 	}
-	manifest, err := os.ReadFile(filepath.Join(output, "manifest.json"))
+	packageJSON, err := os.ReadFile(filepath.Join(output, "package.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(manifest), `"packageName": "@example/client"`) {
-		t.Fatalf("manifest.json = %s", manifest)
+	if !strings.Contains(string(packageJSON), `"name": "@example/client"`) || strings.Contains(string(packageJSON), `"dependencies"`) {
+		t.Fatalf("package.json = %s", packageJSON)
 	}
 }
 
