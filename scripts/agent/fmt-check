@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+cd "$ROOT"
+files=()
+while IFS= read -r -d '' file; do
+  files+=("$file")
+done < <(git ls-files -co --exclude-standard -z -- '*.go')
+if ((${#files[@]} == 0)) || [[ -z "$(gofmt -l "${files[@]}")" ]]; then
+  agent_note "ok go fmt check"
+  exit 0
+fi
+echo "failed go fmt check"
+gofmt -l "${files[@]}"
+exit 1

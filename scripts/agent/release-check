@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+cd "$ROOT"
+for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+  os="${target%/*}"
+  arch="${target#*/}"
+  output="$ROOT/.tmp/release-check/openapi-sdkgen-${os}-${arch}"
+  if [[ "$os" == windows ]]; then
+    output+=".exe"
+  fi
+  mkdir -p "$(dirname "$output")"
+  agent_run "release build ${target}" env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "$output" ./cmd/openapi-sdkgen
+done
+agent_note "ok release check"

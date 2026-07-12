@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+if (($# != 3)); then
+  echo "usage: just agent generate INPUT OUTPUT [TARGET]" >&2
+  exit 2
+fi
+cd "$ROOT"
+agent_run "generate SDK" go run ./cmd/openapi-sdkgen generate --input "$1" --output "$2" --target "$3"
