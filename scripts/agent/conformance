@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+"$ROOT/scripts/agent/build"
+agent_run "generate TypeScript fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/contract.openapi.json" \
+  --target typescript \
+  --output "$TYPESCRIPT_ROOT/fixtures/generated/client" \
+  --package-name "@example/conformance-client"
 agent_run "TypeScript conformance" ts_pnpm run conformance

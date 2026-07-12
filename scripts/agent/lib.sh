@@ -44,13 +44,14 @@ agent_run() {
   if "$@" >"$log_file" 2>&1; then
     echo "ok $label"
     return
+  else
+    local status=$?
+    echo "failed $label"
+    printf 'command: %s\n' "$*"
+    echo "log: $log_file"
+    tail -n "$TAIL_LINES" "$log_file" || true
+    return "$status"
   fi
-  local status=$?
-  echo "failed $label"
-  printf 'command: %s\n' "$*"
-  echo "log: $log_file"
-  tail -n "$TAIL_LINES" "$log_file" || true
-  return "$status"
 }
 
 agent_note() {

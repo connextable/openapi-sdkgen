@@ -1,0 +1,151 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Conformance API",
+    "version": "1.2.3"
+  },
+  "paths": {
+    "/widgets": {
+      "post": {
+        "operationId": "createWidget",
+        "summary": "Create a widget.",
+        "x-envelope": "data",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": { "type": "array", "items": { "type": "string" } }
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "requestId": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["id", "name"],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" },
+                        "requestId": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationFailedError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/customers/{customerID}/widgets/{widgetID}": {
+      "get": {
+        "operationId": "getCustomerWidget",
+        "summary": "Read a customer widget.",
+        "x-envelope": "data",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public",
+        "parameters": [
+          {
+            "name": "customerID",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "widgetID",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": ["id", "name"],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ValidationDetails": {
+        "type": "object",
+        "required": ["field"],
+        "properties": { "field": { "type": "string" } }
+      },
+      "ValidationFailedError": {
+        "type": "object",
+        "x-error-category": "validation",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "const": "validation_failed" },
+              "message": { "type": "string" },
+              "details": { "$ref": "#/components/schemas/ValidationDetails" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

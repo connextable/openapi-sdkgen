@@ -7,6 +7,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh
 "$ROOT/scripts/agent/build"
 "$ROOT/scripts/agent/mod-tidy-check"
 "$ROOT/scripts/agent/mod-verify"
+"$ROOT/scripts/agent/ts-fmt-check"
+"$ROOT/scripts/agent/ts-lint"
 "$ROOT/scripts/agent/conformance"
 "$ROOT/scripts/agent/release-check"
 agent_note "ok check"

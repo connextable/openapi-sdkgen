@@ -38,6 +38,9 @@ generate input output target='typescript':
 conformance:
     ./scripts/agent/conformance
 
+ts-lock:
+    ./scripts/agent/ts-lock
+
 ts-install:
     ./scripts/agent/ts-install
 

@@ -26,6 +26,7 @@ just agent mod-tidy-check
 just agent mod-verify
 just agent generate INPUT OUTPUT [TARGET]
 just agent conformance
+just agent ts-lock
 just agent ts-install
 just agent ts-fmt
 just agent ts-fmt-check

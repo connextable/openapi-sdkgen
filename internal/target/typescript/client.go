@@ -301,7 +301,11 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 	}
 	if len(item.PathParameterOrder) > 0 {
 		emitOperationJSDoc(output, "", item)
-		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", operationName+"ResourceInput", operationName+"Output", operationName+"RawResponse"); err != nil {
+		resourceInput := operationName + "ResourceInput"
+		if len(item.InputTypes) <= 1 {
+			resourceInput = "never"
+		}
+		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", resourceInput, operationName+"Output", operationName+"RawResponse"); err != nil {
 			return err
 		}
 	}
@@ -1316,7 +1320,7 @@ func emitOutputJSDoc(output *bytes.Buffer, operation ir.Operation, item Manifest
 	if regexp.MustCompile(`^Contract\.[A-Za-z_$][A-Za-z0-9_$]*$`).MatchString(outputType) {
 		fmt.Fprintf(output, " *\n * Schema: {@link %s}.\n", outputType)
 	} else {
-		fmt.Fprintf(output, " *\n * Type: `%s`.\n", outputType)
+		fmt.Fprintf(output, " *\n * Type: %s.\n", jsDocTypeReference(outputType))
 	}
 	if item.Deprecated {
 		output.WriteString(" *\n * @deprecated This operation is deprecated.\n")
@@ -1325,6 +1329,7 @@ func emitOutputJSDoc(output *bytes.Buffer, operation ir.Operation, item Manifest
 }
 
 func jsDocTypeReference(typeName string) string {
+	typeName = inlineJSDocType(typeName)
 	switch typeName {
 	case "unknown", "string", "number", "boolean", "void", "never", "null", "undefined":
 		return "`" + typeName + "`"
@@ -1333,6 +1338,22 @@ func jsDocTypeReference(typeName string) string {
 		return "{@link " + typeName + "}"
 	}
 	return "`" + typeName + "`"
+}
+
+func inlineJSDocType(value string) string {
+	for {
+		start := strings.Index(value, "/**")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(value[start+3:], "*/")
+		if end < 0 {
+			value = value[:start]
+			break
+		}
+		value = value[:start] + value[start+3+end+2:]
+	}
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {

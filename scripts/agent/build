@@ -2,4 +2,5 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
 cd "$ROOT"
-agent_run "go build" go build ./cmd/openapi-sdkgen
+mkdir -p "$ROOT/.tmp/bin"
+agent_run "go build" go build -o "$ROOT/.tmp/bin/openapi-sdkgen" ./cmd/openapi-sdkgen
