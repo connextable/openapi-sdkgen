@@ -470,15 +470,18 @@ export function createPaginator<
         throw new TypeError("offset pagination does not accept cursor");
       }
       root.query = query;
+      const seenCursors = new Set<string>();
+      if (typeof query.cursor === "string") seenCursors.add(query.cursor);
       for (;;) {
         const page = await requestPage({ ...root, query: { ...query } } as Input, options);
         const items = pageItems(page);
         for (const item of items) yield item as Item;
         if (mode === "cursor") {
           const nextCursor = pagePagination(page).nextCursor;
-          if (typeof nextCursor !== "string" || nextCursor === "" || nextCursor === query.cursor) {
+          if (typeof nextCursor !== "string" || nextCursor === "" || seenCursors.has(nextCursor)) {
             return;
           }
+          seenCursors.add(nextCursor);
           query.cursor = nextCursor;
           continue;
         }
@@ -549,6 +552,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
 
     const timeoutMS = requestOptions.timeoutMS ?? options.timeoutMS;
     const abort = createAbortContext(requestOptions.signal, timeoutMS);
+    let responseMetadata: { request: RequestMetadata; status: number; response: Response } | undefined;
     try {
       const init: RequestInit = {
         method: operation.method,
@@ -558,9 +562,11 @@ export function createRequest(options: ClientOptions): RequestFunction {
       if (abort.signal !== undefined) init.signal = abort.signal;
       const credentials = requestOptions.credentials ?? options.credentials;
       if (credentials !== undefined) init.credentials = credentials;
-      const response = await fetchImplementation(encoded.url, init);
+      if (abort.signal?.aborted) throw abort.signal.reason;
+      const response = await awaitAbortable(fetchImplementation(encoded.url, init), abort.signal);
       const request = requestMetadata(response);
-      const decodedBody = await decodeResponse(response, request);
+      responseMetadata = { request, status: response.status, response };
+      const decodedBody = await awaitAbortable(decodeResponse(response, request), abort.signal);
       const body = decodeResponseWireValue(operation, response, decodedBody);
       if (!response.ok) {
         throw serverError(response, request, body);
@@ -581,14 +587,20 @@ export function createRequest(options: ClientOptions): RequestFunction {
       };
     } catch (cause) {
       if (abort.timedOut()) {
-        throw transportError(
+        throw transportErrorFromCause(
           TransportErrorCode.REQUEST_TIMEOUT,
           `Request timed out after ${timeoutMS}ms`,
           cause,
+          responseMetadata,
         );
       }
       if (abort.aborted()) {
-        throw transportError(TransportErrorCode.REQUEST_ABORTED, "Request was aborted", cause);
+        throw transportErrorFromCause(
+          TransportErrorCode.REQUEST_ABORTED,
+          "Request was aborted",
+          cause,
+          responseMetadata,
+        );
       }
       if (isAPIError(cause)) throw cause;
       throw transportError(TransportErrorCode.NETWORK_ERROR, "Network request failed", cause);
@@ -624,6 +636,7 @@ function encodeRequest(
 ): EncodedRequest {
   const values = isRecord(input) ? input : {};
   const pathValues = isRecord(values.path) ? values.path : {};
+  rejectUndefinedArrayValues(pathValues);
   const path = operation.path.replaceAll(/\{([^}]+)\}/g, (_, name: string) => {
     const parameter = findParameter(operation, "path", name);
     const property = parameter?.property ?? name;
@@ -636,7 +649,9 @@ function encodeRequest(
   });
   const operationBaseURL = resolveOperationBaseURL(baseURL, operation.serverURL);
   const url = new URL(operationBaseURL + (path.startsWith("/") ? path : `/${path}`));
-  appendQuery(url.searchParams, isRecord(values.query) ? values.query : {}, operation);
+  const queryValues = isRecord(values.query) ? values.query : {};
+  rejectUndefinedArrayValues(queryValues);
+  appendQuery(url.searchParams, queryValues, operation);
 
   const contractHeaderNames = new Set(
     [
@@ -653,6 +668,7 @@ function encodeRequest(
   const headerParams = {
     ...(isRecord(values.headerParams) ? values.headerParams : {}),
   };
+  rejectUndefinedArrayValues(headerParams);
   for (const [property, value] of Object.entries(headerParams)) {
     if (value === undefined) continue;
     const parameter = findParameterByProperty(operation, "header", property);
@@ -673,6 +689,7 @@ function encodeRequest(
   setHeader(headers, "If-Match", options.ifMatch);
 
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
+  rejectUndefinedArrayValues(cookieValues);
   const cookies = Object.entries(cookieValues)
     .filter((entry): entry is [string, unknown] => entry[1] !== undefined)
     .flatMap(([property, value]) => serializeCookie(operation, property, value));
@@ -684,13 +701,17 @@ function encodeRequest(
   rejectUndefinedArrayValues(values.body);
   let contentType = operation.contentType ?? "application/json";
   let bodyValue: unknown = values.body;
+  const suppliedBody = values.body;
   if (
-    isRecord(values.body) &&
-    typeof values.body.contentType === "string" &&
-    "value" in values.body
+    operation.requestBodies !== undefined &&
+    operation.requestBodies.length > 1 &&
+    isRecord(suppliedBody) &&
+    typeof suppliedBody.contentType === "string" &&
+    "value" in suppliedBody &&
+    operation.requestBodies.some((body) => body.contentType === suppliedBody.contentType)
   ) {
-    contentType = values.body.contentType;
-    bodyValue = values.body.value;
+    contentType = suppliedBody.contentType;
+    bodyValue = suppliedBody.value;
   }
   const encodedBody = encodeRequestWireValue(operation, contentType, bodyValue);
   const body = encodeRequestBody(contentType, encodedBody);
@@ -715,6 +736,12 @@ function encodeRequestBody(contentType: string, value: unknown): BodyInit {
     const form = new FormData();
     const append = (name: string, item: unknown): void => {
       if (item instanceof Blob) form.append(name, item);
+      else if (item instanceof ArrayBuffer) form.append(name, new Blob([item]));
+      else if (ArrayBuffer.isView(item)) {
+        const bytes = new Uint8Array(item.byteLength);
+        bytes.set(new Uint8Array(item.buffer, item.byteOffset, item.byteLength));
+        form.append(name, new Blob([bytes.buffer]));
+      }
       else form.append(name, String(item));
     };
     for (const [name, item] of Object.entries(value)) {
@@ -795,11 +822,14 @@ function transformWireValue(
     });
   }
   let transformed: unknown = value;
-  if (isRecord(transformed) && schema.properties !== undefined) {
+  if (
+    isRecord(transformed) &&
+    (schema.properties !== undefined || schema.additionalProperties !== undefined)
+  ) {
     const source = transformed;
     const result: Record<string, unknown> = { ...source };
     const known = new Set<string>();
-    for (const [wireName, propertyDefinition] of Object.entries(schema.properties)) {
+    for (const [wireName, propertyDefinition] of Object.entries(schema.properties ?? {})) {
       const sourceName = direction === "encode" ? propertyDefinition.property : wireName;
       const targetName = direction === "encode" ? wireName : propertyDefinition.property;
       known.add(sourceName);
@@ -1140,6 +1170,8 @@ function serverError(response: Response, request: RequestMetadata, body: unknown
   const message =
     typeof error.message === "string"
       ? error.message
+      : typeof body === "string" && body.trim() !== ""
+        ? body
       : `HTTP request failed with status ${response.status}`;
   return new APIError({
     code,
@@ -1201,6 +1233,50 @@ function numberValue(primary: unknown, secondary: unknown, fallback: number): nu
 
 function transportError(code: TransportErrorCode, message: string, cause: unknown): TransportError {
   return new APIError({ code, message, cause });
+}
+
+function transportErrorFromCause(
+  code: TransportErrorCode,
+  message: string,
+  cause: unknown,
+  responseMetadata?: { request: RequestMetadata; status: number; response: Response },
+): TransportError {
+  if (isAPIError(cause)) {
+    return new APIError({
+      code,
+      message,
+      cause,
+      request: cause.request,
+      status: cause.status,
+      response: cause.response,
+    });
+  }
+  if (responseMetadata !== undefined) {
+    return new APIError({ code, message, cause, ...responseMetadata });
+  }
+  return transportError(code, message, cause);
+}
+
+function awaitAbortable<Value>(value: Promise<Value>, signal: AbortSignal | undefined): Promise<Value> {
+  if (signal === undefined) return value;
+  if (signal.aborted) {
+    void value.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    value.then(
+      (result) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      (cause) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(cause);
+      },
+    );
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

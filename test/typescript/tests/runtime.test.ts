@@ -151,7 +151,7 @@ describe("generated runtime", () => {
     });
     for (const [contentType, body] of [
       ["application/x-www-form-urlencoded", { tag: ["one", "two"], name: "widget" }],
-      ["multipart/form-data", { name: "widget", file: new Blob(["body"]) }],
+      ["multipart/form-data", { name: "widget", file: new Uint8Array([1, 2, 3]) }],
       ["text/plain", "plain text"],
       ["application/octet-stream", new Uint8Array([1, 2])],
     ] as const) {
@@ -160,6 +160,9 @@ describe("generated runtime", () => {
     expect(String(requests[0]?.body)).toBe("tag=one&tag=two&name=widget");
     expect(requests[1]?.body).toBeInstanceOf(FormData);
     expect((requests[1]?.body as FormData).get("name")).toBe("widget");
+    const file = (requests[1]?.body as FormData).get("file");
+    expect(file).toBeInstanceOf(Blob);
+    expect([...new Uint8Array(await (file as Blob).arrayBuffer())]).toEqual([1, 2, 3]);
     expect(requests[2]?.body).toBe("plain text");
     expect(requests[3]?.body).toBeInstanceOf(Uint8Array);
   });
@@ -209,6 +212,7 @@ describe("generated runtime", () => {
     expect(isAPIError(serverError)).toBe(true);
     if (!isAPIError(serverError)) throw new Error("expected API error");
     expect(serverError.code).toBe("HTTP_503");
+    expect(serverError.message).toBe("unavailable");
     expect(isErrorCode(serverError, TransportErrorCode.NETWORK_ERROR)).toBe(false);
     expect(isAPIError(new Error("plain"))).toBe(false);
 
@@ -238,6 +242,11 @@ describe("generated runtime", () => {
       headers: { "content-type": "application/json" },
     }).catch((cause: unknown) => cause);
     expect(isErrorCode(reserved, TransportErrorCode.REQUEST_ENCODE_FAILED)).toBe(true);
+
+    const undefinedArray = await request(operation({ path: "/health" }), {
+      query: { tags: ["valid", undefined] },
+    }).catch((cause: unknown) => cause);
+    expect(isErrorCode(undefinedArray, TransportErrorCode.REQUEST_ENCODE_FAILED)).toBe(true);
   });
 
   it("binds operations and path input without mutating caller input", async () => {
@@ -319,5 +328,155 @@ describe("generated runtime", () => {
       (cause: unknown) => cause,
     );
     expect(invalidCursor).toBeInstanceOf(TypeError);
+  });
+
+  it("stops cursor pagination when a cursor repeats after more than one page", async () => {
+    const cursors: string[] = [];
+    const paginate = createPaginator<string, { query: { cursor?: string } }, unknown>(
+      async (input) => {
+        const cursor = input.query.cursor ?? "start";
+        cursors.push(cursor);
+        return {
+          items: [cursor],
+          pagination: { nextCursor: cursor === "start" ? "a" : cursor === "a" ? "b" : "a" },
+        };
+      },
+      "cursor",
+    );
+    await expect(collect(paginate({ query: {} }))).resolves.toEqual(["start", "a", "b"]);
+    expect(cursors).toEqual(["start", "a", "b"]);
+  });
+
+  it("keeps ordinary bodies with contentType and value fields intact", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+      expect(init?.body).toBe('{"contentType":"business","value":"payload"}');
+      return jsonResponse({ ok: true });
+    });
+    const request = createRequest({ baseURL: "https://api.example.test", fetch });
+    await expect(
+      request(
+        operation({
+          path: "/single-body",
+          requestBodies: [{ contentType: "application/json", schema: {} }],
+        }),
+        { body: { contentType: "business", value: "payload" } },
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("serializes ordinary limit and sort query parameters", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        expect(url.searchParams.get("limit")).toBe("25");
+        expect(url.searchParams.get("sort")).toBe("createdAt");
+        return jsonResponse({ ok: true });
+      },
+    });
+    await expect(
+      request(
+        operation({
+          path: "/search",
+          parameters: [
+            { location: "query", name: "limit", property: "limit", style: "form", explode: true },
+            { location: "query", name: "sort", property: "sort", style: "form", explode: true },
+          ],
+        }),
+        { query: { limit: 25, sort: "createdAt" } },
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("maps additional-properties values on both request and response", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        expect(init?.body).toBe('{"first":{"wire_name":"request"}}');
+        return jsonResponse({ first: { wire_name: "response" } });
+      },
+    });
+    await expect(
+      request<{ first: { displayName: string } }>(
+        operation({
+          path: "/maps",
+          requestBodies: [
+            {
+              contentType: "application/json",
+              schema: {
+                additionalProperties: {
+                  properties: { wire_name: { property: "displayName", schema: {} } },
+                },
+              },
+            },
+          ],
+          responses: [
+            {
+              status: "200",
+              contentType: "application/json",
+              schema: {
+                additionalProperties: {
+                  properties: { wire_name: { property: "displayName", schema: {} } },
+                },
+              },
+            },
+          ],
+          inputSchemas: {},
+          outputSchemas: {},
+        }),
+        { body: { first: { displayName: "request" } } },
+      ),
+    ).resolves.toEqual({ first: { displayName: "response" } });
+  });
+
+  it("honors cancellation even when fetch ignores its AbortSignal", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        receivedSignal = init?.signal as AbortSignal | undefined;
+        return new Promise<Response>(() => undefined);
+      },
+    });
+    const controller = new AbortController();
+    const pending = request(operation({ path: "/slow" }), undefined, { signal: controller.signal });
+    controller.abort("cancelled");
+    const error = await pending.catch((cause: unknown) => cause);
+    expect(receivedSignal).toBeDefined();
+    expect(isErrorCode(error, TransportErrorCode.REQUEST_ABORTED)).toBe(true);
+  });
+
+  it("preserves response metadata when cancellation interrupts decoding", async () => {
+    let release: (() => void) | undefined;
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const response = jsonResponse({ ok: true }, 200, { "x-request-id": "server-1" });
+    vi.spyOn(response, "json").mockImplementation(
+      () =>
+        new Promise<unknown>((resolve) => {
+          release = () => resolve({ ok: true });
+        }),
+    );
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    });
+    const controller = new AbortController();
+    const pending = request(operation({ path: "/decode" }), undefined, {
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    resolveFetch?.(response);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    controller.abort();
+    const error = await pending.catch((cause: unknown) => cause);
+    release?.();
+    expect(isAPIError(error)).toBe(true);
+    if (!isAPIError(error)) throw new Error("expected API error");
+    expect(error.code).toBe(TransportErrorCode.REQUEST_ABORTED);
+    expect(error.status).toBe(200);
+    expect(error.request).toEqual({ id: "server-1" });
   });
 });

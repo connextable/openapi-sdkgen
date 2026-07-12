@@ -573,13 +573,13 @@ func emitRawResponseJSDoc(output *bytes.Buffer, document *ir.Document, operation
 
 func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, operationName string, parameters []operationParameter) error {
 	var filters []operationParameter
+	_, hasSort := operation.Raw["x-sort"]
 	for _, parameter := range parameters {
-		switch parameter.Name {
-		case "cursor", "offset", "limit", "sort":
+		isPaginationControl := operation.Pagination != "" && (parameter.Name == "cursor" || parameter.Name == "offset" || parameter.Name == "limit")
+		if isPaginationControl || (hasSort && parameter.Name == "sort") {
 			continue
-		default:
-			filters = append(filters, parameter)
 		}
+		filters = append(filters, parameter)
 	}
 	parts := make([]string, 0, 3)
 	if operation.Pagination != "" {
@@ -808,7 +808,37 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 	if root.parameterChild != nil {
 		return nil, fmt.Errorf("resource paths may not begin with a path parameter")
 	}
+	if err := validateResourceNodeSymbols(root, "api"); err != nil {
+		return nil, err
+	}
 	return root, nil
+}
+
+func validateResourceNodeSymbols(node *resourceNode, path string) error {
+	members := make(map[string]string, len(node.operations)+1)
+	for terminal, operation := range node.operations {
+		members[terminal] = "operation " + fmt.Sprintf("%q", operation.OperationID)
+	}
+	if operation, ok := paginatedResourceNodeOperation(node); ok {
+		if previous, exists := members["paginate"]; exists {
+			return fmt.Errorf("resource member collision at %s.paginate between %s and pagination for operation %q", path, previous, operation.OperationID)
+		}
+		members["paginate"] = "pagination for operation " + fmt.Sprintf("%q", operation.OperationID)
+	}
+	for name, child := range node.children {
+		if previous, exists := members[name]; exists {
+			return fmt.Errorf("resource member collision at %s.%s between %s and path segment %q", path, name, previous, name)
+		}
+		if err := validateResourceNodeSymbols(child, path+"."+name); err != nil {
+			return err
+		}
+	}
+	if node.parameterChild != nil {
+		if err := validateResourceNodeSymbols(node.parameterChild, path+"(path parameter)"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func sortedResourceChildNames(node *resourceNode) []string {

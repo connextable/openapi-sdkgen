@@ -75,11 +75,16 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 			if enumValues, ok := stringEnum(schema); ok {
 				fmt.Fprintf(&output, "/** Runtime values for {@link %s}. */\n", typeName)
 				fmt.Fprintf(&output, "export const %s = {\n", typeName)
+				enumKeys := make(map[string]string, len(enumValues))
 				for _, value := range enumValues {
 					key, err := naming.Public(value)
 					if err != nil {
 						return nil, fmt.Errorf("enum %s value %q: %w", schemaName, value, err)
 					}
+					if previous, exists := enumKeys[key]; exists {
+						return nil, fmt.Errorf("enum %s values %q and %q both generate TypeScript key %q", schemaName, previous, value, key)
+					}
+					enumKeys[key] = value
 					fmt.Fprintf(&output, "  /** OpenAPI enum value `%s`. */\n", sanitizeComment(value))
 					fmt.Fprintf(&output, "  %s: %s,\n", key, quoteTS(value))
 				}
