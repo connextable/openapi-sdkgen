@@ -33,6 +33,25 @@ func TestGenerateWritesSelfContainedTypeScriptPackage(t *testing.T) {
 	}
 }
 
+func TestGenerateUsesNormalizedOutputDirectoryNameByDefault(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "contract.json")
+	if err := os.WriteFile(input, []byte(minimalDocument), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(directory, "Example API SDK")
+	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON, err := os.ReadFile(filepath.Join(output, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(packageJSON), `"name": "example-api-sdk"`) {
+		t.Fatalf("package.json = %s", packageJSON)
+	}
+}
+
 func TestGenerateRejectsUnknownTarget(t *testing.T) {
 	err := run([]string{"generate", "--input", "contract.json", "--target", "kotlin", "--output", "out"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported SDK target") {
@@ -41,8 +60,12 @@ func TestGenerateRejectsUnknownTarget(t *testing.T) {
 }
 
 func TestSafeArtifactPathRejectsTraversal(t *testing.T) {
-	if _, err := safeArtifactPath("../outside.ts"); err == nil {
-		t.Fatal("traversal path was accepted")
+	for _, value := range []string{"", ".", "..", "../outside.ts", "/outside.ts"} {
+		t.Run(value, func(t *testing.T) {
+			if _, err := safeArtifactPath(value); err == nil {
+				t.Fatalf("invalid path %q was accepted", value)
+			}
+		})
 	}
 }
 

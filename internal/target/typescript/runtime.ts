@@ -167,6 +167,9 @@ export interface RequestOptions {
   readonly credentials?: RequestCredentials;
 }
 
+/** Binary body values supported by generated request encoders. */
+export type BinaryBody = Blob | ArrayBuffer | ArrayBufferView;
+
 /** Endpoint-neutral operation metadata emitted by `sdkgen` for the transport runtime. */
 export interface OperationDefinition {
   /** OpenAPI operation ID. */
@@ -546,7 +549,6 @@ export function createRequest(options: ClientOptions): RequestFunction {
 
     const timeoutMS = requestOptions.timeoutMS ?? options.timeoutMS;
     const abort = createAbortContext(requestOptions.signal, timeoutMS);
-    let response: Response;
     try {
       const init: RequestInit = {
         method: operation.method,
@@ -556,7 +558,27 @@ export function createRequest(options: ClientOptions): RequestFunction {
       if (abort.signal !== undefined) init.signal = abort.signal;
       const credentials = requestOptions.credentials ?? options.credentials;
       if (credentials !== undefined) init.credentials = credentials;
-      response = await fetchImplementation(encoded.url, init);
+      const response = await fetchImplementation(encoded.url, init);
+      const request = requestMetadata(response);
+      const decodedBody = await decodeResponse(response, request);
+      const body = decodeResponseWireValue(operation, response, decodedBody);
+      if (!response.ok) {
+        throw serverError(response, request, body);
+      }
+      const data =
+        operation.envelope === "data" && isRecord(body) && "data" in body
+          ? (body.data as Output)
+          : (body as Output);
+      if (!raw) return data;
+      const contentType = responseContentType(response);
+      return {
+        status: response.status,
+        ...(contentType === undefined ? {} : { contentType }),
+        data,
+        headers: response.headers,
+        request,
+        response,
+      };
     } catch (cause) {
       if (abort.timedOut()) {
         throw transportError(
@@ -568,31 +590,11 @@ export function createRequest(options: ClientOptions): RequestFunction {
       if (abort.aborted()) {
         throw transportError(TransportErrorCode.REQUEST_ABORTED, "Request was aborted", cause);
       }
+      if (isAPIError(cause)) throw cause;
       throw transportError(TransportErrorCode.NETWORK_ERROR, "Network request failed", cause);
     } finally {
       abort.cleanup();
     }
-
-    const request = requestMetadata(response);
-    const decodedBody = await decodeResponse(response, request);
-    const body = decodeResponseWireValue(operation, response, decodedBody);
-    if (!response.ok) {
-      throw serverError(response, request, body);
-    }
-    const data =
-      operation.envelope === "data" && isRecord(body) && "data" in body
-        ? (body.data as Output)
-        : (body as Output);
-    if (!raw) return data;
-    const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
-    return {
-      status: response.status,
-      ...(contentType === undefined ? {} : { contentType }),
-      data,
-      headers: response.headers,
-      request,
-      response,
-    };
   };
   const request = (<Output>(
     operation: OperationDefinition,
@@ -755,11 +757,11 @@ function decodeResponseWireValue(
   response: Response,
   value: unknown,
 ): unknown {
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+  const contentType = responseContentType(response);
   const definition = operation.responses?.find(
     (item) =>
       statusMatches(item.status, response.status) &&
-      (contentType === undefined || item.contentType === contentType),
+      (contentType === undefined || item.contentType.toLowerCase() === contentType),
   );
   return definition === undefined
     ? value
@@ -1105,7 +1107,7 @@ function createAbortContext(
 
 async function decodeResponse(response: Response, request: RequestMetadata): Promise<unknown> {
   if (response.status === 204 || response.status === 205) return undefined;
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+  const contentType = responseContentType(response);
   if (contentType === undefined || response.body === null) return undefined;
   try {
     if (contentType === "application/json" || contentType.endsWith("+json")) {
@@ -1125,6 +1127,10 @@ async function decodeResponse(response: Response, request: RequestMetadata): Pro
       cause,
     });
   }
+}
+
+function responseContentType(response: Response): string | undefined {
+  return response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
 }
 
 function serverError(response: Response, request: RequestMetadata, body: unknown): APIError {

@@ -2,9 +2,21 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createClient, getRequestID, isValidationFailedError } from "@example/conformance-client";
+import {
+  TransportErrorCode,
+  createClient,
+  getRequestID,
+  isAPIError,
+  isValidationFailedError,
+} from "@example/conformance-client";
+import type { UploadWidgetBodyInput } from "@example/conformance-client";
 
 describe("generated TypeScript package", () => {
+  it("accepts binary request values exposed by generated body types", () => {
+    const body: UploadWidgetBodyInput = new Uint8Array([1, 2, 3]);
+    expect(body).toBeInstanceOf(Uint8Array);
+  });
+
   it("exports a nested resource client that serializes request inputs", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const url = new URL(String(input));
@@ -15,7 +27,7 @@ describe("generated TypeScript package", () => {
       expect(init?.body).toBe('{"name":"first","requestId":"request-1"}');
       return new Response('{"data":{"id":"widget-1","name":"first","requestId":"request-2"}}', {
         status: 201,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "Application/JSON" },
       });
     });
     const api = createClient({ baseURL: "https://api.example.test/api", fetch });
@@ -72,6 +84,35 @@ describe("generated TypeScript package", () => {
     expect(error.details).toEqual({ field: "name" });
   });
 
+  it("keeps timeout active while decoding a response body", async () => {
+    const api = createClient({
+      baseURL: "https://api.example.test/api",
+      fetch: async (_input, init) =>
+        ({
+          body: {},
+          headers: new Headers({ "content-type": "application/json" }),
+          json: () =>
+            new Promise((_, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+                once: true,
+              });
+            }),
+          ok: true,
+          status: 201,
+        }) as Response,
+    });
+
+    const error = await api.widgets
+      .create(
+        { query: {}, headerParams: { xTraceID: "trace-3" }, body: { name: "slow" } },
+        { timeoutMS: 1 },
+      )
+      .catch((cause: unknown) => cause);
+    expect(isAPIError(error)).toBe(true);
+    if (!isAPIError(error)) throw new Error("expected API error");
+    expect(error.code).toBe(TransportErrorCode.REQUEST_TIMEOUT);
+  });
+
   it("keeps generated package metadata independent from the conformance harness", async () => {
     const packageJSON = JSON.parse(
       await readFile(new URL("../fixtures/generated/client/package.json", import.meta.url), "utf8"),
@@ -79,6 +120,10 @@ describe("generated TypeScript package", () => {
     expect(packageJSON.name).toBe("@example/conformance-client");
     expect(packageJSON.dependencies).toBeUndefined();
     expect(packageJSON.private).toBeUndefined();
+    expect(packageJSON.files).toEqual(["dist", "README.md", "manifest.json"]);
+    expect(packageJSON.exports).toEqual({
+      ".": { import: "./dist/src/index.js", types: "./dist/src/index.d.ts" },
+    });
     await expect(
       readFile(new URL("../fixtures/generated/client/dist/src/index.js", import.meta.url), "utf8"),
     ).resolves.toContain("generated/index.js");

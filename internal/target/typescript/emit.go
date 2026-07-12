@@ -77,6 +77,9 @@ func PackageArtifacts(document *ir.Document, pkg Package) ([]Artifact, error) {
 	if pkg.Name == "" {
 		return nil, fmt.Errorf("package name is required")
 	}
+	if err := validateOperationSymbols(document); err != nil {
+		return nil, err
+	}
 	manifest, err := buildManifest(document, pkg.Name)
 	if err != nil {
 		return nil, err
@@ -120,6 +123,29 @@ func PackageArtifacts(document *ir.Document, pkg Package) ([]Artifact, error) {
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	return artifacts, nil
+}
+
+func validateOperationSymbols(document *ir.Document) error {
+	aliases := make(map[string]string)
+	for _, operation := range document.Operations {
+		if operation.Visibility == "hidden" {
+			continue
+		}
+		typeName := operationTypeName(operation.OperationID)
+		if previous, exists := aliases["type\x00"+typeName]; exists {
+			return fmt.Errorf("operations %q and %q both generate TypeScript type name %q", previous, operation.OperationID, typeName)
+		}
+		aliases["type\x00"+typeName] = operation.OperationID
+		property, err := naming.Property(operation.OperationID)
+		if err != nil {
+			return fmt.Errorf("operation %s: %w", operation.OperationID, err)
+		}
+		if previous, exists := aliases["property\x00"+property]; exists {
+			return fmt.Errorf("operations %q and %q both generate TypeScript property %q", previous, operation.OperationID, property)
+		}
+		aliases["property\x00"+property] = operation.OperationID
+	}
+	return nil
 }
 
 func emitPackageJSON(manifest Manifest) ([]byte, error) {

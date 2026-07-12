@@ -49,7 +49,3 @@ just agent check
 ```
 
 `just agent conformance` builds the CLI, generates a generic fixture package into an ignored directory, compiles it, typechecks consumer tests, and runs its runtime tests. The test fixture proves generated package behavior without turning the TypeScript harness into a deployment source.
-
-## stamp.is-api migration boundary
-
-The application repository retains its product OpenAPI contracts and package names. During transition it invokes a local checkout of this CLI; once a GitHub Release exists, developer and CI setup can use the matching released binary. The compiler itself contains no Stamp API paths or package names.

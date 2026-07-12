@@ -34,7 +34,7 @@ func Project(document *ir.Document) error {
 		}
 		for _, parameter := range operation.PathParameterOrder {
 			if !declaresPathParameter(document.Raw, operation.Path, operation.PathItemRaw, operation.Raw, parameter) {
-				validationErrors = append(validationErrors, fmt.Sprintf("%s %s: undeclared path parameter %q", operation.Method, operation.Path, parameter))
+				validationErrors = append(validationErrors, fmt.Sprintf("%s %s: path parameter %q must be declared and required", operation.Method, operation.Path, parameter))
 			}
 		}
 		if operation.Envelope != "data" && operation.Envelope != "none" {
@@ -106,7 +106,8 @@ func parameterListDeclares(document map[string]any, value any, name string) bool
 		if reference, _ := parameter["$ref"].(string); reference != "" {
 			parameter = resolveLocalParameter(document, reference)
 		}
-		if parameter["in"] == "path" && parameter["name"] == name {
+		required, _ := parameter["required"].(bool)
+		if parameter["in"] == "path" && parameter["name"] == name && required {
 			return true
 		}
 	}

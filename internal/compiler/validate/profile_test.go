@@ -34,7 +34,18 @@ func TestProjectRejectsUndeclaredPathParameter(t *testing.T) {
 	paths := document.Raw["paths"].(map[string]any)
 	pathItem := paths["/items/{itemID}"].(map[string]any)
 	delete(pathItem, "parameters")
-	if err := Project(document); err == nil || !strings.Contains(err.Error(), "undeclared path parameter") {
+	if err := Project(document); err == nil || !strings.Contains(err.Error(), "declared and required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProjectRequiresPathParameters(t *testing.T) {
+	document := projectFixture()
+	paths := document.Raw["paths"].(map[string]any)
+	pathItem := paths["/items/{itemID}"].(map[string]any)
+	parameters := pathItem["parameters"].([]any)
+	parameters[0].(map[string]any)["required"] = false
+	if err := Project(document); err == nil || !strings.Contains(err.Error(), "declared and required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -91,8 +102,9 @@ func projectFixture() *ir.Document {
 			"paths": map[string]any{
 				"/items/{itemID}": map[string]any{
 					"parameters": []any{map[string]any{
-						"name": "itemID",
-						"in":   "path",
+						"name":     "itemID",
+						"in":       "path",
+						"required": true,
 					}},
 				},
 			},

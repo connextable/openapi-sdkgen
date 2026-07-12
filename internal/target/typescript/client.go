@@ -30,6 +30,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	}
 	output.WriteString("  createRequest,\n")
 	output.WriteString("  type ClientOptions,\n")
+	output.WriteString("  type BinaryBody,\n")
 	if hasPagination {
 		output.WriteString("  type PaginateInput,\n")
 	}
@@ -719,6 +720,9 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 		}
 		media, _ := content[mediaTypes[0]].(map[string]any)
 		schema, _ := media["schema"].(map[string]any)
+		if isBinaryMedia(mediaTypes[0], schema) {
+			return "BinaryBody", nil
+		}
 		return schemaType(document, schema, projectionInput)
 	}
 	variants := make([]string, 0, len(mediaTypes))
@@ -728,7 +732,11 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 		valueType := "string"
 		var err error
 		if !isTextMedia(mediaType) {
-			valueType, err = schemaType(document, schema, projectionInput)
+			if isBinaryMedia(mediaType, schema) {
+				valueType = "BinaryBody"
+			} else {
+				valueType, err = schemaType(document, schema, projectionInput)
+			}
 		}
 		if err != nil {
 			return "", err

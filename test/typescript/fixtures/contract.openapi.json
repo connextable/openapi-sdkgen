@@ -121,6 +121,27 @@
           }
         }
       }
+    },
+    "/uploads": {
+      "post": {
+        "operationId": "uploadWidget",
+        "summary": "Upload widget data.",
+        "x-envelope": "none",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Uploaded" }
+        }
+      }
     }
   },
   "components": {

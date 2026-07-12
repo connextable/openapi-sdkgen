@@ -15,6 +15,7 @@ export GOMODCACHE="$ROOT/.tmp/go-mod"
 export COREPACK_HOME="$ROOT/.tmp/corepack"
 export npm_config_cache="$ROOT/.tmp/node-cache"
 export npm_config_store_dir="$ROOT/.tmp/pnpm-store"
+export CI=true
 
 NODE_VERSION="24.18.0"
 PNPM_VERSION="11.11.0"

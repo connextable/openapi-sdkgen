@@ -79,6 +79,14 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 	for _, key := range order {
 		result = append(result, merged[key])
 	}
+	properties := make(map[string]string, len(result))
+	for _, parameter := range result {
+		key := parameter.Location + "\x00" + parameter.Property
+		if previous, exists := properties[key]; exists {
+			return nil, fmt.Errorf("%s parameters %q and %q both generate TypeScript property %q", parameter.Location, previous, parameter.Name, parameter.Property)
+		}
+		properties[key] = parameter.Name
+	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Location != "path" || result[j].Location != "path" {
 			return false

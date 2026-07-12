@@ -50,6 +50,9 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	if err := validateComponentSymbols(document, names); err != nil {
+		return nil, err
+	}
 
 	var exported []string
 	for _, schemaName := range names {
@@ -94,6 +97,33 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 	}
 	output.WriteString("}\n")
 	return output.Bytes(), nil
+}
+
+func validateComponentSymbols(document *ir.Document, names []string) error {
+	symbols := map[string]string{
+		"SortDirection":         "built-in SortDirection",
+		"CursorPaginationInput": "built-in CursorPaginationInput",
+		"OffsetPaginationInput": "built-in OffsetPaginationInput",
+		"BothPaginationInput":   "built-in BothPaginationInput",
+		"Components":            "built-in Components",
+	}
+	for _, schemaName := range names {
+		schema := document.ComponentSchemas[schemaName]
+		if isErrorSchema(document, schema) {
+			continue
+		}
+		for _, declaration := range componentDeclarations(schemaName, schema) {
+			symbol, err := naming.Public(declaration.name)
+			if err != nil {
+				return fmt.Errorf("component %s: %w", schemaName, err)
+			}
+			if previous, exists := symbols[symbol]; exists {
+				return fmt.Errorf("component %q generates TypeScript symbol %q already used by %s", schemaName, symbol, previous)
+			}
+			symbols[symbol] = "component " + fmt.Sprintf("%q", schemaName)
+		}
+	}
+	return nil
 }
 
 func reachableComponentSchemas(document *ir.Document) map[string]bool {
@@ -352,6 +382,7 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 	sort.Strings(keys)
 	var output bytes.Buffer
 	output.WriteString("{\n")
+	propertySources := make(map[string]string, len(keys))
 	for _, wireName := range keys {
 		propertySchema, _ := properties[wireName].(map[string]any)
 		if direction == projectionInput && boolValue(propertySchema, "readOnly") {
@@ -368,6 +399,10 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 		if err != nil {
 			propertyName = quoteTS(wireName)
 		}
+		if previous, exists := propertySources[propertyName]; exists {
+			return "", fmt.Errorf("object properties %q and %q both generate TypeScript property %s", previous, wireName, propertyName)
+		}
+		propertySources[propertyName] = wireName
 		optional := ""
 		if !required[wireName] {
 			optional = "?"
