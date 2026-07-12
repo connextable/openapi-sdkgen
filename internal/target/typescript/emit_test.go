@@ -51,8 +51,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	if len(artifacts) != 6 {
-		t.Fatalf("source artifact count = %d, want exactly six TypeScript files", len(artifacts))
+	if len(artifacts) != 7 {
+		t.Fatalf("source artifact count = %d, want exactly seven TypeScript files", len(artifacts))
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -66,8 +66,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"export type ProductOutput =",
 		"readonly note?: string | undefined",
 		`export type MixedLiteral = "ready" | 2 | null`,
-		"export type CoordinateInput = readonly [number, number]",
-		"export type CoordinateOutput = readonly [number, number]",
+		"export type CoordinateInput = readonly [number, number, ...unknown[]]",
+		"export type CoordinateOutput = readonly [number, number, ...unknown[]]",
 	} {
 		if !strings.Contains(typesSource, expected) {
 			t.Errorf("types missing %q\n%s", expected, typesSource)
@@ -110,8 +110,14 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	errorsSource := string(artifacts["generated/errors.ts"])
 	runtimeSource := string(artifacts["generated/runtime.ts"])
 	publicIndex := string(artifacts["index.ts"])
+	metadataSource := string(artifacts["generated/metadata.ts"])
 	if !strings.Contains(publicIndex, `export * from "./generated/index.js"`) {
 		t.Fatalf("source entrypoint missing relative re-export:\n%s", publicIndex)
+	}
+	for _, expected := range []string{"export const openapiDocument", `"openapi":"3.2.0"`, "export const openapiVersionLine = \"3.2\""} {
+		if !strings.Contains(metadataSource, expected) {
+			t.Fatalf("metadata missing %q:\n%s", expected, metadataSource)
+		}
 	}
 	if !strings.HasPrefix(runtimeSource, generatedFileHeader) || !strings.Contains(runtimeSource, "export function createRequest") {
 		t.Fatalf("generated runtime missing or invalid:\n%s", runtimeSource)
@@ -162,7 +168,6 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Ordered sort expressions applied by the server.",
 		"Status- and media-aware raw response for `createProduct`",
 		"`201 application/json` — Created",
-		"Header `X-Request-Id` — Request correlation identifier.",
 		"Creates a generated API client.",
 		"Type catalog keyed by OpenAPI operation ID.",
 		"Lazily iterates every item from {@link Operations.listProducts} pagination.",
@@ -355,7 +360,6 @@ const emitterFixture = `{
         "responses": {
           "201": {
             "description": "Created",
-            "headers": {"X-Request-Id": {"description": "Request correlation identifier.", "schema": {"type": "string"}}},
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Product"}}}
           },
           "422": {
@@ -410,8 +414,7 @@ const emitterFixture = `{
       },
       "Coordinate": {
         "type": "array",
-        "prefixItems": [{"type": "number"}, {"type": "number"}],
-        "items": false
+        "prefixItems": [{"type": "number"}, {"type": "number"}]
       },
       "ProductPage": {
         "type": "object",

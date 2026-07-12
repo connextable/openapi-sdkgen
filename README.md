@@ -1,6 +1,7 @@
 # openapi-sdkgen
 
-`openapi-sdkgen` compiles an OpenAPI 3.2 document into typed TypeScript source for your application.
+`openapi-sdkgen` compiles OpenAPI 3.0.x, 3.1.x, and 3.2.x documents into
+source-mode TypeScript or native JavaScript SDKs for your application.
 
 The primary distribution is a precompiled CLI binary published through GitHub Releases, so TypeScript consumers do not need Go installed. Go users can also install the command from the module:
 
@@ -29,17 +30,47 @@ The output contains only generated `.ts` source (`index.ts` and `generated/*.ts`
 
 Generate separate source trees by invoking the command once per OpenAPI document and output directory.
 
+Both targets also export `openapiDocument`, `openapiVersion`, and
+`openapiVersionLine`. This lossless metadata surface keeps documentation,
+examples, tags, and `x-*` extensions available without pretending they affect
+runtime requests.
+
+## Generate JavaScript source
+
+```sh
+openapi-sdkgen generate \
+  --input ./openapi.json \
+  --target javascript \
+  --output ./src/generated/api
+```
+
+JavaScript output is native ESM (`index.js` and `generated/*.js`) with no
+build step or package metadata. Import it relatively and call operations by
+their exact OpenAPI `operationId`:
+
+```js
+import { createClient } from "./generated/api/index.js";
+
+const api = createClient({ baseURL: "https://api.example.test" });
+const result = await api.$operations.listWidgets({ query: { limit: 20 } });
+```
+
 ## Runnable TypeScript example
 
 [`examples/typescript-todo-app`](examples/typescript-todo-app) reproduces the complete consumer flow without test fixtures or symlinks: it generates `src/generated/todo-sdk/` from a small Todo OpenAPI document, builds the app, and calls it over a local HTTP server.
 
 [`examples/typescript-advanced-app`](examples/typescript-advanced-app) covers pagination, path/query/header/cookie inputs, raw responses, typed errors, binary bodies, authorization, and timeouts against a local HTTP server.
 
+[`examples/javascript-todo-app`](examples/javascript-todo-app) runs a native
+JavaScript app against a separate local server with no package install or
+consumer build step.
+
 For repository validation, run:
 
 ```sh
 just agent example-todo
 just agent example-advanced
+just agent example-javascript
 ```
 
 For normal use, follow the example's [`setup.sh`](examples/typescript-todo-app/setup.sh) and separate server/client commands.
@@ -47,11 +78,12 @@ For normal use, follow the example's [`setup.sh`](examples/typescript-todo-app/s
 ## Architecture
 
 ```txt
-OpenAPI 3.2 document
+OpenAPI 3.0.x / 3.1.x / 3.2.x document
         │
         ▼
 parser + validation → language-neutral IR → built-in target registry
-                                               └─ typescript
+                                               ├─ typescript
+                                               └─ javascript
 ```
 
 Targets are compiled into the binary. Adding a future Kotlin, Swift, or Go target implements the target interface; it does not change OpenAPI parsing or CLI command flow.

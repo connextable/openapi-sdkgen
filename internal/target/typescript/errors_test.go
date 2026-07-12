@@ -45,3 +45,32 @@ func TestErrorContractsPropagateAndDeduplicateComposedErrorSchemas(t *testing.T)
 		t.Fatalf("operation error types = %#v", types)
 	}
 }
+
+func TestErrorContractsResolveEscapedSchemaReferences(t *testing.T) {
+	document := &ir.Document{ComponentSchemas: map[string]map[string]any{
+		"Base/Error": {
+			"type": "object",
+			"properties": map[string]any{
+				"error": map[string]any{"properties": map[string]any{
+					"code": map[string]any{"const": "invalid_widget"},
+				}},
+			},
+		},
+	}}
+	contracts, bySchema, err := errorContracts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := ir.Operation{Raw: map[string]any{"responses": map[string]any{
+		"400": map[string]any{"content": map[string]any{
+			"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Base~1Error"}},
+		}},
+	}}}
+	types, err := operationErrorTypes(document, operation, bySchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 1 || !reflect.DeepEqual(types, []string{"InvalidWidgetError"}) {
+		t.Fatalf("contracts = %#v, types = %#v", contracts, types)
+	}
+}

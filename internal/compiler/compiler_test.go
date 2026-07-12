@@ -46,6 +46,49 @@ func TestCompileAcceptsGenericOpenAPIWithoutProjectProfile(t *testing.T) {
 	}
 }
 
+func TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine(t *testing.T) {
+	for _, version := range []string{"3.0.3", "3.1.1", "3.2.0"} {
+		t.Run(version, func(t *testing.T) {
+			directory := t.TempDir()
+			main := `{
+  "openapi": "` + version + `",
+  "info": {"title": "External", "version": "1"},
+  "paths": {
+    "/things": {
+      "get": {
+        "operationId": "listThings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {"application/json": {"schema": {"$ref": "schemas.json#/Thing"}}}
+          }
+        }
+      }
+    }
+  }
+}`
+			mainPath := filepath.Join(directory, "openapi.json")
+			if err := os.WriteFile(mainPath, []byte(main), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, "schemas.json"), []byte(`{"Thing":{"type":"object","properties":{"id":{"type":"string"}}}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			document, err := CompileFile(mainPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if document.OpenAPIVersion != version {
+				t.Fatalf("version = %q, want %q", document.OpenAPIVersion, version)
+			}
+			if len(document.Operations) != 1 || document.Operations[0].OperationID != "listThings" {
+				t.Fatalf("operations = %#v", document.Operations)
+			}
+		})
+	}
+}
+
 func TestCompileProjectFileResolvesExternalReferences(t *testing.T) {
 	directory := t.TempDir()
 	main := `{"openapi":"3.2.0","info":{"title":"External","version":"1"},"servers":[{"url":"/v1"}],"paths":{"/things":{"get":{"operationId":"listThings","security":[],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"schemas.json#/Thing"}}}}},"x-envelope":"none","x-concurrency":"none","x-idempotency":"unsupported","x-sdk-visibility":"public"}}}}`

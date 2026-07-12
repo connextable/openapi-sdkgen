@@ -19,7 +19,7 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"index.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/runtime.ts"} {
+	for _, expected := range []string{"index.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/metadata.ts", "generated/runtime.ts"} {
 		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
 			t.Fatalf("missing %s: %v", expected, err)
 		}
@@ -51,6 +51,23 @@ func TestGenerateRejectsUnknownTarget(t *testing.T) {
 	err := run([]string{"generate", "--input", "contract.json", "--target", "kotlin", "--output", "out"})
 	if err == nil || !strings.Contains(err.Error(), "unsupported SDK target") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestGenerateJavaScriptTarget(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	output := filepath.Join(directory, "generated")
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.0.3","info":{"title":"JavaScript","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"generate", "--input", input, "--target", "javascript", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"index.js", "generated/client.js", "generated/metadata.js", "generated/runtime.js"} {
+		if _, err := os.Stat(filepath.Join(output, path)); err != nil {
+			t.Fatalf("missing JavaScript artifact %s: %v", path, err)
+		}
 	}
 }
 

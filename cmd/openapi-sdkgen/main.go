@@ -52,7 +52,7 @@ func generate(args []string) error {
 		return errors.New("--input, --target, and --output are required")
 	}
 
-	registry, err := generator.NewRegistry(typescript.Generator{})
+	registry, err := generator.NewRegistry(typescript.Generator{}, typescript.JavaScriptGenerator{})
 	if err != nil {
 		return err
 	}

@@ -208,7 +208,10 @@ func containsErrorContract(contracts []errorContract, typeName string) bool {
 
 func schemaErrorCodes(document *ir.Document, schema map[string]any) ([]string, map[string]any) {
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		name := reference[strings.LastIndex(reference, "/")+1:]
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return nil, nil
+		}
 		return schemaErrorCodes(document, document.ComponentSchemas[name])
 	}
 	properties, _ := schema["properties"].(map[string]any)
@@ -217,7 +220,10 @@ func schemaErrorCodes(document *ir.Document, schema map[string]any) ([]string, m
 		return nil, nil
 	}
 	if reference, _ := errorSchema["$ref"].(string); reference != "" {
-		name := reference[strings.LastIndex(reference, "/")+1:]
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return nil, nil
+		}
 		errorSchema = document.ComponentSchemas[name]
 	}
 	errorProperties, _ := errorSchema["properties"].(map[string]any)
@@ -275,7 +281,11 @@ func responseSchemaReferences(response map[string]any) []string {
 func schemaReferences(schema map[string]any) []string {
 	var result []string
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		return []string{reference[strings.LastIndex(reference, "/")+1:]}
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return nil
+		}
+		return []string{name}
 	}
 	for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
 		variants, _ := schema[keyword].([]any)

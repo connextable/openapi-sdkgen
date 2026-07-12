@@ -1,13 +1,14 @@
 package ir
 
 type Document struct {
-	Title            string
-	ContractVersion  string
-	OpenAPIVersion   string
-	Servers          []Server
-	Operations       []Operation
-	ComponentSchemas map[string]map[string]any
-	Raw              map[string]any
+	Title              string
+	ContractVersion    string
+	OpenAPIVersion     string
+	OpenAPIVersionLine string
+	Servers            []Server
+	Operations         []Operation
+	ComponentSchemas   map[string]map[string]any
+	Raw                map[string]any
 }
 
 type Server struct {

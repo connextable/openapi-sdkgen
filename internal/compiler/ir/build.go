@@ -14,14 +14,23 @@ func Build(document *openapidoc.Document) (*Document, error) {
 	if document == nil {
 		return nil, fmt.Errorf("OpenAPI document is nil")
 	}
+	versionLine := document.Version
+	if versionLine == "" {
+		var err error
+		versionLine, err = openapidoc.DetectVersionLine(stringValue(document.Raw, "openapi"))
+		if err != nil {
+			return nil, err
+		}
+	}
 	info, _ := document.Raw["info"].(map[string]any)
 	result := &Document{
-		Title:            stringValue(info, "title"),
-		ContractVersion:  stringValue(info, "version"),
-		OpenAPIVersion:   stringValue(document.Raw, "openapi"),
-		Servers:          readServers(document.Raw["servers"]),
-		ComponentSchemas: readComponentSchemas(document.Raw),
-		Raw:              document.Raw,
+		Title:              stringValue(info, "title"),
+		ContractVersion:    stringValue(info, "version"),
+		OpenAPIVersion:     stringValue(document.Raw, "openapi"),
+		OpenAPIVersionLine: string(versionLine),
+		Servers:            readServers(document.Raw["servers"]),
+		ComponentSchemas:   readComponentSchemas(document.Raw),
+		Raw:                document.Raw,
 	}
 
 	paths := map[string]any{}
@@ -34,6 +43,9 @@ func Build(document *openapidoc.Document) (*Document, error) {
 	}
 	pathNames := sortedKeys(paths)
 	for _, path := range pathNames {
+		if strings.HasPrefix(path, "x-") {
+			continue
+		}
 		pathItem, ok := paths[path].(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("path item %q must be an object", path)
@@ -47,9 +59,15 @@ func Build(document *openapidoc.Document) (*Document, error) {
 			if !ok {
 				continue
 			}
+			if method == "query" && versionLine != openapidoc.Version32 {
+				return nil, fmt.Errorf("OpenAPI 3.2 feature at %s: query method is not available in OpenAPI %s.x", jsonPointer("paths", path, method), versionLine)
+			}
 			result.Operations = append(result.Operations, buildOperation(path, strings.ToUpper(method), pathItem, operation))
 		}
 		additional, _ := pathItem["additionalOperations"].(map[string]any)
+		if len(additional) > 0 && versionLine != openapidoc.Version32 {
+			return nil, fmt.Errorf("OpenAPI 3.2 feature at %s: additionalOperations is not available in OpenAPI %s.x", jsonPointer("paths", path, "additionalOperations"), versionLine)
+		}
 		for _, method := range sortedKeys(additional) {
 			operation, ok := additional[method].(map[string]any)
 			if !ok {
@@ -67,13 +85,20 @@ func Build(document *openapidoc.Document) (*Document, error) {
 	return result, nil
 }
 
+func jsonPointer(parts ...string) string {
+	encoded := make([]string, 0, len(parts))
+	for _, part := range parts {
+		encoded = append(encoded, strings.ReplaceAll(strings.ReplaceAll(part, "~", "~0"), "/", "~1"))
+	}
+	return "/" + strings.Join(encoded, "/")
+}
+
 func resolvePathItem(document, pathItem map[string]any, resolving map[string]bool) (map[string]any, error) {
 	reference, _ := pathItem["$ref"].(string)
 	if reference == "" {
 		return pathItem, nil
 	}
-	const prefix = "#/components/pathItems/"
-	if !strings.HasPrefix(reference, prefix) {
+	if !strings.HasPrefix(reference, "#/") {
 		return nil, fmt.Errorf("external path item reference %q is not supported", reference)
 	}
 	if resolving[reference] {
@@ -81,13 +106,11 @@ func resolvePathItem(document, pathItem map[string]any, resolving map[string]boo
 	}
 	resolving[reference] = true
 	defer delete(resolving, reference)
-	components, _ := document["components"].(map[string]any)
-	pathItems, _ := components["pathItems"].(map[string]any)
-	resolved, ok := pathItems[strings.TrimPrefix(reference, prefix)].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("unresolved path item reference %q", reference)
+	resolved, err := localPathItemReference(document, reference)
+	if err != nil {
+		return nil, err
 	}
-	resolved, err := resolvePathItem(document, resolved, resolving)
+	resolved, err = resolvePathItem(document, resolved, resolving)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +124,55 @@ func resolvePathItem(document, pathItem map[string]any, resolving map[string]boo
 		}
 	}
 	return merged, nil
+}
+
+func localPathItemReference(document map[string]any, reference string) (map[string]any, error) {
+	var value any = document
+	for _, token := range strings.Split(strings.TrimPrefix(reference, "#/"), "/") {
+		name, err := jsonPointerToken(token)
+		if err != nil {
+			return nil, fmt.Errorf("invalid path item reference %q: %w", reference, err)
+		}
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("unresolved path item reference %q", reference)
+		}
+		value, ok = object[name]
+		if !ok {
+			return nil, fmt.Errorf("unresolved path item reference %q", reference)
+		}
+	}
+	pathItem, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unresolved path item reference %q", reference)
+	}
+	return pathItem, nil
+}
+
+func jsonPointerToken(token string) (string, error) {
+	if token == "" || strings.Contains(token, "/") {
+		return "", fmt.Errorf("must target one object")
+	}
+	var output strings.Builder
+	for index := 0; index < len(token); index++ {
+		if token[index] != '~' {
+			output.WriteByte(token[index])
+			continue
+		}
+		if index+1 >= len(token) {
+			return "", fmt.Errorf("invalid JSON Pointer escape")
+		}
+		index++
+		switch token[index] {
+		case '0':
+			output.WriteByte('~')
+		case '1':
+			output.WriteByte('/')
+		default:
+			return "", fmt.Errorf("invalid JSON Pointer escape")
+		}
+	}
+	return output.String(), nil
 }
 
 func buildOperation(path, method string, pathItemRaw, raw map[string]any) Operation {

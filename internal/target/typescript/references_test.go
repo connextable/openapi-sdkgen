@@ -29,6 +29,23 @@ func TestResolveComponentObjectResolvesChainsAndAppliesSiblingOverrides(t *testi
 	}
 }
 
+func TestResolveComponentObjectDecodesEscapedComponentNames(t *testing.T) {
+	document := &ir.Document{Raw: map[string]any{"components": map[string]any{
+		"parameters": map[string]any{
+			"page/size": map[string]any{"name": "pageSize", "in": "query"},
+		},
+	}}}
+	resolved, err := resolveComponentObject(document, map[string]any{
+		"$ref": "#/components/parameters/page~1size",
+	}, "parameters")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved["name"] != "pageSize" {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+}
+
 func TestResolveComponentObjectRejectsExternalUnresolvedAndCyclicReferences(t *testing.T) {
 	for _, test := range []struct {
 		name      string

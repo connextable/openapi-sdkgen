@@ -1,0 +1,18 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "OAS 3.2 SDK Fixture", "version": "1" },
+  "paths": {
+    "/widgets": {
+      "query": {
+        "operationId": "queryWidgets",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "additionalOperations": {
+        "PURGE": {
+          "operationId": "purgeWidgets",
+          "responses": { "204": { "description": "Deleted" } }
+        }
+      }
+    }
+  }
+}

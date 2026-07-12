@@ -75,6 +75,12 @@ func SourceArtifacts(document *ir.Document) ([]Artifact, error) {
 	if document == nil {
 		return nil, fmt.Errorf("IR document is nil")
 	}
+	if err := validateSchemaSupport(document); err != nil {
+		return nil, err
+	}
+	if err := validateOpenAPISupport(document); err != nil {
+		return nil, err
+	}
 	if err := validateOperationSymbols(document); err != nil {
 		return nil, err
 	}
@@ -90,18 +96,23 @@ func SourceArtifacts(document *ir.Document) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	metadataSource, err := emitMetadata(document, true)
+	if err != nil {
+		return nil, err
+	}
 	clientSource, err := emitClient(document, manifest)
 	if err != nil {
 		return nil, err
 	}
 	if err := validateSourceExportSymbols(map[string][]byte{
-		"types":  typesSource,
-		"errors": errorsSource,
-		"client": clientSource,
+		"types":    typesSource,
+		"errors":   errorsSource,
+		"metadata": metadataSource,
+		"client":   clientSource,
 	}); err != nil {
 		return nil, err
 	}
-	indexSource := []byte("export * from \"./types.js\"\nexport * from \"./errors.js\"\nexport * from \"./client.js\"\n")
+	indexSource := []byte("export * from \"./types.js\"\nexport * from \"./errors.js\"\nexport * from \"./metadata.js\"\nexport * from \"./client.js\"\n")
 
 	artifacts := []Artifact{
 		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./generated/index.js\"\n"))},
@@ -109,6 +120,7 @@ func SourceArtifacts(document *ir.Document) ([]Artifact, error) {
 		{Path: "generated/client.ts", Data: generatedSource(clientSource)},
 		{Path: "generated/errors.ts", Data: generatedSource(errorsSource)},
 		{Path: "generated/index.ts", Data: generatedSource(indexSource)},
+		{Path: "generated/metadata.ts", Data: generatedSource(metadataSource)},
 		{Path: "generated/runtime.ts", Data: generatedSource(runtimeTemplate)},
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })

@@ -93,7 +93,7 @@ describe("generated runtime", () => {
             property: "query",
             style: "form",
             explode: true,
-            contentType: "application/json",
+            contentType: "Application/JSON",
           },
           {
             location: "header",

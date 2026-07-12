@@ -194,6 +194,8 @@ export interface OperationDefinition {
   readonly outputSchemas?: WireSchemas;
   /** Supported request-body representations. */
   readonly requestBodies?: readonly WireBodyDefinition[];
+  /** Whether the OpenAPI Request Body Object requires a body. */
+  readonly requestBodyRequired?: boolean;
   /** Successful response representations keyed by status and media type. */
   readonly responses?: readonly WireResponseDefinition[];
 }
@@ -255,6 +257,8 @@ export interface ParameterDefinition {
   readonly style: string;
   /** Whether objects and arrays are exploded into separate values. */
   readonly explode: boolean;
+  /** Whether the parameter must be present before the request is sent. Defaults to false. */
+  readonly required?: boolean;
   /** Media type for a content-based parameter. */
   readonly contentType?: string;
   /** Schema used for wire-name transformation before serialization. */
@@ -690,12 +694,14 @@ function encodeRequest(
 
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
   rejectUndefinedArrayValues(cookieValues);
+  assertRequiredParameters(operation, pathValues, queryValues, headerParams, cookieValues);
   const cookies = Object.entries(cookieValues)
     .filter((entry): entry is [string, unknown] => entry[1] !== undefined)
     .flatMap(([property, value]) => serializeCookie(operation, property, value));
   if (cookies.length > 0) headers.set("Cookie", cookies.join("; "));
 
   if (!("body" in values) || values.body === undefined) {
+	if (operation.requestBodyRequired) throw new TypeError("Missing required request body");
     return { url: url.href, headers };
   }
   rejectUndefinedArrayValues(values.body);
@@ -719,9 +725,29 @@ function encodeRequest(
   return { url: url.href, headers, body };
 }
 
+function assertRequiredParameters(
+  operation: OperationDefinition,
+  pathValues: Record<string, unknown>,
+  queryValues: Record<string, unknown>,
+  headerValues: Record<string, unknown>,
+  cookieValues: Record<string, unknown>,
+): void {
+  for (const parameter of operation.parameters ?? []) {
+    if (!parameter.required) continue;
+    const values = parameter.location === "path" ? pathValues
+      : parameter.location === "query" ? queryValues
+      : parameter.location === "header" ? headerValues
+      : cookieValues;
+    if (values[parameter.property] === undefined || values[parameter.property] === null) {
+      throw new TypeError(`Missing required ${parameter.location} parameter ${parameter.name}`);
+    }
+  }
+}
+
 function encodeRequestBody(contentType: string, value: unknown): BodyInit {
-  if (contentType.includes("json")) return JSON.stringify(value);
-  if (contentType === "application/x-www-form-urlencoded") {
+  const normalizedContentType = contentType.toLowerCase();
+	if (isJSONMediaType(normalizedContentType)) return JSON.stringify(value);
+  if (normalizedContentType === "application/x-www-form-urlencoded") {
     if (!isRecord(value)) throw new TypeError("form body must be an object");
     const form = new URLSearchParams();
     for (const [name, item] of Object.entries(value)) {
@@ -731,7 +757,7 @@ function encodeRequestBody(contentType: string, value: unknown): BodyInit {
     }
     return form;
   }
-  if (contentType === "multipart/form-data") {
+  if (normalizedContentType === "multipart/form-data") {
     if (!isRecord(value)) throw new TypeError("multipart body must be an object");
     const form = new FormData();
     const append = (name: string, item: unknown): void => {
@@ -751,7 +777,7 @@ function encodeRequestBody(contentType: string, value: unknown): BodyInit {
     }
     return form;
   }
-  if (contentType.startsWith("text/") || contentType.includes("xml")) return String(value);
+  if (normalizedContentType.startsWith("text/") || normalizedContentType.includes("xml")) return String(value);
   if (value instanceof Blob || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
     return value as BodyInit;
   }
@@ -1003,8 +1029,8 @@ function serializeSimpleValue(value: unknown, explode: boolean): string {
 }
 
 function serializeContentParameter(value: unknown, contentType: string): string {
-  if (contentType.includes("json")) return JSON.stringify(value);
-  return String(value);
+	if (isJSONMediaType(contentType)) return JSON.stringify(value);
+	return String(value);
 }
 
 function serializeCookie(
@@ -1140,7 +1166,7 @@ async function decodeResponse(response: Response, request: RequestMetadata): Pro
   const contentType = responseContentType(response);
   if (contentType === undefined || response.body === null) return undefined;
   try {
-    if (contentType === "application/json" || contentType.endsWith("+json")) {
+	if (isJSONMediaType(contentType)) {
       return await response.json();
     }
     if (contentType.startsWith("text/") || contentType.includes("xml")) {
@@ -1157,6 +1183,11 @@ async function decodeResponse(response: Response, request: RequestMetadata): Pro
       cause,
     });
   }
+}
+
+function isJSONMediaType(contentType: string): boolean {
+	const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+	return mediaType === "application/json" || mediaType.endsWith("+json");
 }
 
 function responseContentType(response: Response): string | undefined {

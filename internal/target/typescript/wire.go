@@ -28,16 +28,34 @@ func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string
 	return nil
 }
 
+func emitJavaScriptWireComponents(output *bytes.Buffer, document *ir.Document, name string, direction projection) error {
+	names := make([]string, 0, len(document.ComponentSchemas))
+	for schemaName := range document.ComponentSchemas {
+		names = append(names, schemaName)
+	}
+	sort.Strings(names)
+	fmt.Fprintf(output, "const %s = {\n", name)
+	for _, schemaName := range names {
+		descriptor, err := wireSchemaDescriptor(document.ComponentSchemas[schemaName], direction)
+		if err != nil {
+			return fmt.Errorf("component %s wire schema: %w", schemaName, err)
+		}
+		fmt.Fprintf(output, "  %s: %s,\n", quoteTS(schemaName), descriptor)
+	}
+	output.WriteString("}\n\n")
+	return nil
+}
+
 func wireSchemaDescriptor(schema map[string]any, direction projection) (string, error) {
 	if len(schema) == 0 {
 		return "{}", nil
 	}
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		const prefix = "#/components/schemas/"
-		if !strings.HasPrefix(reference, prefix) {
-			return "", fmt.Errorf("external schema reference %q is not supported", reference)
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return "", err
 		}
-		referenceDescriptor := "{ reference: " + quoteTS(strings.TrimPrefix(reference, prefix)) + " }"
+		referenceDescriptor := "{ reference: " + quoteTS(name) + " }"
 		if len(schema) == 1 {
 			return referenceDescriptor, nil
 		}

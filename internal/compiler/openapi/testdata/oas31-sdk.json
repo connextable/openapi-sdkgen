@@ -1,0 +1,29 @@
+{
+  "openapi": "3.1.1",
+  "info": { "title": "OAS 3.1 SDK Fixture", "version": "1", "summary": "JSON Schema null union" },
+  "paths": {
+    "/widgets": {
+      "get": {
+        "operationId": "getWidget",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string" },
+          "note": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

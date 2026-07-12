@@ -63,9 +63,6 @@
         "responses": {
           "201": {
             "description": "Created.",
-            "headers": {
-              "X-Request-Id": { "schema": { "type": "string" } }
-            },
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/Widget" }

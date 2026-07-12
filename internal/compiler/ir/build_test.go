@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	openapidoc "github.com/connextable/openapi-sdkgen/internal/compiler/openapi"
@@ -76,6 +77,9 @@ func TestBuildPreservesOpenAPI32SurfaceAndExtractsNewMethods(t *testing.T) {
 	if got, want := model.OpenAPIVersion, "3.2.0"; got != want {
 		t.Fatalf("OpenAPI version = %q, want %q", got, want)
 	}
+	if got, want := model.OpenAPIVersionLine, "3.2"; got != want {
+		t.Fatalf("OpenAPI version line = %q, want %q", got, want)
+	}
 	if got, want := model.Servers, []Server{{URL: "https://{region}.example.test/v1", Description: "Regional API"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("servers = %#v, want %#v", got, want)
 	}
@@ -126,6 +130,41 @@ func TestBuildPreservesOpenAPI32SurfaceAndExtractsNewMethods(t *testing.T) {
 	}
 }
 
+func TestBuildPreservesSupportedVersionProvenance(t *testing.T) {
+	for version, wantLine := range map[string]string{
+		"3.0.3": "3.0",
+		"3.1.1": "3.1",
+		"3.2.0": "3.2",
+	} {
+		t.Run(version, func(t *testing.T) {
+			schema := `{"type":"object"}`
+			if wantLine != "3.0" {
+				schema = `{"$id":"https://example.test/schemas/dynamic","$dynamicRef":"#node"}`
+			}
+			source, err := openapidoc.Read([]byte(`{
+  "openapi": "` + version + `",
+  "info": {"title": "Versioned", "version": "1"},
+  "paths": {},
+  "components": {"schemas": {"Dynamic": ` + schema + `}}
+}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			model, err := Build(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if model.OpenAPIVersion != version || model.OpenAPIVersionLine != wantLine {
+				t.Fatalf("version provenance = %q (%q), want %q (%q)", model.OpenAPIVersion, model.OpenAPIVersionLine, version, wantLine)
+			}
+			if wantLine != "3.0" && model.ComponentSchemas["Dynamic"]["$dynamicRef"] != "#node" {
+				got := model.ComponentSchemas["Dynamic"]["$dynamicRef"]
+				t.Fatalf("schema reference keyword = %#v", got)
+			}
+		})
+	}
+}
+
 func TestBuildAcceptsWebhookOnlyOpenAPI32Document(t *testing.T) {
 	document := &openapidoc.Document{Raw: map[string]any{
 		"openapi": "3.2.0",
@@ -163,6 +202,39 @@ func TestBuildRejectsNonObjectPaths(t *testing.T) {
 	}
 }
 
+func TestBuildSkipsPathExtensionsAndRejectsOpenAPI32MethodsInEarlierLines(t *testing.T) {
+	for _, version := range []string{"3.0.3", "3.1.1"} {
+		t.Run(version, func(t *testing.T) {
+			document := &openapidoc.Document{Version: openapidoc.VersionLine(version[:3]), Raw: map[string]any{
+				"openapi": version,
+				"info":    map[string]any{"title": "Versioned", "version": "1"},
+				"paths": map[string]any{
+					"x-routing": "metadata only",
+					"/widgets":  map[string]any{"query": operationFixture("queryWidgets")},
+				},
+			}}
+			if _, err := Build(document); err == nil || !strings.Contains(err.Error(), "/paths/~1widgets/query") {
+				t.Fatalf("Build error = %v", err)
+			}
+		})
+	}
+	document := &openapidoc.Document{Version: openapidoc.Version32, Raw: map[string]any{
+		"openapi": "3.2.0",
+		"info":    map[string]any{"title": "Extensions", "version": "1"},
+		"paths": map[string]any{
+			"x-routing": "metadata only",
+			"/widgets":  map[string]any{"query": operationFixture("queryWidgets")},
+		},
+	}}
+	model, err := Build(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.Operations) != 1 || model.Operations[0].OperationID != "queryWidgets" {
+		t.Fatalf("operations = %#v", model.Operations)
+	}
+}
+
 func TestBuildResolvesLocalPathItemReferences(t *testing.T) {
 	operation := operationFixture("getSharedItem")
 	document := &openapidoc.Document{Raw: map[string]any{
@@ -186,6 +258,46 @@ func TestBuildResolvesLocalPathItemReferences(t *testing.T) {
 	}
 	if model.Operations[0].PathItemRaw["summary"] != "Override" {
 		t.Fatalf("path item siblings not applied: %#v", model.Operations[0].PathItemRaw)
+	}
+}
+
+func TestBuildResolvesEscapedLocalPathItemReferences(t *testing.T) {
+	document := &openapidoc.Document{Raw: map[string]any{
+		"openapi": "3.2.0",
+		"info":    map[string]any{"title": "Referenced", "version": "1.0.0"},
+		"paths": map[string]any{
+			"/items": map[string]any{"$ref": "#/components/pathItems/Items~1Shared"},
+		},
+		"components": map[string]any{
+			"pathItems": map[string]any{
+				"Items/Shared": map[string]any{"get": operationFixture("getSharedItems")},
+			},
+		},
+	}}
+	model, err := Build(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.Operations) != 1 || model.Operations[0].OperationID != "getSharedItems" {
+		t.Fatalf("operations = %#v", model.Operations)
+	}
+}
+
+func TestBuildResolvesLocalPathsPathItemReferences(t *testing.T) {
+	document := &openapidoc.Document{Raw: map[string]any{
+		"openapi": "3.2.0",
+		"info":    map[string]any{"title": "Referenced", "version": "1.0.0"},
+		"paths": map[string]any{
+			"/common": map[string]any{"get": operationFixture("getCommon")},
+			"/alias":  map[string]any{"$ref": "#/paths/~1common"},
+		},
+	}}
+	model, err := Build(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.Operations) != 2 || model.Operations[1].OperationID != "getCommon" {
+		t.Fatalf("operations = %#v", model.Operations)
 	}
 }
 

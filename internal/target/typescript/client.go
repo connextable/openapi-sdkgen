@@ -481,7 +481,7 @@ func operationResponseMediaTypes(document *ir.Document, operation ir.Operation) 
 	seen := make(map[string]bool)
 	var result []string
 	for status, value := range responses {
-		if !strings.HasPrefix(status, "2") {
+		if !isSuccessResponseStatus(status) {
 			continue
 		}
 		response, _ := value.(map[string]any)
@@ -507,7 +507,7 @@ func emitRawResponseJSDoc(output *bytes.Buffer, document *ir.Document, operation
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statuses := make([]string, 0, len(responses))
 	for status := range responses {
-		if strings.HasPrefix(status, "2") {
+		if isSuccessResponseStatus(status) {
 			statuses = append(statuses, status)
 		}
 	}
@@ -1141,6 +1141,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 				"property: " + quoteTS(parameter.Property),
 				"style: " + quoteTS(parameter.Style),
 				fmt.Sprintf("explode: %t", parameter.Explode),
+				fmt.Sprintf("required: %t", parameter.Required),
 				"schema: " + descriptor,
 			}
 			if parameter.ContentType != "" {
@@ -1157,6 +1158,14 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 	}
 	if hasRequestBodies {
 		fields = append(fields, "requestBodies: "+requestBodies)
+		body, _ := irOperation.Raw["requestBody"].(map[string]any)
+		resolvedBody, err := resolveComponentObject(document, body, "requestBodies")
+		if err != nil {
+			return "", err
+		}
+		if boolValue(resolvedBody, "required") {
+			fields = append(fields, "requestBodyRequired: true")
+		}
 		usesInputSchemas = true
 	}
 	if usesInputSchemas {

@@ -27,11 +27,15 @@ func resolveComponentObjectRecursive(document *ir.Document, object map[string]an
 	defer delete(resolving, reference)
 	components, _ := document.Raw["components"].(map[string]any)
 	objects, _ := components[component].(map[string]any)
-	resolved, ok := objects[strings.TrimPrefix(reference, prefix)].(map[string]any)
+	name, err := componentReferenceName(reference, component)
+	if err != nil {
+		return nil, err
+	}
+	resolved, ok := objects[name].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unresolved %s reference %q", component, reference)
 	}
-	resolved, err := resolveComponentObjectRecursive(document, resolved, component, resolving)
+	resolved, err = resolveComponentObjectRecursive(document, resolved, component, resolving)
 	if err != nil {
 		return nil, err
 	}
@@ -45,4 +49,35 @@ func resolveComponentObjectRecursive(document *ir.Document, object map[string]an
 		}
 	}
 	return merged, nil
+}
+
+func componentReferenceName(reference, component string) (string, error) {
+	prefix := "#/components/" + component + "/"
+	if !strings.HasPrefix(reference, prefix) {
+		return "", fmt.Errorf("external %s reference %q is not supported", component, reference)
+	}
+	token := strings.TrimPrefix(reference, prefix)
+	if token == "" || strings.Contains(token, "/") {
+		return "", fmt.Errorf("%s reference %q must target one component", component, reference)
+	}
+	var output strings.Builder
+	for index := 0; index < len(token); index++ {
+		if token[index] != '~' {
+			output.WriteByte(token[index])
+			continue
+		}
+		if index+1 >= len(token) {
+			return "", fmt.Errorf("%s reference %q has an invalid JSON Pointer escape", component, reference)
+		}
+		index++
+		switch token[index] {
+		case '0':
+			output.WriteByte('~')
+		case '1':
+			output.WriteByte('/')
+		default:
+			return "", fmt.Errorf("%s reference %q has an invalid JSON Pointer escape", component, reference)
+		}
+	}
+	return output.String(), nil
 }

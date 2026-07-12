@@ -137,8 +137,11 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 	visit = func(value any, found map[string]bool) {
 		switch typed := value.(type) {
 		case map[string]any:
-			if reference, _ := typed["$ref"].(string); strings.HasPrefix(reference, "#/components/schemas/") {
-				name := strings.TrimPrefix(reference, "#/components/schemas/")
+			if reference, _ := typed["$ref"].(string); reference != "" {
+				name, err := componentSchemaReferenceName(reference)
+				if err != nil {
+					break
+				}
 				if !found[name] {
 					found[name] = true
 					visit(document.ComponentSchemas[name], found)
@@ -208,7 +211,31 @@ func emitSchemaValueJSDoc(output *bytes.Buffer, indent string, schema map[string
 	if deprecated {
 		fmt.Fprintf(output, "%s * @deprecated This OpenAPI value is deprecated.\n", indent)
 	}
+	if constraints := schemaConstraintSummary(schema); constraints != "" {
+		fmt.Fprintf(output, "%s * Constraints: %s.\n", indent, constraints)
+	}
 	fmt.Fprintf(output, "%s */\n", indent)
+}
+
+// schemaConstraintSummary keeps validation-only Schema Object keywords visible
+// in generated source. TypeScript cannot encode every JSON Schema predicate in
+// a static type, so the generated declaration records the contract rather than
+// silently discarding it.
+func schemaConstraintSummary(schema map[string]any) string {
+	keys := []string{
+		"multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum",
+		"maxLength", "minLength", "pattern", "maxItems", "minItems", "uniqueItems",
+		"contains", "minContains", "maxContains", "maxProperties", "minProperties",
+		"dependentRequired", "propertyNames", "unevaluatedItems", "unevaluatedProperties",
+		"contentEncoding", "contentMediaType", "contentSchema",
+	}
+	items := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value, ok := schema[key]; ok {
+			items = append(items, "`"+key+"="+sanitizeComment(literalTS(value))+"`")
+		}
+	}
+	return strings.Join(items, ", ")
 }
 
 type componentDeclaration struct {
@@ -233,8 +260,26 @@ func componentDeclarations(name string, schema map[string]any) []componentDeclar
 }
 
 func schemaType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+	// OpenAPI 3.0 expresses nullability independently of `type`, unlike the
+	// JSON Schema type array used by OpenAPI 3.1 and 3.2.
+	if document.OpenAPIVersionLine != "3.1" && document.OpenAPIVersionLine != "3.2" && boolValue(schema, "nullable") {
+		withoutNullable := make(map[string]any, len(schema)-1)
+		for key, value := range schema {
+			if key != "nullable" {
+				withoutNullable[key] = value
+			}
+		}
+		value, err := schemaType(document, withoutNullable, direction)
+		if err != nil {
+			return "", err
+		}
+		return addUnionMember(value, "null"), nil
+	}
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		name := reference[strings.LastIndex(reference, "/")+1:]
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return "", err
+		}
 		referenced, err := referencedType(document, name, direction)
 		if err != nil || len(schema) == 1 {
 			return referenced, err
@@ -345,6 +390,10 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 				return "", err
 			}
 			parts = append(parts, "...("+itemType+")[]")
+		} else {
+			// JSON Schema allows unconstrained trailing items when `items` is
+			// absent. Preserve that openness instead of producing a closed tuple.
+			parts = append(parts, "...unknown[]")
 		}
 		return "readonly [" + strings.Join(parts, ", ") + "]", nil
 	}
@@ -418,7 +467,47 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 		fmt.Fprintf(&output, "  readonly %s%s: %s\n", propertyName, optional, propertyType)
 	}
 	output.WriteString("}")
-	return output.String(), nil
+	additional, err := objectAdditionalType(document, schema, direction)
+	if err != nil {
+		return "", err
+	}
+	if additional == "" {
+		return output.String(), nil
+	}
+	return "(" + output.String() + ") & (Readonly<Record<string, " + additional + ">>)", nil
+}
+
+// objectAdditionalType is intentionally conservative for patternProperties:
+// TypeScript has no regex-key type, so every additional key is represented by
+// the union of the applicable pattern schemas. The exact patterns stay in the
+// generated documentation/contract metadata.
+func objectAdditionalType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+	var values []string
+	if additional, ok := schema["additionalProperties"].(map[string]any); ok {
+		value, err := schemaType(document, additional, direction)
+		if err != nil {
+			return "", err
+		}
+		values = append(values, value)
+	}
+	patterns, _ := schema["patternProperties"].(map[string]any)
+	patternNames := make([]string, 0, len(patterns))
+	for pattern := range patterns {
+		patternNames = append(patternNames, pattern)
+	}
+	sort.Strings(patternNames)
+	for _, pattern := range patternNames {
+		value, ok := patterns[pattern].(map[string]any)
+		if !ok {
+			continue
+		}
+		typeValue, err := schemaType(document, value, direction)
+		if err != nil {
+			return "", err
+		}
+		values = append(values, typeValue)
+	}
+	return strings.Join(uniqueStrings(values), " | "), nil
 }
 
 func referencedType(document *ir.Document, name string, direction projection) (string, error) {
@@ -438,11 +527,15 @@ func referencedType(document *ir.Document, name string, direction projection) (s
 	return naming.Public(selected.name)
 }
 
+func isSuccessResponseStatus(status string) bool {
+	return status == "default" || strings.HasPrefix(status, "2")
+}
+
 func operationOutputType(document *ir.Document, operation ir.Operation) (string, error) {
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
-		if strings.HasPrefix(status, "2") {
+		if isSuccessResponseStatus(status) {
 			statusCodes = append(statusCodes, status)
 		}
 	}
@@ -466,9 +559,11 @@ func operationOutputType(document *ir.Document, operation ir.Operation) (string,
 		sort.Strings(mediaTypes)
 		for _, mediaType := range mediaTypes {
 			media, _ := content[mediaType].(map[string]any)
-			schema, _ := media["schema"].(map[string]any)
-			if len(schema) == 0 {
-				result = append(result, "void")
+			schema, hasSchema := media["schema"].(map[string]any)
+			if !hasSchema {
+				// A Media Type Object without a Schema Object still has a body.
+				// Its shape is unconstrained, not absent.
+				result = append(result, "unknown")
 				continue
 			}
 			if isBinaryMedia(mediaType, schema) {
@@ -501,7 +596,7 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
-		if strings.HasPrefix(status, "2") {
+		if isSuccessResponseStatus(status) {
 			statusCodes = append(statusCodes, status)
 		}
 	}
@@ -561,7 +656,7 @@ func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (m
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
-		if strings.HasPrefix(status, "2") {
+		if isSuccessResponseStatus(status) {
 			statusCodes = append(statusCodes, status)
 		}
 	}
@@ -606,7 +701,8 @@ func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (m
 }
 
 func isBinaryMedia(mediaType string, schema map[string]any) bool {
-	if strings.HasPrefix(mediaType, "text/") || strings.Contains(mediaType, "json") || strings.Contains(mediaType, "xml") {
+	mediaType = strings.ToLower(mediaType)
+	if strings.HasPrefix(mediaType, "text/") || isJSONMediaType(mediaType) || strings.Contains(mediaType, "xml") {
 		return false
 	}
 	format, _ := schema["format"].(string)
@@ -615,12 +711,21 @@ func isBinaryMedia(mediaType string, schema map[string]any) bool {
 }
 
 func isTextMedia(mediaType string) bool {
+	mediaType = strings.ToLower(mediaType)
 	return strings.HasPrefix(mediaType, "text/") || strings.Contains(mediaType, "xml")
+}
+
+func isJSONMediaType(mediaType string) bool {
+	mediaType = strings.TrimSpace(strings.SplitN(strings.ToLower(mediaType), ";", 2)[0])
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
 func envelopeDataSchema(document *ir.Document, schema map[string]any, seen map[string]bool) map[string]any {
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		name := reference[strings.LastIndex(reference, "/")+1:]
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return nil
+		}
 		if seen[name] {
 			return nil
 		}
@@ -636,7 +741,7 @@ func operationSuccessSchema(document *ir.Document, operation ir.Operation) (map[
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
-		if strings.HasPrefix(status, "2") {
+		if isSuccessResponseStatus(status) {
 			statusCodes = append(statusCodes, status)
 		}
 	}
@@ -683,7 +788,10 @@ func operationItemType(document *ir.Document, operation ir.Operation) (string, e
 
 func findItemsSchema(document *ir.Document, schema map[string]any, seen map[string]bool) map[string]any {
 	if reference, _ := schema["$ref"].(string); reference != "" {
-		name := reference[strings.LastIndex(reference, "/")+1:]
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return nil
+		}
 		if seen[name] {
 			return nil
 		}
@@ -769,6 +877,15 @@ func schemaTypes(value any) []string {
 	default:
 		return nil
 	}
+}
+
+func addUnionMember(value, member string) string {
+	for _, item := range strings.Split(value, " | ") {
+		if item == member {
+			return value
+		}
+	}
+	return value + " | " + member
 }
 
 func schemaEnum(schema map[string]any) []string {

@@ -1,6 +1,7 @@
 package typescript
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,5 +55,19 @@ func TestRequestBodyTypeRepresentsEmptyTextJSONAndMultiMediaBodies(t *testing.T)
 				t.Fatalf("requestBodyType = %q, %v; want %q", value, err, test.want)
 			}
 		})
+	}
+}
+
+func TestOperationResponseMediaTypesIncludesDefaultResponses(t *testing.T) {
+	document := &ir.Document{}
+	operation := ir.Operation{Raw: map[string]any{"responses": map[string]any{
+		"default": map[string]any{"content": map[string]any{"application/json": map[string]any{}, "text/plain": map[string]any{}}},
+	}}}
+	mediaTypes, err := operationResponseMediaTypes(document, operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(mediaTypes, []string{"application/json", "text/plain"}) {
+		t.Fatalf("media types = %#v", mediaTypes)
 	}
 }
