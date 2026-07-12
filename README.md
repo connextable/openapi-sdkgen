@@ -26,6 +26,18 @@ The output is an independent package source tree. It includes the generated clie
 
 Generate separate packages by invoking the command once per OpenAPI document and output directory.
 
+## Runnable TypeScript example
+
+[`examples/typescript-todo-app`](examples/typescript-todo-app) reproduces the complete consumer flow without test fixtures or symlinks: it generates `sdk/` from a small Todo OpenAPI document, installs that SDK through `file:./sdk`, builds the app, and calls it over a local HTTP server.
+
+For repository validation, run:
+
+```sh
+just agent example-todo
+```
+
+For normal use, follow the example's [`setup.sh`](examples/typescript-todo-app/setup.sh) and separate server/client commands.
+
 ## Architecture
 
 ```txt

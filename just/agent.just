@@ -62,5 +62,8 @@ ts-typecheck:
 ts-test:
     ./scripts/agent/ts-test
 
+example-todo:
+    ./scripts/agent/example-todo
+
 release-check:
     ./scripts/agent/release-check

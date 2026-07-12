@@ -1,0 +1,93 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Todo API",
+    "version": "1.0.0"
+  },
+  "servers": [{ "url": "/v1" }],
+  "paths": {
+    "/todos": {
+      "get": {
+        "operationId": "listTodos",
+        "summary": "List todos.",
+        "security": [],
+        "x-envelope": "none",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public",
+        "parameters": [
+          {
+            "name": "completed",
+            "in": "query",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Todo list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Todo" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTodo",
+        "summary": "Create a todo.",
+        "security": [],
+        "x-envelope": "none",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                  "title": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created todo.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Todo" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Todo": {
+        "type": "object",
+        "required": ["id", "title", "completed"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "completed": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

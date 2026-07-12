@@ -6,3 +6,6 @@ test/typescript/node_modules/
 test/typescript/.pnpm-store/
 test/typescript/coverage/
 test/typescript/fixtures/generated/
+examples/typescript-todo-app/node_modules/
+examples/typescript-todo-app/dist/
+examples/typescript-todo-app/sdk/

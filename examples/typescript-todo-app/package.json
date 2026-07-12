@@ -1,0 +1,21 @@
+{
+  "name": "typescript-todo-app-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "server": "node dist/server.js",
+    "client": "node dist/client.js"
+  },
+  "dependencies": {
+    "@example/todo-sdk": "file:./sdk"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.0",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
+}

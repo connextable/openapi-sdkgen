@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+example="$ROOT/examples/typescript-todo-app"
+"$ROOT/scripts/agent/build"
+agent_run "prepare Todo example" env SDKGEN_BIN="$ROOT/.tmp/bin/openapi-sdkgen" "$example/setup.sh"
+server_log="$ROOT/.tmp/todo-example-server.log"
+TODO_API_PORT=18787 ts_pnpm --dir "$example" run server >"$server_log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+for _ in {1..20}; do
+  if grep -q "Todo API listening" "$server_log"; then
+    break
+  fi
+  sleep 0.1
+done
+if ! grep -q "Todo API listening" "$server_log"; then
+  cat "$server_log" >&2
+  exit 1
+fi
+agent_run "run Todo client" ts_pnpm --dir "$example" run client
