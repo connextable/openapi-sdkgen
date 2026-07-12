@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,10 +7,10 @@ import {
   isAPIError,
   isValidationError,
   isValidationFailedError,
-} from "@example/conformance-client";
-import type { UploadWidgetBodyInput } from "@example/conformance-client";
+} from "../fixtures/generated/client/index.js";
+import type { UploadWidgetBodyInput } from "../fixtures/generated/client/index.js";
 
-describe("generated TypeScript package", () => {
+describe("generated TypeScript source", () => {
   it("accepts binary request values exposed by generated body types", () => {
     const body: UploadWidgetBodyInput = new Uint8Array([1, 2, 3]);
     expect(body).toBeInstanceOf(Uint8Array);
@@ -136,21 +134,5 @@ describe("generated TypeScript package", () => {
     expect(isAPIError(error)).toBe(true);
     if (!isAPIError(error)) throw new Error("expected API error");
     expect(error.code).toBe(TransportErrorCode.REQUEST_TIMEOUT);
-  });
-
-  it("keeps generated package metadata independent from the conformance harness", async () => {
-    const packageJSON = JSON.parse(
-      await readFile(new URL("../fixtures/generated/client/package.json", import.meta.url), "utf8"),
-    ) as Record<string, unknown>;
-    expect(packageJSON.name).toBe("@example/conformance-client");
-    expect(packageJSON.dependencies).toBeUndefined();
-    expect(packageJSON.private).toBeUndefined();
-    expect(packageJSON.files).toEqual(["dist", "README.md", "manifest.json"]);
-    expect(packageJSON.exports).toEqual({
-      ".": { import: "./dist/src/index.js", types: "./dist/src/index.d.ts" },
-    });
-    await expect(
-      readFile(new URL("../fixtures/generated/client/dist/src/index.js", import.meta.url), "utf8"),
-    ).resolves.toContain("generated/index.js");
   });
 });

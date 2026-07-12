@@ -16,7 +16,7 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
 
-const usage = "usage: openapi-sdkgen generate --input <document> --target <target> --output <directory> [--package-name <name>]"
+const usage = "usage: openapi-sdkgen generate --input <document> --target <target> --output <directory>"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -42,7 +42,6 @@ func generate(args []string) error {
 	input := flags.String("input", "", "OpenAPI document path")
 	targetName := flags.String("target", "", "SDK target")
 	output := flags.String("output", "", "output directory")
-	packageName := flags.String("package-name", "", "package name (defaults to output directory name)")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("parse generate arguments: %w", err)
 	}
@@ -65,11 +64,7 @@ func generate(args []string) error {
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", *input, err)
 	}
-	name := *packageName
-	if name == "" {
-		name = defaultPackageName(*output)
-	}
-	artifacts, err := target.Generate(document, generator.Options{PackageName: name})
+	artifacts, err := target.Generate(document, generator.Options{})
 	if err != nil {
 		return fmt.Errorf("generate %s SDK: %w", target.Name(), err)
 	}
@@ -77,24 +72,6 @@ func generate(args []string) error {
 		return err
 	}
 	return nil
-}
-
-func defaultPackageName(output string) string {
-	base := strings.ToLower(filepath.Base(filepath.Clean(output)))
-	var value strings.Builder
-	for _, character := range base {
-		switch {
-		case character >= 'a' && character <= 'z', character >= '0' && character <= '9', character == '-', character == '_', character == '.':
-			value.WriteRune(character)
-		default:
-			value.WriteByte('-')
-		}
-	}
-	name := strings.Trim(value.String(), ".-_")
-	if name == "" {
-		return "openapi-sdk"
-	}
-	return name
 }
 
 func writeArtifacts(output string, artifacts []generator.Artifact) error {

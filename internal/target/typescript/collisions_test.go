@@ -6,15 +6,14 @@ import (
 	"testing"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
-func TestPackageArtifactsRejectsCollidingOperationSymbols(t *testing.T) {
+func TestSourceArtifactsRejectsCollidingOperationSymbols(t *testing.T) {
 	document := &ir.Document{ContractVersion: "1.0.0", Operations: []ir.Operation{
 		{OperationID: "get-pet", Method: "GET", Path: "/pets"},
 		{OperationID: "get_pet", Method: "GET", Path: "/pets"},
 	}}
-	_, err := PackageArtifacts(document, Package{Name: "@example/api"})
+	_, err := SourceArtifacts(document)
 	if err == nil || !strings.Contains(err.Error(), "both generate TypeScript") {
 		t.Fatalf("error = %v", err)
 	}
@@ -150,17 +149,17 @@ func TestEmitQueryTypesKeepsOrdinaryLimitAndSortParameters(t *testing.T) {
 	}
 }
 
-func TestValidatePackageExportSymbolsRejectsCrossModuleCollision(t *testing.T) {
-	err := validatePackageExportSymbols(map[string][]byte{
+func TestValidateSourceExportSymbolsRejectsCrossModuleCollision(t *testing.T) {
+	err := validateSourceExportSymbols(map[string][]byte{
 		"types":  []byte("export type ListWidgetsInput = {}\n"),
 		"client": []byte("export type ListWidgetsInput = {}\n"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "generated package export") {
+	if err == nil || !strings.Contains(err.Error(), "generated source export") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestPackageArtifactsRejectsComponentAndOperationExportCollision(t *testing.T) {
+func TestSourceArtifactsRejectsComponentAndOperationExportCollision(t *testing.T) {
 	document := &ir.Document{
 		ContractVersion: "1.0.0",
 		ComponentSchemas: map[string]map[string]any{
@@ -183,26 +182,18 @@ func TestPackageArtifactsRejectsComponentAndOperationExportCollision(t *testing.
 			},
 		}},
 	}
-	_, err := PackageArtifacts(document, Package{Name: "@example/api"})
-	if err == nil || !strings.Contains(err.Error(), "generated package export") {
+	_, err := SourceArtifacts(document)
+	if err == nil || !strings.Contains(err.Error(), "generated source export") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestGeneratorRejectsInvalidNPMNameAndVersion(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		packageName string
-		version     string
-	}{
-		{name: "name", packageName: "@Example/client", version: "1.2.3"},
-		{name: "version", packageName: "@example/client", version: "release-1"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := (Generator{}).Generate(&ir.Document{ContractVersion: test.version}, generator.Options{PackageName: test.packageName})
-			if err == nil {
-				t.Fatal("Generate succeeded")
-			}
-		})
+func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
+	artifacts, err := SourceArtifacts(&ir.Document{ContractVersion: "release-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 6 {
+		t.Fatalf("source artifact count = %d, want 6", len(artifacts))
 	}
 }

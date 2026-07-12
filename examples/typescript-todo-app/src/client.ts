@@ -1,4 +1,4 @@
-import { createClient } from "@example/todo-sdk";
+import { createClient } from "./generated/todo-sdk/index.js";
 
 const baseURL = process.env.TODO_API_BASE_URL ?? "http://127.0.0.1:18787/v1";
 const api = createClient({ baseURL });

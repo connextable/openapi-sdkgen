@@ -65,5 +65,8 @@ ts-test:
 example-todo:
     ./scripts/agent/example-todo
 
+example-advanced:
+    ./scripts/agent/example-advanced
+
 release-check:
     ./scripts/agent/release-check

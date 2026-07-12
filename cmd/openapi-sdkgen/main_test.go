@@ -9,46 +9,41 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
-func TestGenerateWritesSelfContainedTypeScriptPackage(t *testing.T) {
+func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 	directory := t.TempDir()
 	input := filepath.Join(directory, "contract.json")
 	if err := os.WriteFile(input, []byte(minimalDocument), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(directory, "generated-client")
-	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output, "--package-name", "@example/client"}); err != nil {
+	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"package.json", "tsconfig.json", "src/index.ts", "manifest.json", "README.md", "generated/client.ts", "generated/runtime.ts"} {
+	for _, expected := range []string{"index.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/runtime.ts"} {
 		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
 			t.Fatalf("missing %s: %v", expected, err)
 		}
 	}
-	packageJSON, err := os.ReadFile(filepath.Join(output, "package.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(packageJSON), `"name": "@example/client"`) || !strings.Contains(string(packageJSON), `"build": "tsc --project tsconfig.json"`) || strings.Contains(string(packageJSON), `"dependencies"`) {
-		t.Fatalf("package.json = %s", packageJSON)
+	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
+		if _, err := os.Stat(filepath.Join(output, forbidden)); !os.IsNotExist(err) {
+			t.Fatalf("source output unexpectedly contains %s: %v", forbidden, err)
+		}
 	}
 }
 
-func TestGenerateUsesNormalizedOutputDirectoryNameByDefault(t *testing.T) {
+func TestGenerateRejectsRemovedPackageNameFlag(t *testing.T) {
 	directory := t.TempDir()
 	input := filepath.Join(directory, "contract.json")
 	if err := os.WriteFile(input, []byte(minimalDocument), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	output := filepath.Join(directory, "Example API SDK")
-	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
-		t.Fatal(err)
+	output := filepath.Join(directory, "generated")
+	err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output, "--package-name", "@example/client"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("error = %v", err)
 	}
-	packageJSON, err := os.ReadFile(filepath.Join(output, "package.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(packageJSON), `"name": "example-api-sdk"`) {
-		t.Fatalf("package.json = %s", packageJSON)
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("unexpected output stat error = %v", err)
 	}
 }
 
@@ -81,18 +76,6 @@ func TestRunRejectsInvalidArgumentsWithoutCreatingOutput(t *testing.T) {
 				t.Fatalf("unexpected output stat error = %v", err)
 			}
 		})
-	}
-}
-
-func TestDefaultPackageNameNormalizesAndFallsBack(t *testing.T) {
-	for input, want := range map[string]string{
-		"Example API SDK": "example-api-sdk",
-		"💥":               "openapi-sdk",
-		"._client_.":      "client",
-	} {
-		if value := defaultPackageName(input); value != want {
-			t.Errorf("defaultPackageName(%q) = %q, want %q", input, value, want)
-		}
 	}
 }
 

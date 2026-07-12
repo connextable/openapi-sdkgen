@@ -1,6 +1,6 @@
 # openapi-sdkgen
 
-`openapi-sdkgen` compiles an OpenAPI 3.2 document into a typed SDK package.
+`openapi-sdkgen` compiles an OpenAPI 3.2 document into typed TypeScript source for your application.
 
 The primary distribution is a precompiled CLI binary published through GitHub Releases, so TypeScript consumers do not need Go installed. Go users can also install the command from the module:
 
@@ -8,32 +8,38 @@ The primary distribution is a precompiled CLI binary published through GitHub Re
 go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
 ```
 
-## Generate a TypeScript package
+## Generate TypeScript source
 
 ```sh
 openapi-sdkgen generate \
   --input ./openapi.json \
   --target typescript \
-  --output ./sdk \
-  --package-name @example/api-sdk
+  --output ./src/generated/api
 ```
 
-`--package-name` is optional; the output directory name becomes the package name when it is omitted.
+Import it from application source with a relative ESM path:
+
+```ts
+import { createClient } from "./generated/api/index.js";
+```
 
 The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
 
-The output is an independent package source tree. It includes the generated client, public entrypoint, `package.json`, TypeScript build configuration, README, and contract manifest. It also declares its own `build` script and TypeScript build dependency. Run the emitted package's package-manager install and `build` command, then publish that package; `test/typescript` is never part of the package to publish.
+The output contains only generated `.ts` source (`index.ts` and `generated/*.ts`). It has no `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and lint/format suppression directives so application tooling can ignore it safely.
 
-Generate separate packages by invoking the command once per OpenAPI document and output directory.
+Generate separate source trees by invoking the command once per OpenAPI document and output directory.
 
 ## Runnable TypeScript example
 
-[`examples/typescript-todo-app`](examples/typescript-todo-app) reproduces the complete consumer flow without test fixtures or symlinks: it generates `sdk/` from a small Todo OpenAPI document, installs that SDK through `file:./sdk`, builds the app, and calls it over a local HTTP server.
+[`examples/typescript-todo-app`](examples/typescript-todo-app) reproduces the complete consumer flow without test fixtures or symlinks: it generates `src/generated/todo-sdk/` from a small Todo OpenAPI document, builds the app, and calls it over a local HTTP server.
+
+[`examples/typescript-advanced-app`](examples/typescript-advanced-app) covers pagination, path/query/header/cookie inputs, raw responses, typed errors, binary bodies, authorization, and timeouts against a local HTTP server.
 
 For repository validation, run:
 
 ```sh
 just agent example-todo
+just agent example-advanced
 ```
 
 For normal use, follow the example's [`setup.sh`](examples/typescript-todo-app/setup.sh) and separate server/client commands.
@@ -60,4 +66,4 @@ just agent ts-install
 just agent check
 ```
 
-`just agent conformance` builds the CLI, generates a generic fixture package into an ignored directory, compiles it, typechecks consumer tests, and runs its runtime tests. The test fixture proves generated package behavior without turning the TypeScript harness into a deployment source.
+`just agent conformance` builds the CLI, generates a generic source fixture into an ignored directory, typechecks consumer tests, and runs its runtime tests. The fixture is imported with the same relative path pattern used by an application.

@@ -6,7 +6,7 @@ export default defineConfig({
   },
   coverage: {
     provider: "v8",
-    include: ["fixtures/generated/client/dist/generated/**/*.js"],
+    include: ["fixtures/generated/client/generated/**/*.ts"],
     reporter: ["text", "json-summary", "lcov"],
     reportsDirectory: "../../.tmp/coverage/typescript",
     thresholds: {

@@ -1,0 +1,71 @@
+{
+  "openapi": "3.2.0",
+  "info": { "title": "Widget API", "version": "1.0.0" },
+  "servers": [{ "url": "/v1" }],
+  "paths": {
+    "/widgets": {
+      "get": {
+        "operationId": "listWidgets",
+        "security": [],
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Widget page.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WidgetPage" } } } } },
+        "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-pagination": "cursor", "x-sdk-visibility": "public"
+      },
+      "post": {
+        "operationId": "createWidget",
+        "security": [],
+        "parameters": [
+          { "name": "tag", "in": "query", "schema": { "type": "array", "items": { "type": "string" } } },
+          { "name": "X-Trace-Id", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "session", "in": "cookie", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WidgetCreatePayload" } } } },
+        "responses": {
+          "201": { "description": "Created.", "headers": { "X-Request-Id": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } } },
+          "422": { "description": "Invalid.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidationFailedError" } } } }
+        },
+        "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"
+      }
+    },
+    "/customers/{customerID}/widgets/{widgetID}": {
+      "get": {
+        "operationId": "getCustomerWidget",
+        "security": [],
+        "parameters": [
+          { "name": "customerID", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "widgetID", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Widget.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } } } },
+        "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"
+      }
+    },
+    "/uploads": {
+      "post": {
+        "operationId": "uploadWidget",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": { "204": { "description": "Uploaded." } },
+        "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"
+      }
+    },
+    "/slow": {
+      "get": {
+        "operationId": "getSlow",
+        "security": [],
+        "responses": { "200": { "description": "Eventually ready.", "content": { "application/json": { "schema": { "type": "object", "required": ["ready"], "properties": { "ready": { "type": "boolean" } } } } } } },
+        "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "string" }, "name": { "type": "string" } } },
+      "WidgetCreatePayload": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } },
+      "WidgetPage": { "type": "object", "required": ["items", "pagination"], "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Widget" } }, "pagination": { "type": "object", "properties": { "nextCursor": { "type": ["string", "null"] } } } } },
+      "ValidationFailedError": { "type": "object", "x-error-category": "validation", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message"], "properties": { "code": { "const": "validation_failed" }, "message": { "type": "string" }, "details": { "type": "object", "properties": { "field": { "type": "string" } } } } } } }
+    }
+  }
+}

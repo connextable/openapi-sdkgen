@@ -9,12 +9,12 @@ import {
   getErrorCode,
   isAPIError,
   isErrorCode,
-} from "../fixtures/generated/client/dist/generated/runtime.js";
+} from "../fixtures/generated/client/generated/runtime.js";
 import type {
   OperationDefinition,
   RawResponse,
   RequestFunction,
-} from "../fixtures/generated/client/dist/generated/runtime.js";
+} from "../fixtures/generated/client/generated/runtime.js";
 
 const operation = (overrides: Partial<OperationDefinition> = {}): OperationDefinition => ({
   operationID: "runtimeTest",

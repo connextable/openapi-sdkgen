@@ -8,4 +8,7 @@ test/typescript/coverage/
 test/typescript/fixtures/generated/
 examples/typescript-todo-app/node_modules/
 examples/typescript-todo-app/dist/
-examples/typescript-todo-app/sdk/
+examples/typescript-todo-app/src/generated/
+examples/typescript-advanced-app/node_modules/
+examples/typescript-advanced-app/dist/
+examples/typescript-advanced-app/src/generated/

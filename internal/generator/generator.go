@@ -15,11 +15,12 @@ type Artifact struct {
 }
 
 // Options are shared target options selected by the CLI.
-type Options struct {
-	PackageName string
-}
+//
+// It is intentionally empty today: TypeScript emits source files that belong
+// directly in the consumer application rather than an installable package.
+type Options struct{}
 
-// Target emits a client package from the language-neutral OpenAPI IR.
+// Target emits client source files from the language-neutral OpenAPI IR.
 type Target interface {
 	Name() string
 	Generate(*ir.Document, Options) ([]Artifact, error)
