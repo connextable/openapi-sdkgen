@@ -25,7 +25,7 @@ import { createClient } from "./generated/api/index.js";
 
 The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
 
-The output contains only generated `.ts` source (`index.ts` and `generated/*.ts`). It has no `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and lint/format suppression directives so application tooling can ignore it safely.
+The output contains only generated `.ts` source (`index.ts` and `generated/*.ts`). It has no `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and supported lint suppression directives. Prettier has no file-level in-source ignore directive, so add the generated directory (for example `src/generated/**`) to your application's `.prettierignore`.
 
 Generate separate source trees by invoking the command once per OpenAPI document and output directory.
 

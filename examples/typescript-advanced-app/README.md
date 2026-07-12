@@ -2,6 +2,8 @@
 
 Full source-mode consumer example. It generates the client into `src/generated/widget-sdk/`, then the app compiles and imports it with a relative path. No generated package install or build step.
 
+Install the `openapi-sdkgen` CLI, Node 22 or newer, and pnpm 10 or newer. The example calls `openapi-sdkgen` from `PATH`, as a normal application repository would.
+
 ## Covered behavior
 
 - Client authorization

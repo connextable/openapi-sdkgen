@@ -12,4 +12,6 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh
 "$ROOT/scripts/agent/conformance"
 "$ROOT/scripts/agent/coverage"
 "$ROOT/scripts/agent/release-check"
+"$ROOT/scripts/agent/example-todo"
+"$ROOT/scripts/agent/example-advanced"
 agent_note "ok check"
