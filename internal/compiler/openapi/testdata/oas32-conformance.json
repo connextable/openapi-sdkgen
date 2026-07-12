@@ -1,0 +1,320 @@
+{
+  "openapi": "3.2.0",
+  "$self": "https://example.test/openapi.json",
+  "info": {
+    "title": "OpenAPI 3.2 conformance fixture",
+    "version": "1.2.3",
+    "summary": "Exercises 3.2 surface preservation"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "https://{region}.example.test/v1",
+      "description": "Regional API",
+      "variables": {
+        "region": {
+          "default": "us",
+          "enum": ["us", "eu"]
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "oauth": ["items:read"]
+    }
+  ],
+  "tags": [
+    {
+      "name": "items",
+      "summary": "Item operations",
+      "description": "Reads and queries items",
+      "kind": "nav",
+      "externalDocs": {
+        "url": "https://example.test/docs/items"
+      }
+    }
+  ],
+  "externalDocs": {
+    "description": "API guide",
+    "url": "https://example.test/docs"
+  },
+  "paths": {
+    "/items/{itemId}": {
+      "summary": "One item",
+      "description": "Path-level metadata must survive IR construction",
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        }
+      ],
+      "servers": [
+        {
+          "url": "/v1"
+        }
+      ],
+      "x-path-extension": {
+        "enabled": true
+      },
+      "get": {
+        "operationId": "getItem",
+        "summary": "Get an item",
+        "tags": ["items"],
+        "externalDocs": {
+          "url": "https://example.test/docs/items/get"
+        },
+        "responses": {
+          "200": {
+            "description": "Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          }
+        },
+        "callbacks": {
+          "changed": {
+            "{$request.query.callbackURL}": {
+              "post": {
+                "operationId": "itemChangedCallback",
+                "requestBody": {
+                  "required": true,
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/Item"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "204": {
+                    "description": "Accepted"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-operation-extension": ["alpha", 2, null],
+        "x-envelope": "data",
+        "x-concurrency": "etag",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public"
+      },
+      "query": {
+        "operationId": "queryItem",
+        "summary": "Query an item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query result"
+          }
+        },
+        "x-envelope": "data",
+        "x-concurrency": "none",
+        "x-idempotency": "unsupported",
+        "x-sdk-visibility": "public"
+      },
+      "additionalOperations": {
+        "m-SEARCH": {
+          "operationId": "searchItemByCustomMethod",
+          "summary": "Search with a case-sensitive extension method",
+          "responses": {
+            "200": {
+              "description": "Search result"
+            }
+          },
+          "x-envelope": "data",
+          "x-concurrency": "none",
+          "x-idempotency": "unsupported",
+          "x-sdk-visibility": "public"
+        },
+        "PURGE": {
+          "operationId": "purgeItem",
+          "summary": "Purge an item",
+          "responses": {
+            "204": {
+              "description": "Purged"
+            }
+          },
+          "x-envelope": "none",
+          "x-concurrency": "none",
+          "x-idempotency": "required",
+          "x-sdk-visibility": "internal"
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "itemCreated": {
+      "post": {
+        "operationId": "itemCreatedWebhook",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ItemEvent"
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Item": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.test/schemas/item",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "coordinates": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false
+          }
+        },
+        "required": ["id"],
+        "dependentRequired": {
+          "id": ["coordinates"]
+        },
+        "unevaluatedProperties": false,
+        "exampleVocabularyKeyword": {
+          "mode": "lossless"
+        },
+        "x-schema-extension": {
+          "owner": "sdkgen"
+        }
+      },
+      "ItemQuery": {
+        "type": "object",
+        "properties": {
+          "term": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "responses": {
+      "Problem": {
+        "description": "Problem response"
+      }
+    },
+    "parameters": {
+      "ItemID": {
+        "name": "itemId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "examples": {
+      "Item": {
+        "value": {
+          "id": "item_1"
+        }
+      }
+    },
+    "requestBodies": {
+      "ItemEvent": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Item"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "RequestID": {
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://example.test/oauth/token",
+            "scopes": {
+              "items:read": "Read items"
+            }
+          }
+        }
+      }
+    },
+    "links": {
+      "Item": {
+        "operationId": "getItem",
+        "parameters": {
+          "itemId": "$response.body#/id"
+        }
+      }
+    },
+    "callbacks": {
+      "ItemChanged": {
+        "{$request.query.callbackURL}": {
+          "post": {
+            "operationId": "componentItemChangedCallback",
+            "responses": {
+              "204": {
+                "description": "Accepted"
+              }
+            }
+          }
+        }
+      }
+    },
+    "pathItems": {
+      "ItemLookup": {
+        "get": {
+          "operationId": "componentItemLookup",
+          "responses": {
+            "200": {
+              "description": "Found"
+            }
+          }
+        }
+      }
+    },
+    "mediaTypes": {
+      "ItemStream": {
+        "itemSchema": {
+          "$ref": "#/components/schemas/Item"
+        }
+      }
+    }
+  },
+  "x-root-extension": {
+    "nested": {
+      "count": 9007199254740993
+    }
+  }
+}
