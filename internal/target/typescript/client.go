@@ -355,7 +355,7 @@ func emitRawCallSignature(output *bytes.Buffer, inputType, optionsType, resultTy
 		output.WriteString("   * @param input Generated operation input.\n")
 	}
 	output.WriteString("   * @param options Per-request transport options.\n")
-	fmt.Fprintf(output, "   * @returns %s\n", jsDocTypeReference(resultType))
+	fmt.Fprintf(output, "   * @returns Decoded response and HTTP metadata as %s.\n", jsDocTypeReference(resultType))
 	output.WriteString("   */\n")
 	if inputType == "never" {
 		fmt.Fprintf(output, "  raw(options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
@@ -376,7 +376,7 @@ func emitCallSignature(output *bytes.Buffer, inputType, optionsType, resultType 
 		output.WriteString("   * @param input Generated operation input.\n")
 	}
 	output.WriteString("   * @param options Per-request transport options.\n")
-	fmt.Fprintf(output, "   * @returns %s\n", jsDocTypeReference(resultType))
+	fmt.Fprintf(output, "   * @returns Decoded response body as %s.\n", jsDocTypeReference(resultType))
 	output.WriteString("   */\n")
 	if inputType == "never" {
 		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
@@ -1041,72 +1041,6 @@ func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, ope
 	return nil
 }
 
-func ergonomicGroups(document *ir.Document, manifest Manifest) (map[string]map[string]ManifestOperation, error) {
-	groups := make(map[string]map[string]ManifestOperation)
-	for _, operation := range manifest.Operations {
-		if operation.Visibility != "public" || len(operation.PathParameterOrder) > 0 || len(operation.ResourceSegments) != 1 {
-			continue
-		}
-		irOperation := findOperation(document, operation.OperationID)
-		terminal, err := terminalName(irOperation, strings.Split(strings.Trim(irOperation.Path, "/"), "/"))
-		if err != nil {
-			return nil, err
-		}
-		group := operation.ResourceSegments[0]
-		if groups[group] == nil {
-			groups[group] = make(map[string]ManifestOperation)
-		}
-		if _, exists := groups[group][terminal]; exists {
-			return nil, fmt.Errorf("ergonomic alias collision at %s.%s", group, terminal)
-		}
-		groups[group][terminal] = operation
-	}
-	return groups, nil
-}
-
-type ergonomicInstanceGroup struct {
-	Parameter  operationParameter
-	Operations map[string]ManifestOperation
-}
-
-func ergonomicInstanceGroups(document *ir.Document, manifest Manifest) (map[string]ergonomicInstanceGroup, error) {
-	result := make(map[string]ergonomicInstanceGroup)
-	for _, operation := range manifest.Operations {
-		parts := strings.Split(strings.Trim(operation.Path, "/"), "/")
-		irOperation := findOperation(document, operation.OperationID)
-		if operation.Visibility != "public" || len(operation.PathParameterOrder) != 1 || !isSimpleInstancePath(irOperation, parts) {
-			continue
-		}
-		groupName, err := naming.Property(parts[0])
-		if err != nil {
-			return nil, err
-		}
-		parameters, err := parametersIn(document, irOperation, "path")
-		if err != nil {
-			return nil, err
-		}
-		if len(parameters) != 1 {
-			return nil, fmt.Errorf("ergonomic instance %s must have one path parameter", operation.OperationID)
-		}
-		terminal, err := terminalName(irOperation, parts)
-		if err != nil {
-			return nil, err
-		}
-		group := result[groupName]
-		if group.Operations == nil {
-			group = ergonomicInstanceGroup{Parameter: parameters[0], Operations: make(map[string]ManifestOperation)}
-		} else if group.Parameter.Name != parameters[0].Name {
-			return nil, fmt.Errorf("ergonomic instance %s path parameter conflicts with %s", operation.OperationID, group.Parameter.Name)
-		}
-		if _, exists := group.Operations[terminal]; exists {
-			return nil, fmt.Errorf("ergonomic alias collision at %s(%s).%s", groupName, group.Parameter.Property, terminal)
-		}
-		group.Operations[terminal] = operation
-		result[groupName] = group
-	}
-	return result, nil
-}
-
 func findOperation(document *ir.Document, operationID string) ir.Operation {
 	for _, operation := range document.Operations {
 		if operation.OperationID == operationID {
@@ -1114,31 +1048,6 @@ func findOperation(document *ir.Document, operationID string) ir.Operation {
 		}
 	}
 	return ir.Operation{OperationID: operationID}
-}
-
-func sortedGroupNames(groups map[string]map[string]ManifestOperation) []string {
-	result := make([]string, 0, len(groups))
-	for name := range groups {
-		result = append(result, name)
-	}
-	sort.Strings(result)
-	return result
-}
-
-func sortedErgonomicGroupNames(groups map[string]map[string]ManifestOperation, instances map[string]ergonomicInstanceGroup) []string {
-	seen := make(map[string]bool)
-	for name := range groups {
-		seen[name] = true
-	}
-	for name := range instances {
-		seen[name] = true
-	}
-	result := make([]string, 0, len(seen))
-	for name := range seen {
-		result = append(result, name)
-	}
-	sort.Strings(result)
-	return result
 }
 
 func sortedManifestOperationNames(operations map[string]ManifestOperation) []string {
@@ -1174,42 +1083,6 @@ func paginationFunctionType(operation ManifestOperation, itemType string) string
 	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ">, options" + optional + ": " + operationName + "Options) => AsyncIterable<" + itemType + ">"
 }
 
-func paginatedGroupOperation(operations map[string]ManifestOperation) (ManifestOperation, bool) {
-	var result ManifestOperation
-	found := false
-	for _, operation := range operations {
-		if operation.Pagination == "" {
-			continue
-		}
-		if found {
-			return ManifestOperation{}, false
-		}
-		result = operation
-		found = true
-	}
-	return result, found
-}
-
-func isGroupOperation(groups map[string]map[string]ManifestOperation, operationID string) bool {
-	for _, operations := range groups {
-		for _, operation := range operations {
-			if operation.OperationID == operationID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasGroupPagination(groups map[string]map[string]ManifestOperation) bool {
-	for _, operations := range groups {
-		if _, ok := paginatedGroupOperation(operations); ok {
-			return true
-		}
-	}
-	return false
-}
-
 func hasVisibleInputSchemas(document *ir.Document) bool {
 	for _, operation := range document.Operations {
 		if operation.Visibility != "hidden" {
@@ -1241,18 +1114,6 @@ func hasVisibleResponseBodies(document *ir.Document) bool {
 		}
 	}
 	return false
-}
-
-func qualifyType(value string) string {
-	switch value {
-	case "void", "string", "number", "boolean", "unknown", "null":
-		return value
-	default:
-		if strings.ContainsAny(value, " {|&<") {
-			return value
-		}
-		return "Contract." + value
-	}
 }
 
 func operationDefinition(document *ir.Document, irOperation ir.Operation, operation ManifestOperation) (string, error) {

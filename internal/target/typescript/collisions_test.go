@@ -64,6 +64,22 @@ func TestOperationParametersRejectCollidingPropertyAliases(t *testing.T) {
 	}
 }
 
+func TestOperationParametersFollowURIPathParameterOrder(t *testing.T) {
+	parameters, err := operationParameters(&ir.Document{}, ir.Operation{
+		PathParameterOrder: []string{"customerID", "widgetID"},
+		Raw: map[string]any{"parameters": []any{
+			map[string]any{"name": "widgetID", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "customerID", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parameters) != 2 || parameters[0].Name != "customerID" || parameters[1].Name != "widgetID" {
+		t.Fatalf("path parameters = %#v", parameters)
+	}
+}
+
 func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 	value, err := requestBodyType(&ir.Document{}, map[string]any{"content": map[string]any{
 		"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},

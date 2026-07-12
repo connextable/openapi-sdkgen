@@ -13,4 +13,39 @@ agent_run "install generated fixture" ts_pnpm --dir "$fixture" install
 agent_run "build generated fixture" ts_pnpm --dir "$fixture" run build
 mkdir -p "$TYPESCRIPT_ROOT/node_modules/@example"
 ln -sfn "$fixture" "$TYPESCRIPT_ROOT/node_modules/@example/conformance-client"
-agent_run "pack generated fixture" ts_pnpm --dir "$fixture" pack --dry-run
+archive_dir="$ROOT/.tmp/conformance-package"
+consumer_dir="$ROOT/.tmp/conformance-consumer"
+rm -rf "$archive_dir" "$consumer_dir"
+mkdir -p "$archive_dir" "$consumer_dir/node_modules/@example"
+agent_run "pack generated fixture" ts_pnpm --dir "$fixture" pack --pack-destination "$archive_dir"
+archive="$(find "$archive_dir" -maxdepth 1 -name '*.tgz' -type f -print -quit)"
+if [[ -z "$archive" ]]; then
+  echo "failed packed fixture archive was not created" >&2
+  exit 1
+fi
+verify_packed_fixture() {
+  local contents
+  contents="$(tar -tzf "$archive")"
+  for required in package/package.json package/README.md package/manifest.json package/dist/src/index.js package/dist/src/index.d.ts package/dist/generated/runtime.js package/dist/generated/runtime.d.ts; do
+    if ! grep -Fqx "$required" <<<"$contents"; then
+      echo "packed fixture missing $required" >&2
+      return 1
+    fi
+  done
+  for forbidden in package/generated package/src package/tsconfig.json package/node_modules; do
+    if grep -Fq "$forbidden" <<<"$contents"; then
+      echo "packed fixture unexpectedly includes $forbidden" >&2
+      return 1
+    fi
+  done
+}
+agent_run "verify packed fixture contents" verify_packed_fixture
+tar -xzf "$archive" -C "$consumer_dir/node_modules/@example"
+mv "$consumer_dir/node_modules/@example/package" "$consumer_dir/node_modules/@example/conformance-client"
+import_packed_fixture() {
+  (
+    cd "$consumer_dir"
+    fnm exec --using "$NODE_VERSION" node --input-type=module --eval 'import { createClient } from "@example/conformance-client"; if (typeof createClient !== "function") process.exit(1)'
+  )
+}
+agent_run "import packed fixture" import_packed_fixture

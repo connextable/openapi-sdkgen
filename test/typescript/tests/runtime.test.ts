@@ -6,6 +6,7 @@ import {
   bindPathOperation,
   createPaginator,
   createRequest,
+  getErrorCode,
   isAPIError,
   isErrorCode,
 } from "../fixtures/generated/client/dist/generated/runtime.js";
@@ -386,6 +387,305 @@ describe("generated runtime", () => {
         { query: { limit: 25, sort: "createdAt" } },
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("serializes OpenAPI style variants for paths, query objects, headers, and cookies", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        expect(url.pathname).toBe("/styles/.one.two/;first=1;second=two");
+        expect(url.searchParams.get("filter")).toBe("first,1,second,two");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("x-context")).toBe('{"scope":"all"}');
+        expect(headers.get("cookie")).toBe("flags=one%2Ctwo");
+        return jsonResponse({ ok: true });
+      },
+    });
+    await expect(
+      request(
+        operation({
+          path: "/styles/{label}/{matrix}",
+          parameters: [
+            { location: "path", name: "label", property: "label", style: "label", explode: true },
+            {
+              location: "path",
+              name: "matrix",
+              property: "matrix",
+              style: "matrix",
+              explode: true,
+            },
+            {
+              location: "query",
+              name: "filter",
+              property: "filter",
+              style: "form",
+              explode: false,
+            },
+            {
+              location: "header",
+              name: "X-Context",
+              property: "context",
+              style: "simple",
+              explode: false,
+              contentType: "application/json",
+            },
+            { location: "cookie", name: "flags", property: "flags", style: "form", explode: false },
+          ],
+        }),
+        {
+          path: { label: ["one", "two"], matrix: { first: 1, second: "two" } },
+          query: { filter: { first: 1, second: "two" } },
+          headerParams: { context: { scope: "all" } },
+          cookieParams: { flags: ["one", "two"] },
+        },
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("selects and transforms declared multi-representation request bodies", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
+        expect(init?.body).toBe('{"wire_name":"widget"}');
+        return new Response(null, { status: 204 });
+      },
+    });
+    await expect(
+      request(
+        operation({
+          path: "/multi-body",
+          requestBodies: [
+            {
+              contentType: "application/json",
+              schema: { properties: { wire_name: { property: "displayName", schema: {} } } },
+            },
+            { contentType: "text/plain", schema: {} },
+          ],
+          inputSchemas: {},
+        }),
+        { body: { contentType: "application/json", value: { displayName: "widget" } } },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("applies reference, tuple, and composed schemas to request and response values", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        expect(init?.body).toBe('[{"wire_name":"request"},{"wire_name":"extra"}]');
+        return jsonResponse([{ wire_name: "response" }, { wire_name: "extra-response" }]);
+      },
+    });
+    const itemSchema = { properties: { wire_name: { property: "displayName", schema: {} } } };
+    await expect(
+      request<Array<{ displayName: string }>>(
+        operation({
+          path: "/tuple",
+          requestBodies: [{ contentType: "application/json", schema: { reference: "Tuple" } }],
+          responses: [
+            { status: "200", contentType: "application/json", schema: { reference: "Tuple" } },
+          ],
+          inputSchemas: { Tuple: { prefixItems: [itemSchema], items: itemSchema } },
+          outputSchemas: { Tuple: { prefixItems: [itemSchema], items: itemSchema } },
+        }),
+        { body: [{ displayName: "request" }, { displayName: "extra" }] },
+      ),
+    ).resolves.toEqual([{ displayName: "response" }, { displayName: "extra-response" }]);
+  });
+
+  it("applies every declared composition branch to wire-name transforms", async () => {
+    const composed = {
+      allOf: [{ properties: { wire_first: { property: "first", schema: {} } } }],
+      oneOf: [{ properties: { wire_second: { property: "second", schema: {} } } }],
+      anyOf: [{ properties: { wire_third: { property: "third", schema: {} } } }],
+    };
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        expect(init?.body).toBe('{"wire_first":"one","wire_second":"two","wire_third":"three"}');
+        return jsonResponse({
+          wire_first: "response-one",
+          wire_second: "response-two",
+          wire_third: "response-three",
+        });
+      },
+    });
+    await expect(
+      request<{ first: string; second: string; third: string }>(
+        operation({
+          path: "/composed",
+          requestBodies: [{ contentType: "application/json", schema: composed }],
+          responses: [{ status: "2XX", contentType: "application/json", schema: composed }],
+          inputSchemas: {},
+          outputSchemas: {},
+        }),
+        { body: { first: "one", second: "two", third: "three" } },
+      ),
+    ).resolves.toEqual({
+      first: "response-one",
+      second: "response-two",
+      third: "response-three",
+    });
+  });
+
+  it("times out when a fetch implementation ignores its AbortSignal", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = createRequest({
+        baseURL: "https://api.example.test",
+        fetch: async () => new Promise<Response>(() => undefined),
+      });
+      const pending = request(operation({ path: "/timeout" }), undefined, { timeoutMS: 5 });
+      const result = pending.catch((cause: unknown) => cause);
+      await vi.advanceTimersByTimeAsync(5);
+      const error = await result;
+      expect(isErrorCode(error, TransportErrorCode.REQUEST_TIMEOUT)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("decodes documented text and JSON media types and preserves empty raw responses", async () => {
+    const text = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () =>
+        new Response("ready", { status: 200, headers: { "content-type": "text/plain" } }),
+    });
+    await expect(text<string>(operation({ path: "/text" }))).resolves.toBe("ready");
+
+    const problem = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () =>
+        new Response('{"title":"invalid"}', {
+          status: 200,
+          headers: { "content-type": "application/problem+json" },
+        }),
+    });
+    await expect(problem<{ title: string }>(operation({ path: "/problem" }))).resolves.toEqual({
+      title: "invalid",
+    });
+
+    const empty = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () => new Response(null, { status: 204 }),
+    });
+    await expect(empty.raw(operation({ path: "/empty" }))).resolves.toMatchObject({
+      status: 204,
+      data: undefined,
+    });
+  });
+
+  it("returns binary response streams with raw response metadata", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () =>
+        new Response(new Uint8Array([4, 5, 6]), {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        }),
+    });
+    const raw = await request.raw<ReadableStream<Uint8Array>>(operation({ path: "/binary" }));
+    expect(raw.contentType).toBe("application/octet-stream");
+    expect(raw.data).toBeInstanceOf(ReadableStream);
+    expect([...new Uint8Array(await new Response(raw.data).arrayBuffer())]).toEqual([4, 5, 6]);
+  });
+
+  it("stops offset pagination at zero limit and leaves caller input unchanged", async () => {
+    const calls: Array<{ query: { offset?: number; limit?: number } }> = [];
+    const paginate = createPaginator<
+      string,
+      { query: { offset?: number; limit?: number } },
+      unknown
+    >(async (input) => {
+      calls.push(input);
+      return { items: ["first"], pagination: { offset: 0, limit: 0, total: 100 } };
+    }, "offset");
+    const input = { query: { offset: 0, limit: 0 } };
+    await expect(collect(paginate(input))).resolves.toEqual(["first"]);
+    expect(calls).toEqual([{ query: { offset: 0, limit: 0 } }]);
+    expect(input).toEqual({ query: { offset: 0, limit: 0 } });
+  });
+
+  it("stops pagination after an empty page returned through meta pagination", async () => {
+    const calls: unknown[] = [];
+    const paginate = createPaginator<
+      string,
+      { query: { offset?: number; limit?: number } },
+      unknown
+    >(async (input) => {
+      calls.push(input);
+      return { items: [], meta: { pagination: { offset: 10, limit: 5 } } };
+    }, "offset");
+    await expect(collect(paginate({ query: { offset: 10, limit: 5 } }))).resolves.toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("rejects invalid base URLs and keeps plain errors unclassified", () => {
+    expect(() => createRequest({ baseURL: "/relative" })).toThrow("absolute URL");
+    expect(() => createRequest({ baseURL: "ftp://api.example.test" })).toThrow("http(s)");
+    expect(getErrorCode(new Error("plain"))).toBeUndefined();
+  });
+
+  it("uses operation server overrides and request-level transport options", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test/v1",
+      credentials: "include",
+      headers: { "x-client-version": "one" },
+      fetch: async (input, init) => {
+        expect(String(input)).toBe("https://alternate.example.test/v2/health");
+        expect(init?.credentials).toBe("omit");
+        expect(new Headers(init?.headers).get("x-client-version")).toBe("one");
+        return jsonResponse({ ok: true });
+      },
+    });
+    await expect(
+      request(
+        operation({
+          path: "health",
+          serverURL: "https://alternate.example.test/v2/",
+        }),
+        undefined,
+        { credentials: "omit" },
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("uses global fetch only when no client transport is supplied", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const request = createRequest({ baseURL: "https://api.example.test" });
+      await expect(request(operation({ path: "/global" }))).resolves.toEqual({ ok: true });
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps structured server error details and fields", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async () =>
+        jsonResponse(
+          {
+            error: {
+              code: "invalid",
+              message: "bad input",
+              details: { reason: "name" },
+              fields: { name: "required" },
+            },
+          },
+          422,
+        ),
+    });
+    const error = await request(operation({ path: "/invalid" })).catch((cause: unknown) => cause);
+    expect(isAPIError(error)).toBe(true);
+    if (!isAPIError(error)) throw new Error("expected API error");
+    expect(error.code).toBe("invalid");
+    expect(error.details).toEqual({ reason: "name" });
+    expect(error.fields).toEqual({ name: "required" });
   });
 
   it("maps additional-properties values on both request and response", async () => {

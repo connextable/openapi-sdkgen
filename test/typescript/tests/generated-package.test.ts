@@ -7,6 +7,7 @@ import {
   createClient,
   getRequestID,
   isAPIError,
+  isValidationError,
   isValidationFailedError,
 } from "@example/conformance-client";
 import type { UploadWidgetBodyInput } from "@example/conformance-client";
@@ -62,6 +63,29 @@ describe("generated TypeScript package", () => {
     });
   });
 
+  it("exposes raw responses through the generated operation call", async () => {
+    const api = createClient({
+      baseURL: "https://api.example.test/api",
+      fetch: async () =>
+        new Response('{"data":{"id":"widget-1","name":"raw"}}', {
+          status: 201,
+          headers: { "content-type": "application/json", "x-request-id": "raw-request" },
+        }),
+    });
+    await expect(
+      api.widgets.create.raw({
+        query: {},
+        headerParams: { xTraceID: "trace-raw" },
+        body: { name: "raw" },
+      }),
+    ).resolves.toMatchObject({
+      status: 201,
+      contentType: "application/json",
+      data: { id: "widget-1", name: "raw" },
+      request: { id: "raw-request" },
+    });
+  });
+
   it("exports generated error guards with documented error details", async () => {
     const api = createClient({
       baseURL: "https://api.example.test/api",
@@ -79,6 +103,7 @@ describe("generated TypeScript package", () => {
       .create({ query: {}, headerParams: { xTraceID: "trace-2" }, body: { name: "invalid" } })
       .catch((cause: unknown) => cause);
     expect(isValidationFailedError(error)).toBe(true);
+    expect(isValidationError(error)).toBe(true);
     expect(getRequestID(error)).toBe("request-error");
     if (!isValidationFailedError(error)) throw new Error("expected validation error");
     expect(error.details).toEqual({ field: "name" });

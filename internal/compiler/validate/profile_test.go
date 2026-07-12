@@ -50,6 +50,23 @@ func TestProjectRequiresPathParameters(t *testing.T) {
 	}
 }
 
+func TestProjectResolvesComponentPathParameters(t *testing.T) {
+	document := projectFixture()
+	paths := document.Raw["paths"].(map[string]any)
+	pathItem := paths["/items/{itemID}"].(map[string]any)
+	pathItem["parameters"] = []any{map[string]any{"$ref": "#/components/parameters/ItemID"}}
+	document.Raw["components"] = map[string]any{"parameters": map[string]any{
+		"ItemID": map[string]any{"name": "itemID", "in": "path", "required": true},
+	}}
+	if err := Project(document); err != nil {
+		t.Fatal(err)
+	}
+	document.Raw["components"].(map[string]any)["parameters"].(map[string]any)["ItemID"].(map[string]any)["required"] = false
+	if err := Project(document); err == nil || !strings.Contains(err.Error(), "declared and required") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestProjectRejectsInvalidPaginationAndFilterProfiles(t *testing.T) {
 	document := projectFixture()
 	operation := &document.Operations[0]

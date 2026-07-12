@@ -478,16 +478,6 @@ func methodTerminal(method string) (string, error) {
 	}
 }
 
-func isSimpleInstancePath(operation ir.Operation, parts []string) bool {
-	if len(parts) < 2 || len(parts) > 3 {
-		return false
-	}
-	if strings.HasPrefix(parts[0], "{") || !strings.HasPrefix(parts[1], "{") || !strings.HasSuffix(parts[1], "}") {
-		return false
-	}
-	return len(parts) == 2 || isTerminalAction(operation, parts, 2)
-}
-
 func callInput(operation ir.Operation, inputTypes []string, pathBound bool, pathParameters []string) string {
 	var fields []string
 	for _, inputType := range inputTypes {
