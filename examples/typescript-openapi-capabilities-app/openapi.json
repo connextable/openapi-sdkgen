@@ -1,0 +1,266 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Capability Showcase API",
+    "summary": "A runnable OpenAPI SDK feature tour.",
+    "description": "Used by the TypeScript source-mode capability example.",
+    "version": "1.0.0",
+    "contact": { "name": "SDK Team" },
+    "license": { "name": "MIT", "identifier": "MIT" }
+  },
+  "servers": [{ "url": "/v1", "description": "Local example API." }],
+  "tags": [{ "name": "items", "description": "Item operations." }],
+  "externalDocs": { "url": "https://spec.openapis.org/oas/v3.2.0.html" },
+  "security": [{ "webhookSignature": [] }],
+  "paths": {
+    "/records/{label}/{matrix}": {
+      "get": {
+        "operationId": "inspectRecord",
+        "summary": "Exercise generated parameter serialization.",
+        "security": [],
+        "parameters": [
+          { "name": "label", "in": "path", "required": true, "style": "label", "explode": true, "schema": { "type": "array", "items": { "type": "string" } } },
+          { "name": "matrix", "in": "path", "required": true, "style": "matrix", "explode": true, "schema": { "type": "object", "additionalProperties": { "type": "string" } } },
+          { "$ref": "#/components/parameters/Tags" },
+          { "$ref": "#/components/parameters/Filter" },
+          { "$ref": "#/components/parameters/Spaces" },
+          { "$ref": "#/components/parameters/Pipes" },
+          { "$ref": "#/components/parameters/StructuredQuery" },
+          { "$ref": "#/components/parameters/TraceID" },
+          { "$ref": "#/components/parameters/Session" }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/ItemResponse" } }
+      }
+    },
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "tags": ["items"],
+        "security": [],
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "One cursor page.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemPage" } } }
+          }
+        },
+        "x-pagination": "cursor"
+      },
+      "post": {
+        "operationId": "createItem",
+        "tags": ["items"],
+        "security": [],
+        "requestBody": { "$ref": "#/components/requestBodies/CreateItem" },
+        "callbacks": { "deliveryStatus": { "$ref": "#/components/callbacks/DeliveryStatus" } },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ItemResponse" },
+          "422": {
+            "description": "The item name was invalid.",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ValidationError" } } }
+          },
+          "default": { "description": "An unclassified failure." }
+        }
+      }
+    },
+    "/payloads/form": {
+      "post": {
+        "operationId": "submitForm",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "tag": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Form accepted." } }
+      }
+    },
+    "/payloads/multipart": {
+      "post": {
+        "operationId": "uploadAttachment",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "file": { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Attachment accepted." } }
+      }
+    },
+    "/payloads/text": {
+      "post": {
+        "operationId": "echoText",
+        "security": [],
+        "requestBody": { "required": true, "content": { "text/plain": { "schema": { "type": "string" } } } },
+        "responses": { "200": { "description": "Text echoed.", "content": { "text/plain": { "schema": { "type": "string" } } } } }
+      }
+    },
+    "/payloads/binary": {
+      "post": {
+        "operationId": "echoBinary",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": { "200": { "description": "Binary echoed.", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } } }
+      }
+    },
+    "/verbs": {
+      "get": { "operationId": "getVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "put": { "operationId": "putVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "post": { "operationId": "postVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "delete": { "operationId": "deleteVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "options": { "operationId": "optionsVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "head": { "operationId": "headVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "patch": { "operationId": "patchVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "trace": { "operationId": "traceVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "query": { "operationId": "queryVerb", "security": [], "responses": { "204": { "description": "OK" } } },
+      "additionalOperations": {
+        "PURGE": { "operationId": "purgeVerb", "security": [], "responses": { "204": { "description": "OK" } } }
+      }
+    },
+    "/status": { "$ref": "#/components/pathItems/Status" }
+  },
+  "webhooks": {
+    "itemChanged": {
+      "post": {
+        "operationId": "itemChangedWebhook",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemEvent" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Webhook accepted.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookAccepted" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Item": {
+        "description": "A persisted item with input/output projections.",
+        "type": "object",
+        "required": ["id", "name", "status"],
+        "properties": {
+          "id": { "type": "string", "readOnly": true },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "status": { "$ref": "#/components/schemas/ItemStatus" },
+          "secret": { "type": "string", "writeOnly": true },
+          "callbackURL": { "type": "string", "format": "uri" }
+        }
+      },
+      "ItemStatus": { "type": "string", "enum": ["draft", "published"], "default": "draft" },
+      "ItemPage": {
+        "type": "object",
+        "required": ["items", "pagination"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" }, "minItems": 1 },
+          "pagination": {
+            "type": "object",
+            "required": ["nextCursor"],
+            "properties": { "nextCursor": { "type": ["string", "null"] } }
+          }
+        }
+      },
+      "ItemEvent": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^item-" },
+          "kind": { "const": "changed" },
+          "attempt": { "type": "integer", "minimum": 1, "exclusiveMaximum": 10 },
+          "labels": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "attributes": { "type": "object", "additionalProperties": { "type": "string" }, "maxProperties": 5 }
+        }
+      },
+      "WebhookAccepted": {
+        "type": "object",
+        "required": ["accepted"],
+        "properties": { "accepted": { "type": "string" } }
+      },
+      "ValidationError": {
+        "type": "object",
+        "x-error-category": "validation",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "const": "validation_failed" },
+              "message": { "type": "string" },
+              "details": { "type": "object", "additionalProperties": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Tags": { "name": "tag", "in": "query", "style": "form", "explode": true, "schema": { "type": "array", "items": { "type": "string" } } },
+      "Filter": { "name": "filter", "in": "query", "style": "deepObject", "explode": true, "schema": { "type": "object", "additionalProperties": { "type": "string" } } },
+      "Spaces": { "name": "spaces", "in": "query", "style": "spaceDelimited", "explode": false, "schema": { "type": "array", "items": { "type": "string" } } },
+      "Pipes": { "name": "pipes", "in": "query", "style": "pipeDelimited", "explode": false, "schema": { "type": "array", "items": { "type": "string" } } },
+      "StructuredQuery": { "name": "query", "in": "query", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": { "type": "string" } } } } },
+      "TraceID": { "name": "X-Trace-ID", "in": "header", "required": true, "schema": { "type": "string" } },
+      "Session": { "name": "session", "in": "cookie", "required": true, "schema": { "type": "string" } }
+    },
+    "requestBodies": {
+      "CreateItem": {
+        "description": "Create an item and optionally supply a callback URL.",
+        "required": true,
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+      }
+    },
+    "responses": {
+      "ItemResponse": {
+        "description": "An item response.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } }
+      }
+    },
+    "callbacks": {
+      "DeliveryStatus": {
+        "{$request.body#/callbackURL}": {
+          "post": {
+            "operationId": "deliveryStatusCallback",
+            "requestBody": {
+              "required": true,
+              "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemEvent" } } }
+            },
+            "responses": { "204": { "description": "Callback accepted." } }
+          }
+        }
+      }
+    },
+    "pathItems": {
+      "Status": {
+        "get": { "operationId": "getStatus", "security": [], "responses": { "204": { "description": "Healthy." } } }
+      }
+    },
+    "securitySchemes": {
+      "webhookSignature": { "type": "apiKey", "in": "header", "name": "x-webhook-signature" }
+    }
+  }
+}

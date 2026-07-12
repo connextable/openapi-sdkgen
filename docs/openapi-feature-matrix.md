@@ -38,15 +38,15 @@ Authoritative specifications: [OAS 3.0.4](https://spec.openapis.org/oas/v3.0.4.h
 | Feature | 3.0.x | 3.1.x | 3.2.x | Current | Required SDK result | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | `openapi` minor/patch detection | yes | yes | yes | Generated for SemVer `3.0.x`, `3.1.x`, `3.2.x` lines | detect each supported minor line; reject other minors/majors explicitly | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
-| `info` (`title`, `summary`, `description`, `termsOfService`, `contact`, `license`, `version`) | common; `summary`/license identifier later | yes | yes | Metadata: lossless `openapiDocument` export | generated API metadata/docs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
+| `info` (`title`, `summary`, `description`, `termsOfService`, `contact`, `license`, `version`) | common; `summary`/license identifier later | yes | yes | Metadata: lossless `metadata.js` `openapi.document` export | generated API metadata/docs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | root `servers` and defaults | yes | yes | yes | Generated first fixed URL; variables error | generated server selector + defaults | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | root `paths` | required | optional with other surface | optional with other surface | Generated when present; optional absence preserved | generated operations | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
-| root `webhooks` | no | yes | yes | Error required: feature-path diagnostic | generated webhook handler contracts | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
+| root `webhooks` | no | yes | yes | TypeScript `--with server`: generated handler contracts; otherwise error | generated webhook handler contracts | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | `components` | yes | yes | yes | Generated/metadata with feature-path diagnostics for unsupported semantics | reusable generated declarations/codecs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
-| root `security`, `tags`, `externalDocs` | yes | yes | yes | Security errors; tags/docs exported through metadata | generated auth metadata + docs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
+| root `security`, `tags`, `externalDocs` | yes | yes | yes | Non-empty client security errors; inbound-only TypeScript `--with server` preserves requirement metadata for host authentication; tags/docs export through metadata | generated inbound auth metadata + docs | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
 | `jsonSchemaDialect` | no | yes | yes | Error required: feature-path diagnostic | version/dialect-aware schema lowering | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | `$self` | no | no | yes | Error required: feature-path diagnostic | base URI for references | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
-| `x-*` extensions | yes | yes | yes | Metadata: lossless `openapiDocument` export plus selected project extensions | preserved metadata; documented extensions affect behavior | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
+| `x-*` extensions | yes | yes | yes | Metadata: lossless `metadata.js` `openapi.document` export plus selected project extensions | preserved metadata; documented extensions affect behavior | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 
 ## Reuse, References, and Servers
 
@@ -54,7 +54,7 @@ Authoritative specifications: [OAS 3.0.4](https://spec.openapis.org/oas/v3.0.4.h
 | --- | --- | --- | --- | --- |
 | Local JSON Pointer `$ref` | all | Generated for Path Items, component schemas/responses/parameters/request bodies; Link/security forms error | resolve each supported object context | `internal/compiler/ir/build_test.go::TestBuildResolvesLocalPathsPathItemReferences` |
 | External document `$ref` | all | Generated for contained `CompileFile` references; remote/out-of-root refs error | complete-document resolution under explicit resource policy | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
-| Reference Object summary/description siblings | 3.1+ | Metadata: lossless `openapiDocument` export | preserve generated docs/metadata | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
+| Reference Object summary/description siblings | 3.1+ | Metadata: lossless `metadata.js` `openapi.document` export | preserve generated docs/metadata | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
 | Schema `$id`, `$anchor`, `$dynamicAnchor`, `$dynamicRef` | 3.1+ | Error required: schema feature-path diagnostic | JSON Schema 2020-12 resolution or feature-path error | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
 | `$self` URI and relative references | 3.2 | Error required: schema feature-path diagnostic | 3.2 base URI resolution | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
 | Path Item references | all | Generated local references with sibling merge; external forms error | resolve and merge version-correctly | `internal/compiler/compiler_test.go::TestCompileFileBundlesInDirectoryReferencesForEverySupportedVersionLine` |
@@ -96,27 +96,28 @@ Authoritative specifications: [OAS 3.0.4](https://spec.openapis.org/oas/v3.0.4.h
 | Binary/text/JSON response bodies | all | Generated | typed codecs | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
 | Sequential JSON and binary streams | 3.2 | Error required: feature-path diagnostic | `AsyncIterable`/stream API | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
 | Server-Sent Events | 3.2 | Error required: feature-path diagnostic | typed event stream API | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
-| Callback Object/key expressions | all | Error required: feature-path diagnostic | callback registration/handler contract | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
-| Root Webhook Object | 3.1+ | Error required: feature-path diagnostic | generated inbound handler contract | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
+| Callback Object/key expressions | all | TypeScript `--with server`: host-bound Fetch callback endpoints; otherwise error | callback registration/handler contract | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
+| Root Webhook Object | 3.1+ | TypeScript `--with server`: Fetch router and typed handler; otherwise error | generated inbound handler contract | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | Link Object (`operationRef`/`operationId`, parameters, requestBody, server, runtime expressions) | all | Error required: feature-path diagnostic | follow-up operation helper | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
-| Example Object (`value`, `externalValue`, summary, description) | all | Metadata: lossless `openapiDocument` export | generated metadata/test vectors | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
-| `dataValue`/`serializedValue` examples | 3.1+ | Metadata: lossless `openapiDocument` export | serialization test vectors | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
+| Example Object (`value`, `externalValue`, summary, description) | all | Metadata: lossless `metadata.js` `openapi.document` export | generated metadata/test vectors | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
+| `dataValue`/`serializedValue` examples | 3.1+ | Metadata: lossless `metadata.js` `openapi.document` export | serialization test vectors | `internal/target/typescript/types_test.go::TestOperationOutputTypesIncludeDefaultResponses` |
 
 ## Components, Security, XML, and Metadata
 
 | Feature | Versions | Current | Required SDK result | Evidence |
 | --- | --- | --- | --- | --- |
 | Component schemas/responses/parameters/examples/request bodies/headers | all | Schemas/responses/parameters/request bodies generated; examples metadata; headers error | reusable source declarations/codecs | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
-| Component security schemes/links/callbacks/path items | all | Generated path items; callbacks/links/security error | reusable runtime builders | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
+| Component security schemes/links/path items | all | Generated path items; links/security error | reusable runtime builders | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
+| Component callbacks | all | TypeScript `--with server`: host-bound Fetch callback endpoints; otherwise error | reusable callback endpoints | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
 | Component media types | 3.2 | Error required: feature-path diagnostic | reusable media codec definitions | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
-| API key in header/query/cookie | all | Error required through security scheme diagnostic | typed credential provider | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
-| HTTP basic/bearer/other schemes | all | Error required for schemes; manual `authorization` option remains available | typed credential provider | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
-| OAuth2 flows/scopes and OpenID Connect | all | Error required through security scheme diagnostic | auth configuration metadata/provider hooks | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
+| API key in header/query/cookie | all | Inbound TypeScript server add-on preserves opaque requirement metadata for host auth; client provider remains error | typed credential provider | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
+| HTTP basic/bearer/other schemes | all | Inbound TypeScript server add-on preserves opaque requirement metadata for host auth; client provider remains error | typed credential provider | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
+| OAuth2 flows/scopes and OpenID Connect | all | Inbound TypeScript server add-on preserves opaque requirement metadata for host auth; client provider remains error | auth configuration metadata/provider hooks | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
 | Mutual TLS | 3.1+ | Error required through security scheme diagnostic | transport capability metadata/error for unsupported environment | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 | Security requirement alternatives/optional/operation override | all | Error required for non-empty requirement | auth requirement planner | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 | XML Object (`name`, namespace, prefix, attribute, wrapped) | all | Error required: schema feature-path diagnostic | XML codecs | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 | 3.2 XML nodes/arrays/text/null behavior | 3.2 | Error required: schema feature-path diagnostic | version-aware XML codec | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
-| Tags/contact/license/docs/terms | all | Metadata: lossless `openapiDocument` export | generated API metadata/docs | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
+| Tags/contact/license/docs/terms | all | Metadata: lossless `metadata.js` `openapi.document` export | generated API metadata/docs | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 
 ## Schema Object Keywords
 

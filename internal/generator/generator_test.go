@@ -38,3 +38,33 @@ func TestRegistryRejectsDuplicateAndUnknownTargets(t *testing.T) {
 		t.Fatalf("lookup error = %v", err)
 	}
 }
+
+func TestAddonRegistryResolvesRepeatableAddonsAndRejectsInvalidValues(t *testing.T) {
+	registry, err := NewAddonRegistry(AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil || !options.HasAddon(AddonServer) || len(options.Addons()) != 1 {
+		t.Fatalf("resolve server = %#v, %v", options, err)
+	}
+	for _, values := range [][]string{{"worker"}, {"server", "server"}} {
+		if _, err := registry.Resolve(values); err == nil {
+			t.Fatalf("Resolve(%q) succeeded", values)
+		}
+	}
+}
+
+func TestValidateTargetOptionsRequiresExplicitAddonSupport(t *testing.T) {
+	registry, err := NewAddonRegistry(AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateTargetOptions(testTarget("typescript"), options); err == nil {
+		t.Fatal("target without add-on declaration accepted server")
+	}
+}

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+example="$ROOT/examples/typescript-openapi-capabilities-app"
+api_port="${CAPABILITIES_API_PORT:-18790}"
+webhook_port="${CAPABILITIES_WEBHOOK_PORT:-18791}"
+"$ROOT/scripts/agent/build"
+agent_run "prepare OpenAPI capability example" env SDKGEN_BIN="$ROOT/.tmp/bin/openapi-sdkgen" "$example/setup.sh"
+server_log="$ROOT/.tmp/capabilities-example-server.log"
+CAPABILITIES_API_PORT="$api_port" CAPABILITIES_WEBHOOK_PORT="$webhook_port" node "$example/dist/server.js" >"$server_log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+for _ in {1..20}; do
+  if grep -q "Capability inbound host listening" "$server_log"; then
+    break
+  fi
+  sleep 0.1
+done
+if ! grep -q "Capability API listening" "$server_log" || ! grep -q "Capability inbound host listening" "$server_log"; then
+  cat "$server_log" >&2
+  exit 1
+fi
+CAPABILITIES_API_BASE_URL="http://127.0.0.1:$api_port/v1" \
+CAPABILITIES_WEBHOOK_BASE_URL="http://127.0.0.1:$webhook_port" \
+  agent_run "run OpenAPI capability client" ts_pnpm --dir "$example" run client

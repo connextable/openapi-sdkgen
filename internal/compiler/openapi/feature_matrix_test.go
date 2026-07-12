@@ -19,8 +19,17 @@ type featureManifest struct {
 }
 
 type manifestFeature struct {
-	ID       string   `json:"id"`
-	Versions []string `json:"versions"`
+	ID         string             `json:"id"`
+	Versions   []string           `json:"versions"`
+	State      string             `json:"state"`
+	Evidence   string             `json:"evidence"`
+	Conditions []featureCondition `json:"conditions"`
+}
+
+type featureCondition struct {
+	Target   string   `json:"target"`
+	With     []string `json:"with"`
+	Scope    string   `json:"scope"`
 	State    string   `json:"state"`
 	Evidence string   `json:"evidence"`
 }
@@ -204,6 +213,21 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 			}
 		}
 		assertMatrixEvidence(t, root, feature.Evidence, feature.ID)
+		for _, condition := range feature.Conditions {
+			if !containsString(manifest.Targets, condition.Target) {
+				t.Errorf("manifest feature %q has invalid conditional target %q", feature.ID, condition.Target)
+			}
+			switch condition.State {
+			case "generated", "metadata", "error":
+			default:
+				t.Errorf("manifest feature %q has invalid conditional state %q", feature.ID, condition.State)
+			}
+			if condition.Evidence == "" {
+				t.Errorf("manifest feature %q has conditional state without evidence", feature.ID)
+			} else {
+				assertMatrixEvidence(t, root, condition.Evidence, feature.ID)
+			}
+		}
 	}
 	// The exact sorted feature/evidence contract is deliberate: neither an ID
 	// nor its mapped target state, version scope, or assertion can be changed
@@ -213,9 +237,17 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		manifestContracts = append(manifestContracts, strings.Join([]string{
 			feature.ID, feature.State, strings.Join(feature.Versions, ","), feature.Evidence,
 		}, "\t"))
+		for _, condition := range feature.Conditions {
+			if condition.Scope != "" && condition.Scope != "inbound-only" {
+				t.Errorf("manifest feature %s has unsupported condition scope %q", feature.ID, condition.Scope)
+			}
+			manifestContracts = append(manifestContracts, strings.Join([]string{
+				feature.ID + "@" + condition.Target, condition.Scope, condition.State, strings.Join(condition.With, ","), condition.Evidence,
+			}, "\t"))
+		}
 	}
 	sort.Strings(manifestContracts)
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "74e50fc0dc94bc59af2cf05eaf3f8182f3a539786cc6fa34ac36fc98dbc8ade3" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "d56ebaa4f3c5801bee38aeddb03b372d88c1cb875c879c2d64555260904e7426" {
 		t.Errorf("manifest feature/evidence contract changed: %s", got)
 	}
 
@@ -276,6 +308,15 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 			t.Errorf("manifest misses OpenAPI object feature %q", id)
 		}
 	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func sameStrings(actual, expected []string) bool {

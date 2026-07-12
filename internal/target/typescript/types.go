@@ -166,6 +166,9 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 		visit(operation.Raw, found)
 		visit(operation.PathItemRaw["parameters"], found)
 	}
+	visit(document.Raw["webhooks"], visible)
+	components, _ := document.Raw["components"].(map[string]any)
+	visit(components["callbacks"], visible)
 	result := make(map[string]bool, len(document.ComponentSchemas))
 	for name := range document.ComponentSchemas {
 		if !hidden[name] || visible[name] {

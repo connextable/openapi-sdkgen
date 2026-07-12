@@ -57,11 +57,44 @@ func compileFile(path string, project bool) (*ir.Document, error) {
 	if err := yaml.Unmarshal(bundled, &value); err != nil {
 		return nil, fmt.Errorf("decode bundled OpenAPI document: %w", err)
 	}
-	normalized, err := json.Marshal(value)
+	var source any
+	if err := yaml.Unmarshal(data, &source); err != nil {
+		return nil, fmt.Errorf("decode source OpenAPI document: %w", err)
+	}
+	normalized, err := json.Marshal(mergeBundledDocument(source, value))
 	if err != nil {
 		return nil, fmt.Errorf("normalize bundled OpenAPI document: %w", err)
 	}
 	return compile(normalized, project)
+}
+
+// mergeBundledDocument keeps extensions and newly standardized OpenAPI fields
+// that the bundler does not model yet, while retaining its resolved $ref output.
+// This matters for an OpenAPI 3.2 document such as a Path Item's
+// additionalOperations: it must reach the IR even when the CLI compiles a file.
+func mergeBundledDocument(source, bundled any) any {
+	sourceObject, sourceIsObject := source.(map[string]any)
+	bundledObject, bundledIsObject := bundled.(map[string]any)
+	if !sourceIsObject || !bundledIsObject {
+		return bundled
+	}
+	result := make(map[string]any, len(sourceObject)+len(bundledObject))
+	for key, value := range bundledObject {
+		result[key] = value
+	}
+	for key, sourceValue := range sourceObject {
+		if key == "$ref" {
+			// The bundled value is the resolved reference. Restoring the source
+			// value would undo external reference resolution.
+			continue
+		}
+		if bundledValue, exists := bundledObject[key]; exists {
+			result[key] = mergeBundledDocument(sourceValue, bundledValue)
+			continue
+		}
+		result[key] = sourceValue
+	}
+	return result
 }
 
 func rejectEscapingFileReferences(path, root string) error {

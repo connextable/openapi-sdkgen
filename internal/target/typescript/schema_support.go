@@ -17,6 +17,15 @@ func validateSchemaSupport(document *ir.Document) error {
 	return validateSchemaSupportForTarget(document, "TypeScript")
 }
 
+func validateServerInboundSchemaSupport(document *ir.Document) error {
+	unsupported := unsupportedSchemasInOpenAPIValue(document.Raw["webhooks"], openAPIPointer("webhooks"))
+	if len(unsupported) == 0 {
+		return nil
+	}
+	sort.Strings(unsupported)
+	return fmt.Errorf("TypeScript server add-on does not yet implement these OpenAPI Schema Object features:\n- %s", strings.Join(unsupported, "\n- "))
+}
+
 func validateSchemaSupportForTarget(document *ir.Document, target string) error {
 	var unsupported []string
 	for _, name := range sortedSchemaNames(document.ComponentSchemas) {

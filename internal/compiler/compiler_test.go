@@ -164,6 +164,31 @@ func TestCompileFileAcceptsYAML(t *testing.T) {
 	}
 }
 
+func TestCompileFilePreservesOpenAPI32AdditionalOperations(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "openapi.json")
+	if err := os.WriteFile(path, []byte(`{
+  "openapi": "3.2.0",
+  "info": {"title": "Additional operations", "version": "1"},
+  "paths": {
+    "/records": {
+      "additionalOperations": {
+        "PURGE": {"operationId": "purgeRecords", "responses": {"204": {"description": "Deleted"}}}
+      }
+    }
+  }
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := CompileFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Operations) != 1 || document.Operations[0].OperationID != "purgeRecords" || document.Operations[0].Method != "PURGE" {
+		t.Fatalf("compiled operations = %#v", document.Operations)
+	}
+}
+
 func TestCompileProjectValidatesResolvedPathItemParameters(t *testing.T) {
 	input := []byte(`{
 		"openapi":"3.2.0",

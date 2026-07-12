@@ -1,0 +1,18 @@
+{
+  "name": "typescript-openapi-capabilities-app-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "server": "node dist/server.js",
+    "client": "node dist/client.js"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.0",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
+}

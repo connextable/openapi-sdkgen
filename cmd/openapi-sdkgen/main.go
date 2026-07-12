@@ -16,7 +16,7 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
 
-const usage = "usage: openapi-sdkgen generate --input <document> --target <target> --output <directory>"
+const usage = "usage: openapi-sdkgen generate --input <document> --target <target> --output <directory> [--with <addon> ...]"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -42,6 +42,8 @@ func generate(args []string) error {
 	input := flags.String("input", "", "OpenAPI document path")
 	targetName := flags.String("target", "", "SDK target")
 	output := flags.String("output", "", "output directory")
+	var with repeatedStrings
+	flags.Var(&with, "with", "optional generated add-on (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("parse generate arguments: %w", err)
 	}
@@ -60,17 +62,42 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
+	addons, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		return err
+	}
+	options, err := addons.Resolve(with)
+	if err != nil {
+		return err
+	}
+	if err := generator.ValidateTargetOptions(target, options); err != nil {
+		return err
+	}
 	document, err := compiler.CompileFile(*input)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", *input, err)
 	}
-	artifacts, err := target.Generate(document, generator.Options{})
+	artifacts, err := target.Generate(document, options)
 	if err != nil {
 		return fmt.Errorf("generate %s SDK: %w", target.Name(), err)
 	}
 	if err := writeArtifacts(*output, artifacts); err != nil {
 		return err
 	}
+	return nil
+}
+
+type repeatedStrings []string
+
+func (values *repeatedStrings) String() string {
+	return strings.Join(*values, ",")
+}
+
+func (values *repeatedStrings) Set(value string) error {
+	if value == "" {
+		return errors.New("--with requires a non-empty add-on name")
+	}
+	*values = append(*values, value)
 	return nil
 }
 

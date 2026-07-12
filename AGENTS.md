@@ -34,6 +34,9 @@ just agent ts-lint
 just agent ts-typecheck
 just agent ts-test
 just agent example-todo
+just agent example-advanced
+just agent example-javascript
+just agent example-capabilities
 just agent release-check
 ```
 

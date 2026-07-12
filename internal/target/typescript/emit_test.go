@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
 func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
@@ -110,14 +111,17 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	errorsSource := string(artifacts["generated/errors.ts"])
 	runtimeSource := string(artifacts["generated/runtime.ts"])
 	publicIndex := string(artifacts["index.ts"])
-	metadataSource := string(artifacts["generated/metadata.ts"])
+	metadataSource := string(artifacts["metadata.ts"])
 	if !strings.Contains(publicIndex, `export * from "./generated/index.js"`) {
 		t.Fatalf("source entrypoint missing relative re-export:\n%s", publicIndex)
 	}
-	for _, expected := range []string{"export const openapiDocument", `"openapi":"3.2.0"`, "export const openapiVersionLine = \"3.2\""} {
+	for _, expected := range []string{"export const openapi = { document:", `"openapi":"3.2.0"`, `versionLine: "3.2"`} {
 		if !strings.Contains(metadataSource, expected) {
 			t.Fatalf("metadata missing %q:\n%s", expected, metadataSource)
 		}
+	}
+	if generatedIndex := string(artifacts["generated/index.ts"]); strings.Contains(generatedIndex, "metadata.js") {
+		t.Fatalf("client root must not re-export metadata:\n%s", generatedIndex)
 	}
 	if !strings.HasPrefix(runtimeSource, generatedFileHeader) || !strings.Contains(runtimeSource, "export function createRequest") {
 		t.Fatalf("generated runtime missing or invalid:\n%s", runtimeSource)
@@ -232,6 +236,112 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "client", source: clientSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "errors", source: errorsSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeSource})
+}
+
+func TestGeneratorAddsServerArtifactsWithoutChangingClientLayout(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(emitterFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientOnly, err := (Generator{}).Generate(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withServer, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSources := make(map[string][]byte, len(clientOnly))
+	for _, artifact := range clientOnly {
+		clientSources[artifact.Path] = artifact.Data
+	}
+	serverSources := make(map[string][]byte, len(withServer))
+	for _, artifact := range withServer {
+		serverSources[artifact.Path] = artifact.Data
+	}
+	for path, source := range clientSources {
+		if generated := serverSources[path]; !bytes.Equal(generated, source) {
+			t.Fatalf("client artifact %s changed when server was selected", path)
+		}
+	}
+	for _, path := range []string{"server/runtime.ts", "server/webhooks.ts", "server/callbacks.ts"} {
+		if _, exists := serverSources[path]; !exists {
+			t.Fatalf("missing server artifact %s", path)
+		}
+	}
+	if strings.Contains(string(serverSources["index.ts"]), "server") {
+		t.Fatalf("client root re-exported server module:\n%s", serverSources["index.ts"])
+	}
+	if _, exists := serverSources["server/index.ts"]; exists {
+		t.Fatal("server barrel must not be emitted")
+	}
+}
+
+func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.1",
+  "info": {"title": "Webhook", "version": "1"},
+  "paths": {},
+  "webhooks": {
+    "orderCreated": {
+      "post": {
+        "operationId": "orderCreatedWebhook",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Order"}}}},
+        "responses": {"202": {"description": "Accepted"}},
+        "security": [{"signature": []}]
+      }
+    }
+  },
+  "components": {"schemas": {"Order": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
+	for _, expected := range []string{
+		"export interface OrderCreatedWebhookContext extends InboundRequestContext",
+		"readonly body: Contract.OrderInput",
+		"export interface WebhookHandlers",
+		"orderCreated?: (context: OrderCreatedWebhookContext)",
+		"export type WebhookRoutes = Readonly<Partial<Record<keyof WebhookHandlers, string>>>",
+		"export function createWebhookRouter",
+		"request.method === \"POST\" && pathname === routes.orderCreated",
+		"operationID: orderCreatedWebhook.operationID",
+		"const denied = await options.authenticate?.(context)",
+	} {
+		if !strings.Contains(webhooks, expected) {
+			t.Fatalf("webhook source missing %q:\n%s", expected, webhooks)
+		}
+	}
+	runtime := string(artifactByPath(t, artifacts, "server/runtime.ts"))
+	for _, expected := range []string{"export type Authenticate", "new Response(\"Unsupported Media Type\", { status: 415 })", "export function responseFromHandler"} {
+		if !strings.Contains(runtime, expected) {
+			t.Fatalf("server runtime missing %q:\n%s", expected, runtime)
+		}
+	}
+	if !strings.Contains(string(artifactByPath(t, artifacts, "generated/types.ts")), "export type OrderInput") {
+		t.Fatal("webhook body component was not emitted into shared generated types")
+	}
 }
 
 func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {

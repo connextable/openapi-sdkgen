@@ -9,8 +9,23 @@ import {
   isValidationFailedError,
 } from "../fixtures/generated/client/index.js";
 import type { UploadWidgetBodyInput } from "../fixtures/generated/client/index.js";
+import { openapi } from "../fixtures/generated/client/metadata.js";
+
+type Expect<Value extends true> = Value;
+type RootHidesMetadata = Expect<
+  "openapi" extends keyof typeof import("../fixtures/generated/client/index.js") ? false : true
+>;
+
+const rootHidesMetadata: RootHidesMetadata = true;
+void rootHidesMetadata;
 
 describe("generated TypeScript source", () => {
+  it("keeps lossless OpenAPI metadata behind its explicit entry", () => {
+    expect(openapi.version).toBe("3.2.0");
+    expect(openapi.versionLine).toBe("3.2");
+    expect(openapi.document.openapi).toBe("3.2.0");
+  });
+
   it("accepts binary request values exposed by generated body types", () => {
     const body: UploadWidgetBodyInput = new Uint8Array([1, 2, 3]);
     expect(body).toBeInstanceOf(Uint8Array);

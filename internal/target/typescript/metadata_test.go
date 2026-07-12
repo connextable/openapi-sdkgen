@@ -72,10 +72,15 @@ func TestEmitMetadataPreservesDocumentationExamplesAndExtensions(t *testing.T) {
 		`"dataValue":{"id":"1"}`,
 		`"serializedValue":"{\"id\":\"1\"}"`,
 		`"examples":{"widget":{"value":{"id":"1"}}}`,
-		`export const openapiVersionLine = "3.2"`,
+		`export const openapi = { document:`,
+		`version: "3.2.0"`,
+		`versionLine: "3.2"`,
 	} {
 		if !strings.Contains(string(source), expected) {
 			t.Fatalf("metadata missing %q:\n%s", expected, source)
 		}
+	}
+	if strings.Count(string(source), "export const ") != 1 {
+		t.Fatalf("metadata must export one object:\n%s", source)
 	}
 }

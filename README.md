@@ -26,14 +26,65 @@ import { createClient } from "./generated/api/index.js";
 
 The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
 
-The output contains only generated `.ts` source (`index.ts` and `generated/*.ts`). It has no `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and supported lint suppression directives. Prettier has no file-level in-source ignore directive, so add the generated directory (for example `src/generated/**`) to your application's `.prettierignore`.
+Client-only output contains generated `.ts` source in `index.ts` and `generated/*.ts`; `--with server` additionally emits `server/*.ts`. Neither mode contains a `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and supported lint suppression directives. Prettier has no file-level in-source ignore directive, so add the generated directory (for example `src/generated/**`) to your application's `.prettierignore`.
+
+### Optional inbound server contracts
+
+Keep the default client-only entry point, or add Fetch-native Webhook and
+host-bound Callback contracts explicitly:
+
+```sh
+openapi-sdkgen generate \
+  --input ./openapi.json \
+  --target typescript \
+  --with server \
+  --output ./src/generated/api
+```
+
+This adds explicit `server/webhooks.ts` and `server/callbacks.ts`. `index.ts`
+remains client-only, so browser imports do not pull in inbound code. Import the
+role-specific entry and let the host own credential verification and routing:
+
+```ts
+import { createWebhookRouter, type WebhookHandlers } from "./generated/api/server/webhooks.js";
+
+const handlers: WebhookHandlers = {
+  orderCreated: async ({ body }) => ({ status: 202, body: { accepted: body.id } }),
+};
+const router = createWebhookRouter(handlers, {
+  routes: { orderCreated: "/webhooks/orders" },
+  authenticate: ({ request }) =>
+    request.headers.get("x-signature") === expectedSignature
+      ? undefined
+      : new Response("Unauthorized", { status: 401 }),
+});
+await router.fetch(request);
+```
+
+Callbacks have runtime URL expressions, so the host chooses the route and mounts
+a generated Fetch endpoint instead of receiving a fabricated route matcher:
+
+```ts
+import { createCallbackHandlers } from "./generated/api/server/callbacks.js";
+
+const callbacks = createCallbackHandlers({
+  orderStatus: async ({ body }) => ({ status: 204 }),
+});
+await callbacks.orderStatus.fetch(request);
+```
 
 Generate separate source trees by invoking the command once per OpenAPI document and output directory.
 
-Both targets also export `openapiDocument`, `openapiVersion`, and
-`openapiVersionLine`. This lossless metadata surface keeps documentation,
-examples, tags, and `x-*` extensions available without pretending they affect
-runtime requests.
+Lossless OpenAPI metadata stays out of the normal SDK root surface. Tooling can
+opt in through its explicit entry:
+
+```ts
+import { openapi } from "./generated/api/metadata.js";
+
+openapi.document;
+openapi.version;
+openapi.versionLine;
+```
 
 ## Generate JavaScript source
 
@@ -45,13 +96,15 @@ openapi-sdkgen generate \
 ```
 
 JavaScript output is native ESM (`index.js` and `generated/*.js`) with no
-build step or package metadata. Import it relatively and call operations by
-their exact OpenAPI `operationId`:
+build step or package metadata. It includes adjacent `.d.ts` sidecars, so a
+`// @ts-check` JavaScript app gets the same typed resource calls as TypeScript.
+The exact `operationId` surface remains available under `$operations`:
 
 ```js
 import { createClient } from "./generated/api/index.js";
 
 const api = createClient({ baseURL: "https://api.example.test" });
+const todo = await api.todos.create({ body: { title: "Read docs" } });
 const result = await api.$operations.listWidgets({ query: { limit: 20 } });
 ```
 
@@ -65,12 +118,20 @@ const result = await api.$operations.listWidgets({ query: { limit: 20 } });
 JavaScript app against a separate local server with no package install or
 consumer build step.
 
+[`examples/typescript-openapi-capabilities-app`](examples/typescript-openapi-capabilities-app)
+is the comprehensive TypeScript showcase. It generates client and `--with server`
+source, then runs parameter styles, every generated HTTP method, all supported
+body codecs, components, typed errors, pagination, explicit metadata, Callback
+endpoints, and a Webhook router against local servers. It documents the unsupported
+OpenAPI constructs separately instead of claiming full grammar support.
+
 For repository validation, run:
 
 ```sh
 just agent example-todo
 just agent example-advanced
 just agent example-javascript
+just agent example-capabilities
 ```
 
 For normal use, follow the example's [`setup.sh`](examples/typescript-todo-app/setup.sh) and separate server/client commands.

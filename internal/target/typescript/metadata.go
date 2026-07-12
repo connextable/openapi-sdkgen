@@ -18,13 +18,11 @@ func emitMetadata(document *ir.Document, typescript bool) ([]byte, error) {
 		return nil, fmt.Errorf("encode OpenAPI metadata: %w", err)
 	}
 	var output bytes.Buffer
-	output.WriteString("/** Lossless source OpenAPI document, including documentation, examples, and extensions. */\n")
+	output.WriteString("/** Lossless OpenAPI metadata, kept separate from the client call surface. */\n")
 	if typescript {
-		fmt.Fprintf(&output, "export const openapiDocument = %s as const\n\n", raw)
+		fmt.Fprintf(&output, "export const openapi = { document: %s, version: %s, versionLine: %s } as const\n", raw, quoteTS(document.OpenAPIVersion), quoteTS(document.OpenAPIVersionLine))
 	} else {
-		fmt.Fprintf(&output, "export const openapiDocument = %s\n\n", raw)
+		fmt.Fprintf(&output, "export const openapi = Object.freeze({ document: %s, version: %s, versionLine: %s })\n", raw, quoteTS(document.OpenAPIVersion), quoteTS(document.OpenAPIVersionLine))
 	}
-	fmt.Fprintf(&output, "/** Exact OpenAPI semantic version declared by the source document. */\nexport const openapiVersion = %s\n", quoteTS(document.OpenAPIVersion))
-	fmt.Fprintf(&output, "/** OpenAPI minor line selected by the compiler. */\nexport const openapiVersionLine = %s\n", quoteTS(document.OpenAPIVersionLine))
 	return output.Bytes(), nil
 }

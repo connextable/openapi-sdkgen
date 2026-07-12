@@ -19,7 +19,7 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"index.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/metadata.ts", "generated/runtime.ts"} {
+	for _, expected := range []string{"index.ts", "metadata.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/runtime.ts"} {
 		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
 			t.Fatalf("missing %s: %v", expected, err)
 		}
@@ -28,6 +28,33 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(output, forbidden)); !os.IsNotExist(err) {
 			t.Fatalf("source output unexpectedly contains %s: %v", forbidden, err)
 		}
+	}
+}
+
+func TestGenerateWithServerWritesOnlyExplicitServerEntry(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "contract.json")
+	if err := os.WriteFile(input, []byte(minimalDocument), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(directory, "generated-client")
+	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--with", "server", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"server/runtime.ts", "server/webhooks.ts", "server/callbacks.ts"} {
+		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
+			t.Fatalf("missing %s: %v", expected, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(output, "server", "index.ts")); !os.IsNotExist(err) {
+		t.Fatalf("server barrel unexpectedly exists: %v", err)
+	}
+	root, err := os.ReadFile(filepath.Join(output, "index.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(root), "server") {
+		t.Fatalf("client root imports server: %s", root)
 	}
 }
 
@@ -64,10 +91,43 @@ func TestGenerateJavaScriptTarget(t *testing.T) {
 	if err := run([]string{"generate", "--input", input, "--target", "javascript", "--output", output}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"index.js", "generated/client.js", "generated/metadata.js", "generated/runtime.js"} {
+	for _, path := range []string{"index.js", "metadata.js", "generated/client.js", "generated/runtime.js"} {
 		if _, err := os.Stat(filepath.Join(output, path)); err != nil {
 			t.Fatalf("missing JavaScript artifact %s: %v", path, err)
 		}
+	}
+}
+
+func TestGenerateParsesRepeatableWithAddons(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.0.3","info":{"title":"Add-on","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown", args: []string{"--with", "worker"}, want: "unsupported SDK add-on"},
+		{name: "duplicate", args: []string{"--with", "server", "--with", "server"}, want: "specified more than once"},
+		{name: "javascript incompatible", args: []string{"--with", "server"}, want: `target "javascript" does not support add-on "server"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := filepath.Join(directory, test.name)
+			target := "typescript"
+			if test.name == "javascript incompatible" {
+				target = "javascript"
+			}
+			args := append([]string{"generate", "--input", input, "--target", target, "--output", output}, test.args...)
+			err := run(args)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v", err)
+			}
+			if _, err := os.Stat(output); !os.IsNotExist(err) {
+				t.Fatalf("unexpected output stat error = %v", err)
+			}
+		})
 	}
 }
 

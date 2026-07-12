@@ -12,23 +12,75 @@ import (
 // inert raw fields. Features without an emitted client API or runtime behavior
 // are rejected with their contract path until the target has an implementation.
 func validateOpenAPISupport(document *ir.Document) error {
-	return validateOpenAPISupportForTarget(document, "TypeScript")
+	return validateOpenAPISupportWithServer(document, "TypeScript", false)
 }
 
 func validateOpenAPISupportForTarget(document *ir.Document, target string) error {
+	return validateOpenAPISupportWithServer(document, target, false)
+}
+
+func validateOpenAPISupportWithServer(document *ir.Document, target string, includeServer bool) error {
 	var unsupported []string
 	root := document.Raw
-	unsupported = append(unsupported, unsupportedRootFeatures(document, root)...)
+	rootUnsupported := unsupportedRootFeatures(document, root)
+	if includeServer {
+		rootUnsupported = withoutServerAddonRootFeatures(rootUnsupported, rootSecurityIsInboundOnly(document))
+	}
+	unsupported = append(unsupported, rootUnsupported...)
 	for _, operation := range document.Operations {
 		path := openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method))
 		unsupported = append(unsupported, unsupportedOperationFeatures(document, operation.PathItemRaw, openAPIPointer("paths", operation.Path))...)
 		unsupported = append(unsupported, unsupportedOperationFeatures(document, operation.Raw, path)...)
+	}
+	if includeServer {
+		unsupported = withoutServerAddonFeatures(unsupported)
 	}
 	if len(unsupported) == 0 {
 		return nil
 	}
 	sort.Strings(unsupported)
 	return fmt.Errorf("%s target does not yet implement these OpenAPI features:\n- %s", target, strings.Join(unsupported, "\n- "))
+}
+
+func withoutServerAddonFeatures(features []string) []string {
+	result := make([]string, 0, len(features))
+	for _, feature := range features {
+		if strings.Contains(feature, "(generated inbound webhook contracts)") || strings.Contains(feature, "(generated callback contracts)") {
+			continue
+		}
+		result = append(result, feature)
+	}
+	return result
+}
+
+func withoutServerAddonRootFeatures(features []string, allowRootSecurity bool) []string {
+	result := make([]string, 0, len(features))
+	for _, feature := range features {
+		if strings.Contains(feature, "(generated inbound webhook contracts)") ||
+			strings.Contains(feature, "(generated callback contracts)") ||
+			strings.HasPrefix(feature, "#/components/securitySchemes/") ||
+			(allowRootSecurity && strings.HasPrefix(feature, "#/security ")) {
+			continue
+		}
+		result = append(result, feature)
+	}
+	return result
+}
+
+func rootSecurityIsInboundOnly(document *ir.Document) bool {
+	if !hasNonEmptyList(document.Raw["security"]) {
+		return false
+	}
+	for _, operation := range document.Operations {
+		security, declared := operation.Raw["security"]
+		if !declared {
+			return false
+		}
+		if hasNonEmptyList(security) {
+			return false
+		}
+	}
+	return true
 }
 
 func unsupportedRootFeatures(document *ir.Document, root map[string]any) []string {

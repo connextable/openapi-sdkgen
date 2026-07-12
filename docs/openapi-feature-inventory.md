@@ -4,7 +4,7 @@ This is the grouped, human-readable companion to
 [`openapi-feature-matrix.md`](openapi-feature-matrix.md). Every listed surface
 has one target state only: `generated`, `metadata`, or `error`. `error` means
 generation stops before output for that target and includes the JSON Pointer of
-the feature. `metadata` means the lossless `openapiDocument` artifact exposes
+the feature. `metadata` means the lossless `metadata.js` `openapi.document` export exposes
 the source value, but does not invent a runtime API.
 
 The canonical field-level source is
@@ -51,7 +51,7 @@ line.
 | reusable-request-bodies | `components.requestBodies` | all | generated | `internal/target/typescript/emit_test.go::TestSourceArtifactsStayConsistentAndDeterministic` |
 | reusable-headers | `components.headers` | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 | reusable-examples | `components.examples` | all | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
-| reusable-links-callbacks-security | `components.links`, `callbacks`, `securitySchemes` | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
+| reusable-links-security | `components.links`, `securitySchemes` | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
 | reusable-path-items | `components.pathItems` | 3.1+ | generated | `internal/compiler/ir/build_test.go::TestBuildResolvesLocalPathItemReferences` |
 | reusable-media-types | `components.mediaTypes` | 3.2 | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
 
@@ -90,11 +90,11 @@ line.
 | response-media-wildcards | wildcard media negotiation | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures` |
 | response-streams | sequential JSON, binary streams, Server-Sent Events | 3.2 | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
 | response-links | Link Object, runtime expressions, `operationId`, `operationRef`, parameters, requestBody, server | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
-| callbacks | Callback Object, key expressions, callback Path Items | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
-| webhooks | root Webhook Object | 3.1+ | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
+| callbacks | Callback Object, key expressions, callback Path Items; generated only by `typescript --with server` | all | error | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
+| webhooks | root Webhook Object; generated only by `typescript --with server` | 3.1+ | error | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | examples | Example `summary`, `description`, `value`, `externalValue` | all | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
-| security-requirements | root/operation requirement alternatives, optional requirements, override | all | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
-| security-schemes | API key, HTTP, OAuth2, OpenID Connect, mutual TLS | all; mutual TLS 3.1+ | error | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths` |
+| security-requirements | root requirement metadata for inbound `typescript --with server`; operation/client security otherwise errors | all | error | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
+| security-schemes | lossless `metadata.js` security-scheme metadata for `typescript --with server`; client credential providers remain error | all; mutual TLS 3.1+ | error | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
 
 ## Schema Object: OAS 3.0.x
 
