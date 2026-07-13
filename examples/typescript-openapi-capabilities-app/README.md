@@ -47,7 +47,9 @@ pnpm run client
 ```
 
 `src/client.ts` is deliberately written as readable, checked application code.
-It imports the client API and the separate opt-in metadata entry:
+This example runs as compiled Node ESM, so it uses explicit `.js` file paths.
+In a normal web bundler, import `./generated/capabilities-sdk` and
+`./generated/capabilities-sdk/metadata` without those suffixes instead:
 
 ```ts
 import { createClient } from "./generated/capabilities-sdk/index.js";

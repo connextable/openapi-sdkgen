@@ -39,6 +39,18 @@ just agent example-capabilities
 just agent release-check
 ```
 
+## Documentation commands
+
+VitePress uses normal user-facing commands, not `scripts/agent` wrappers:
+
+```txt
+just docs install
+just docs dev
+just docs build
+just docs preview
+just docs lock
+```
+
 ## Output policy
 
 - Agent scripts print short success summaries.

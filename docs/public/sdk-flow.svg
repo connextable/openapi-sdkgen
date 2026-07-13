@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" role="img" aria-labelledby="title description">
+  <title id="title">OpenAPI to TypeScript SDK flow</title>
+  <desc id="description">An OpenAPI document flows through a generator into a TypeScript client with typed calls.</desc>
+  <defs>
+    <linearGradient id="document" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#e0f2fe"/>
+      <stop offset="1" stop-color="#d1fae5"/>
+    </linearGradient>
+    <linearGradient id="client" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#ede9fe"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#0f172a" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <rect x="48" y="68" width="228" height="334" rx="28" fill="url(#document)" filter="url(#shadow)"/>
+  <path d="M98 116h104l34 34v198H98z" fill="#fff"/>
+  <path d="M202 116v42h42" fill="none" stroke="#0f766e" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M124 200h88M124 240h88M124 280h56" stroke="#0f766e" stroke-linecap="round" stroke-width="14"/>
+  <text x="162" y="374" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="24" font-weight="700" fill="#115e59">OpenAPI</text>
+  <path d="M322 236h74" stroke="#2563eb" stroke-width="18" stroke-linecap="round"/>
+  <path d="m378 204 42 32-42 32" fill="none" stroke="#2563eb" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  <circle cx="360" cy="126" r="44" fill="#2563eb" filter="url(#shadow)"/>
+  <path d="M340 126h40M360 106v40" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  <text x="360" y="186" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="20" font-weight="700" fill="#1e3a8a">generate</text>
+  <rect x="444" y="116" width="228" height="286" rx="28" fill="url(#client)" filter="url(#shadow)"/>
+  <rect x="482" y="156" width="152" height="118" rx="16" fill="#fff"/>
+  <text x="506" y="202" font-family="ui-monospace, SFMono-Regular, monospace" font-size="30" font-weight="700" fill="#4338ca">{ }</text>
+  <path d="M552 190h52M552 220h36" stroke="#2563eb" stroke-width="10" stroke-linecap="round"/>
+  <path d="M482 310h152" stroke="#4338ca" stroke-width="12" stroke-linecap="round"/>
+  <path d="M482 340h98" stroke="#4338ca" stroke-width="12" stroke-linecap="round"/>
+  <text x="558" y="374" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="24" font-weight="700" fill="#3730a3">TypeScript client</text>
+</svg>

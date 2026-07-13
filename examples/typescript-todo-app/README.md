@@ -41,7 +41,10 @@ TODO_API_PORT=18787 pnpm run server
 TODO_API_BASE_URL=http://127.0.0.1:18787/v1 pnpm run client
 ```
 
-`src/client.ts` imports the generated source through a relative path. The `.js` suffix is intentional: it lets the app use TypeScript's `NodeNext` module resolution and produces valid ESM after compilation.
+`src/client.ts` imports the generated source through a relative path. This
+example runs its compiled output directly in Node ESM, so the explicit `.js`
+suffix and `/index.js` entry are intentional. A normal Vite, Next.js, or Nuxt
+application can import the generated directory as `./generated/todo-sdk`.
 
 ```ts
 import { createClient } from "./generated/todo-sdk/index.js";

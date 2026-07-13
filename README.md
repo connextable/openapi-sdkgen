@@ -18,11 +18,16 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-Import it from application source with a relative ESM path:
+Import it from application source with the relative path your web bundler
+resolves:
 
 ```ts
-import { createClient } from "./generated/api/index.js";
+import { createClient } from "./generated/api";
 ```
+
+Vite, Next.js, Nuxt, and similar bundlers resolve the generated directory to
+its `index.ts` entry. If an application compiles and executes directly in Node
+ESM instead, use the explicit `./generated/api/index.js` path.
 
 The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
 
@@ -66,7 +71,7 @@ schema JSON, target (`typescript`), and JSON Pointer location, then returns a
 replacement JSON Schema object or boolean. Generated SDK code never executes
 an extension.
 
-Client-only output contains generated `.ts` source in `index.ts` and `generated/*.ts`; `--with server` additionally emits `server/*.ts`. Neither mode contains a `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and supported lint suppression directives. Prettier has no file-level in-source ignore directive, so add the generated directory (for example `src/generated/**`) to your application's `.prettierignore`.
+Client-only output contains generated `.ts` source in `index.ts` and `generated/*.ts`; `--with server` additionally emits `server/*.ts`. Neither mode contains a `package.json`, build configuration, or dependencies: your application installs TypeScript and compiles this source as part of its ordinary build. Every generated file begins with generated-code markers and supported lint suppression directives. Files also begin with Prettier's `@noprettier` pragma. To honor it, enable `checkIgnorePragma` in Prettier 3.6.0 or later; older Prettier versions can ignore the generated directory (for example `src/generated/**`) in `.prettierignore`.
 
 ### Optional inbound server contracts
 
@@ -86,7 +91,7 @@ remains client-only, so browser imports do not pull in inbound code. Import the
 role-specific entry and let the host own credential verification and routing:
 
 ```ts
-import { createWebhookRouter, type WebhookHandlers } from "./generated/api/server/webhooks.js";
+import { createWebhookRouter, type WebhookHandlers } from "./generated/api/server/webhooks";
 
 const handlers: WebhookHandlers = {
   orderCreated: async ({ body }) => ({ status: 202, body: { accepted: body.id } }),
@@ -105,7 +110,7 @@ Callbacks have runtime URL expressions, so the host chooses the route and mounts
 a generated Fetch endpoint instead of receiving a fabricated route matcher:
 
 ```ts
-import { createCallbackHandlers } from "./generated/api/server/callbacks.js";
+import { createCallbackHandlers } from "./generated/api/server/callbacks";
 
 const callbacks = createCallbackHandlers({
   orderStatus: async ({ body }) => ({ status: 204 }),
@@ -119,7 +124,7 @@ Lossless OpenAPI metadata stays out of the normal SDK root surface. Tooling can
 opt in through its explicit entry:
 
 ```ts
-import { openapi } from "./generated/api/metadata.js";
+import { openapi } from "./generated/api/metadata";
 
 openapi.document;
 openapi.version;
@@ -172,3 +177,20 @@ just agent check
 ```
 
 `just agent conformance` builds the CLI, generates a generic source fixture into an ignored directory, typechecks consumer tests, and runs its runtime tests. The fixture is imported with the same relative path pattern used by an application.
+
+## Documentation site
+
+The VitePress site lives in [`docs/`](docs). Its normal local workflow is
+separate from the agent command wrappers:
+
+```sh
+just docs install
+just docs dev
+```
+
+Use `just docs build` for the production static build. The generated site is
+written to `docs/.vitepress/dist/` and is ignored by Git.
+
+Maintainers can refresh the pinned VitePress dependency graph with `just docs
+lock`; it deliberately rebuilds the lock from the repository's supply-chain
+policy before the next install.

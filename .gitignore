@@ -7,3 +7,5 @@ dist
 generated
 coverage
 .openapi-sdkgen-cache
+.DS_Store
+**/.vitepress/cache

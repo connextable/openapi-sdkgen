@@ -27,7 +27,9 @@ pnpm run server
 WIDGET_API_BASE_URL=http://127.0.0.1:18788/v1 pnpm run client
 ```
 
-`src/client.ts` is the complete usage example. It imports generated source directly:
+`src/client.ts` is the complete usage example. It runs as compiled Node ESM, so
+it intentionally uses the explicit `.js` file path. In a normal web bundler,
+import the generated directory as `./generated/widget-sdk` instead:
 
 ```ts
 import { createClient } from "./generated/widget-sdk/index.js";
