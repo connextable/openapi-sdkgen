@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+workflow="$ROOT/.github/workflows/release.yml"
+goreleaser="$ROOT/.goreleaser.yaml"
+
+require_pattern() {
+  local pattern="$1"
+  if ! grep -Eq "$pattern" "$workflow"; then
+    echo "release workflow is missing required contract: $pattern" >&2
+    exit 1
+  fi
+}
+
+reject_pattern() {
+  local pattern="$1"
+  if grep -Eq "$pattern" "$workflow"; then
+    echo "release workflow contains forbidden contract: $pattern" >&2
+    exit 1
+  fi
+}
+
+require_goreleaser_pattern() {
+  local pattern="$1"
+  if ! grep -Eq "$pattern" "$goreleaser"; then
+    echo "GoReleaser config is missing required release contract: $pattern" >&2
+    exit 1
+  fi
+}
+
+require_pattern 'workflow_dispatch:'
+require_pattern 'run-name: Release'
+require_pattern 'group: openapi-sdkgen-release'
+require_pattern 'Validate release tag'
+require_pattern 'Verify release inputs'
+require_pattern 'Run release checks'
+require_pattern 'scripts/release/check\.sh'
+require_pattern 'Verify immutable tag target'
+require_pattern 'scripts/npm/package\.sh'
+require_pattern 'scripts/npm/check\.sh'
+require_pattern 'scripts/npm/publish\.sh'
+require_pattern '\$GITHUB_WORKSPACE/\.tmp/npm-package'
+require_pattern 'publish-formula\.yml@main'
+require_pattern 'Publish GitHub Release'
+require_pattern 'release-tools/\.goreleaser\.yaml'
+require_goreleaser_pattern 'replace_existing_artifacts: true'
+require_goreleaser_pattern 'target_commitish:'
+require_pattern 'contents: write'
+reject_pattern 'just agent'
+
+agent_note "ok release workflow contract"

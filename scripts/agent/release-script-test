@@ -36,15 +36,33 @@ cp "$ROOT/scripts/release/publish.sh" "$repository/scripts/release/publish.sh"
 cp "$ROOT/scripts/lib/ui.sh" "$repository/scripts/lib/ui.sh"
 chmod +x "$repository/scripts/release/publish.sh"
 
-cat >"$mock_bin/just" <<'EOF'
+cat >"$repository/scripts/release/check.sh" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${RELEASE_TEST_MUTATE_HEAD:-}" == "1" ]]; then
   git commit --allow-empty -m "test: mutate release head" >/dev/null
 fi
 EOF
-chmod +x "$mock_bin/just"
+chmod +x "$repository/scripts/release/check.sh"
 
-git -C "$repository" add scripts/release/publish.sh scripts/lib/ui.sh
+cat >"$mock_bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${RELEASE_TEST_GH_ARGS:?}"
+if [[ "$1 $2 $3" == "run list --repo" ]]; then
+  count_file="${RELEASE_TEST_GH_LIST_COUNT:?}"
+  count=0
+  if [[ -f "$count_file" ]]; then count="$(cat "$count_file")"; fi
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$count_file"
+  if [[ "$count" == 1 ]]; then
+    printf '111\n'
+  else
+    printf '111\n222\n'
+  fi
+fi
+EOF
+chmod +x "$mock_bin/gh"
+
+git -C "$repository" add scripts/release/publish.sh scripts/release/check.sh scripts/lib/ui.sh
 git -C "$repository" commit -m "feat: release helper" >/dev/null
 git -C "$repository" tag -a v1.0.0 -m v1.0.0
 git -C "$repository" push --follow-tags -u origin main >/dev/null
@@ -61,7 +79,7 @@ git -C "$repository" commit --allow-empty -m "fix: main release change" >/dev/nu
 git -C "$repository" push origin main >/dev/null
 
 run_release() {
-  PATH="$mock_bin:$PATH" "$repository/scripts/release/publish.sh" "$@"
+  GITHUB_REPOSITORY=test/repository PATH="$mock_bin:$PATH" "$repository/scripts/release/publish.sh" "$@"
 }
 
 output="$(run_release --since v1.0.0 --dry-run patch)"
@@ -91,5 +109,12 @@ if output="$(RELEASE_TEST_MUTATE_HEAD=1 run_release --since v1.0.0 patch 2>&1)";
   fail "tagged a HEAD changed by the check command"
 fi
 assert_contains "$output" "branch or HEAD changed while checks ran"
+
+resume_args="$test_root/resume-args"
+resume_list_count="$test_root/resume-list-count"
+RELEASE_TEST_GH_ARGS="$resume_args" RELEASE_TEST_GH_LIST_COUNT="$resume_list_count" run_release --resume v1.0.0 --yes
+resume_output="$(cat "$resume_args")"
+assert_contains "$resume_output" "workflow run release.yml --ref main -f tag=v1.0.0"
+assert_contains "$resume_output" "run watch 222 --repo test/repository --exit-status"
 
 agent_note "ok release script test"

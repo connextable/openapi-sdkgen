@@ -4,6 +4,7 @@ set -euo pipefail
 DRY_RUN=0
 AUTO_PUSH=0
 TAG_INPUT=""
+RESUME_TAG=""
 NOTES_BASE_OVERRIDE=""
 NOTES_BASE_OVERRIDE_SET=0
 CURSOR_HIDDEN=0
@@ -68,6 +69,14 @@ while [ "$#" -gt 0 ]; do
       NOTES_BASE_OVERRIDE_SET=1
       shift
       ;;
+    --resume)
+      if [ "$#" -eq 0 ]; then
+        ui_error "--resume requires an existing tag"
+        exit 1
+      fi
+      RESUME_TAG="$1"
+      shift
+      ;;
     patch|minor|major)
       TAG_INPUT="$arg"
       ;;
@@ -80,11 +89,16 @@ while [ "$#" -gt 0 ]; do
 			;;
     *)
       ui_error "Unknown argument: $arg"
-			ui_note_err "Usage: scripts/release/publish.sh [--dry-run|-n] [--yes|-y] [--since vX.Y.Z] [patch|minor|major|vX.Y.Z[-prerelease]]"
+			ui_note_err "Usage: scripts/release/publish.sh [--dry-run|-n] [--yes|-y] [--since vX.Y.Z] [--resume vX.Y.Z] [patch|minor|major|vX.Y.Z[-prerelease]]"
       exit 1
       ;;
   esac
 done
+
+if [ -n "$RESUME_TAG" ] && [ -n "$TAG_INPUT" ]; then
+  ui_error "--resume cannot be combined with a version or bump"
+  exit 1
+fi
 
 validate_prerelease() {
   local tag="$1"
@@ -219,6 +233,111 @@ sync_tags() {
   if git remote get-url origin >/dev/null 2>&1; then
     git fetch --tags --prune origin
   fi
+}
+
+resume_release() {
+  local tag="$1"
+  local response
+
+  if ! [[ "$tag" =~ $TAG_REGEX ]]; then
+    ui_error "Resume tag must be valid SemVer: $tag"
+    exit 1
+  fi
+  validate_prerelease "$tag"
+  if ! sync_tags; then
+    ui_error "Failed to fetch tags from origin."
+    exit 1
+  fi
+  if [[ "$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)" != "tag" ]]; then
+    ui_error "Resume tag must exist locally and be annotated: $tag"
+    exit 1
+  fi
+  if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+    ui_error "Resume tag does not exist on origin: $tag"
+    exit 1
+  fi
+  if ! git fetch origin main >/dev/null 2>&1 || ! git merge-base --is-ancestor "${tag}^{commit}" origin/main; then
+    ui_error "Resume tag must point to a commit merged into origin/main: $tag"
+    exit 1
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    ui_error "Resuming a release requires GitHub CLI (gh)."
+    exit 1
+  fi
+
+  ui_section "Resume release"
+  ui_kv "Tag" "$tag"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    ui_note "No workflow was dispatched."
+    exit 0
+  fi
+  if [ "$AUTO_PUSH" -eq 0 ] && [ -z "${CI:-}" ]; then
+    ui_prompt "Dispatch the release workflow for ${tag}? [Y/n]:"
+    read -r response
+    response="${response:-y}"
+    case "$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')" in
+      y|yes) ;;
+      *) ui_note "Aborted. No workflow was dispatched."; exit 0 ;;
+    esac
+  fi
+
+  existing_run_ids="$(release_workflow_run_ids "$tag" workflow_dispatch)"
+  gh workflow run release.yml --ref main -f "tag=$tag"
+  wait_for_release_workflow "$tag" workflow_dispatch "$existing_run_ids"
+  exit 0
+}
+
+release_workflow_run_ids() {
+  local tag="$1"
+  local event="$2"
+  local repo
+
+  repo="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$repo" ]]; then
+    repo="$(origin_repo_slug)" || return 1
+  fi
+  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || return 1
+  gh run list --repo "$repo" --workflow release.yml --event "$event" --limit 100 --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"Release $tag\") | .databaseId"
+}
+
+wait_for_release_workflow() {
+  local tag="$1"
+  local event="$2"
+  local existing_run_ids="${3:-}"
+  local repo
+  local run_id=""
+  local attempt
+
+  repo="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$repo" ]]; then
+    repo="$(origin_repo_slug)" || {
+      ui_error "Could not identify the GitHub repository for release monitoring."
+      exit 1
+    }
+  fi
+  if [[ ! "$repo" =~ ^[^/]+/[^/]+$ ]]; then
+    ui_error "Could not identify the GitHub repository for release monitoring."
+    exit 1
+  fi
+  for attempt in {1..30}; do
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      if ! grep -Fqx "$candidate" <<<"$existing_run_ids"; then
+        run_id="$candidate"
+        break
+      fi
+    done < <(release_workflow_run_ids "$tag" "$event")
+    [[ -n "$run_id" ]] && break
+    sleep 2
+  done
+  if [[ -z "$run_id" ]]; then
+    ui_error "Could not find the release workflow run for $tag. Check GitHub Actions."
+    exit 1
+  fi
+
+  ui_note "Watching release workflow $run_id"
+  gh run watch "$run_id" --repo "$repo" --exit-status
+  ui_ok "release workflow completed for $tag"
 }
 
 semver_from_tag() {
@@ -536,9 +655,9 @@ select_bump() {
 # status line on success and only surfacing the detail when something fails.
 run_checks() {
   ui_section "Checks"
-  ui_note "Running test, lint, vuln"
+  ui_note "Running release checks"
   local out
-  if out="$(just agent check 2>&1)"; then
+  if out="$(bash "$ROOT/scripts/release/check.sh" "${PATCH_TAG#v}" 2>&1)"; then
     ui_ok "checks passed"
   else
     ui_error "checks failed"
@@ -579,6 +698,10 @@ confirm_push() {
 working_tree_changes() {
   git status --porcelain
 }
+
+if [ -n "$RESUME_TAG" ]; then
+  resume_release "$RESUME_TAG"
+fi
 
 confirm_dirty_tree() {
   local changes="$1"
@@ -779,6 +902,11 @@ if [ "$DRY_RUN" -eq 0 ] && git ls-remote --exit-code --tags origin "refs/tags/$P
   exit 1
 fi
 
+if [ "$DRY_RUN" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
+  ui_error "Release requires GitHub CLI (gh) so it can wait for the published workflow."
+  exit 1
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   ui_section "Dry run"
   ui_kv "Tag" "$PATCH_TAG"
@@ -810,3 +938,4 @@ if ! git push --atomic origin HEAD:main "refs/tags/$PATCH_TAG:refs/tags/$PATCH_T
 	exit 1
 fi
 ui_ok "created and pushed tag $PATCH_TAG"
+wait_for_release_workflow "$PATCH_TAG" push

@@ -1,44 +1,118 @@
 name: release
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated SemVer tag to resume.
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: openapi-sdkgen-release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  validate-release:
+    name: Validate release tag
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      ref: ${{ steps.release.outputs.ref }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: main
           fetch-depth: 0
+      - id: release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+          if ! [[ "$TAG" =~ $semver ]]; then
+            echo "release tag must be SemVer: $TAG" >&2
+            exit 1
+          fi
+          if [[ "$TAG" == *-* ]]; then
+            IFS=. read -r -a prerelease_identifiers <<<"${TAG#*-}"
+            for identifier in "${prerelease_identifiers[@]}"; do
+              if [[ "$identifier" =~ ^0[0-9]+$ ]]; then
+                echo "release tag has an invalid numeric prerelease identifier: $TAG" >&2
+                exit 1
+              fi
+            done
+          fi
+          git fetch --force origin main "refs/tags/$TAG:refs/tags/$TAG"
+          if [[ "$(git cat-file -t "refs/tags/$TAG")" != "tag" ]]; then
+            echo "release tag must be annotated: $TAG" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${TAG}^{commit}" origin/main; then
+            echo "release tag must point to a commit merged into main: $TAG" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "ref=refs/tags/$TAG"
+            echo "version=${TAG#v}"
+            echo "commit=$(git rev-parse "${TAG}^{commit}")"
+          } >> "$GITHUB_OUTPUT"
+
+  verify-release:
+    name: Verify release inputs
+    needs: validate-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          path: release-tools
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.26.5"
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          node-version: "24.18.0"
+          package-manager-cache: false
+      - name: Verify immutable tag target
+        run: test "$(git rev-parse HEAD)" = "${{ needs.validate-release.outputs.commit }}"
+      - name: Run release checks
+        run: |
+          SOURCE_ROOT="$GITHUB_WORKSPACE" \
+            RELEASE_CHECK_DIR="$GITHUB_WORKSPACE/.tmp/release-check" \
+            bash release-tools/scripts/release/check.sh "${{ needs.validate-release.outputs.version }}"
 
   publish-npm:
-    needs: release
+    name: Publish npm package
+    needs: [validate-release, verify-release]
     runs-on: ubuntu-latest
-    concurrency:
-      group: npm-publish
-      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.validate-release.outputs.ref }}
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          path: release-tools
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.26.5"
@@ -47,21 +121,162 @@ jobs:
           node-version: "24.18.0"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+      - name: Verify immutable tag target
+        run: test "$(git rev-parse HEAD)" = "${{ needs.validate-release.outputs.commit }}"
       - name: Build npm package
-        env:
-          PACKAGE_VERSION: ${{ github.ref_name }}
-        run: just agent npm-package "${PACKAGE_VERSION#v}"
+        run: |
+          SOURCE_ROOT="$GITHUB_WORKSPACE" \
+            NPM_PACKAGE_DIR="$GITHUB_WORKSPACE/.tmp/npm-package" \
+            bash release-tools/scripts/npm/package.sh "${{ needs.validate-release.outputs.version }}"
       - name: Verify npm package
-        run: just agent npm-package-check
+        run: |
+          SOURCE_ROOT="$GITHUB_WORKSPACE" \
+            NPM_PACKAGE_DIR="$GITHUB_WORKSPACE/.tmp/npm-package" \
+            NPM_TEST_DIR="$GITHUB_WORKSPACE/.tmp/npm-package-install" \
+            bash release-tools/scripts/npm/check.sh "$GITHUB_WORKSPACE/.tmp/npm-package"
       - name: Publish npm package through OIDC
-        run: just agent npm-publish .tmp/npm-package ${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
+        run: bash release-tools/scripts/npm/publish.sh "$GITHUB_WORKSPACE/.tmp/npm-package" ${{ contains(needs.validate-release.outputs.tag, '-') && 'next' || 'latest' }}
 
   publish-homebrew:
-    needs: release
-    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@ca59d9ca7f476daa09af2168440f20ad37ef3ac3 # ca59d9c
+    name: Publish Homebrew formula
+    needs: [validate-release, publish-npm]
+    concurrency:
+      group: connextable-homebrew-tap
+      cancel-in-progress: false
+    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@main
     with:
       formula: openapi-sdkgen
-      ref: ${{ github.ref }}
-      version: ${{ github.ref_name }}
+      ref: ${{ needs.validate-release.outputs.commit }}
+      version: ${{ needs.validate-release.outputs.tag }}
     secrets:
       deploy_key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: [validate-release, publish-homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-release.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          path: release-tools
+      - name: Verify immutable tag target
+        run: test "$(git rev-parse HEAD)" = "${{ needs.validate-release.outputs.commit }}"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.18.0"
+          package-manager-cache: false
+      - id: existing-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          COMMIT: ${{ needs.validate-release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          case "$status" in
+            200)
+              release="$(curl --fail-with-body --silent \
+                --header 'Accept: application/vnd.github+json' \
+                --header "Authorization: Bearer $GITHUB_TOKEN" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+              release_state="$(RELEASE="$release" TAG="$TAG" COMMIT="$COMMIT" node <<'NODE'
+          const release = JSON.parse(process.env.RELEASE);
+          if (release.tag_name !== process.env.TAG) {
+            throw new Error(`existing GitHub Release has tag ${release.tag_name}, not ${process.env.TAG}`);
+          }
+          if (![process.env.TAG, "main", process.env.COMMIT].includes(release.target_commitish)) {
+            throw new Error(`existing GitHub Release has an unexpected target: ${release.target_commitish}`);
+          }
+          const version = process.env.TAG.slice(1);
+          const required = [
+            "checksums.txt",
+            `openapi-sdkgen_${version}_darwin_amd64.tar.gz`,
+            `openapi-sdkgen_${version}_darwin_arm64.tar.gz`,
+            `openapi-sdkgen_${version}_linux_amd64.tar.gz`,
+            `openapi-sdkgen_${version}_linux_arm64.tar.gz`,
+            `openapi-sdkgen_${version}_windows_amd64.zip`,
+            `openapi-sdkgen_${version}_windows_arm64.zip`,
+          ];
+          const assets = new Map(release.assets.map((asset) => [asset.name, asset]));
+          for (const filename of required) {
+            if (assets.get(filename) === undefined) {
+              process.stdout.write("incomplete");
+              process.exit(0);
+            }
+          }
+          process.stdout.write(`complete ${assets.get("checksums.txt").browser_download_url}`);
+          NODE
+              )"
+              case "$release_state" in
+                incomplete) echo 'exists=false' >> "$GITHUB_OUTPUT" ;;
+                complete\ *)
+                  echo 'exists=true' >> "$GITHUB_OUTPUT"
+                  echo "checksums_url=${release_state#complete }" >> "$GITHUB_OUTPUT"
+                  ;;
+                *) echo "could not validate existing GitHub Release for $TAG" >&2; exit 1 ;;
+              esac
+              ;;
+            404) echo 'exists=false' >> "$GITHUB_OUTPUT" ;;
+            *) echo "could not query GitHub Release for $TAG (HTTP $status)" >&2; exit 1 ;;
+          esac
+      - name: Verify existing GitHub Release checksums
+        if: steps.existing-release.outputs.exists == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+          CHECKSUMS_URL: ${{ steps.existing-release.outputs.checksums_url }}
+        run: |
+          set -euo pipefail
+          release="$(curl --fail-with-body --silent \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          checksums="$(curl --fail-with-body --location --silent "$CHECKSUMS_URL")"
+          RELEASE="$release" CHECKSUMS="$checksums" TAG="$TAG" node <<'NODE'
+          const release = JSON.parse(process.env.RELEASE);
+          const checksums = new Map(
+            process.env.CHECKSUMS.trim().split(/\n+/).map((line) => {
+              const [digest, filename] = line.trim().split(/\s+/, 2);
+              return [filename, digest];
+            }),
+          );
+          const version = process.env.TAG.slice(1);
+          const required = [
+            `openapi-sdkgen_${version}_darwin_amd64.tar.gz`,
+            `openapi-sdkgen_${version}_darwin_arm64.tar.gz`,
+            `openapi-sdkgen_${version}_linux_amd64.tar.gz`,
+            `openapi-sdkgen_${version}_linux_arm64.tar.gz`,
+            `openapi-sdkgen_${version}_windows_amd64.zip`,
+            `openapi-sdkgen_${version}_windows_arm64.zip`,
+          ];
+          const assets = new Map(release.assets.map((asset) => [asset.name, asset]));
+          for (const filename of required) {
+            const digest = checksums.get(filename);
+            const asset = assets.get(filename);
+            if (digest === undefined || asset === undefined || asset.digest !== `sha256:${digest}`) {
+              throw new Error(`existing GitHub Release asset checksum mismatch: ${filename}`);
+            }
+          }
+          NODE
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.existing-release.outputs.exists != 'true'
+        with:
+          go-version: "1.26.5"
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        if: steps.existing-release.outputs.exists != 'true'
+        with:
+          distribution: goreleaser
+          version: "v2.17.0"
+          args: release --clean --config ${{ github.workspace }}/release-tools/.goreleaser.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

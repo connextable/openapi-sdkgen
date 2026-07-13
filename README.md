@@ -226,9 +226,11 @@ policy before the next install.
 
 ## npm publishing
 
-Every `v<semver>` tag builds the GitHub Release first, then packages the six
-supported CLI binaries into the public `openapi-sdkgen` npm package. Stable
-versions publish with the `latest` dist-tag; prereleases publish with `next`.
+Every `v<semver>` tag validates the Go module and npm package first, then
+publishes the six supported CLI binaries to the public `openapi-sdkgen` npm
+package, updates the Homebrew formula, and finally publishes the GitHub Release.
+Stable versions publish with the `latest` dist-tag; prereleases publish with
+`next`.
 
 The npm publish job uses GitHub Actions OIDC and accepts no npm token. Before
 the first automated release, bootstrap the npm package once with an interactive
@@ -250,8 +252,9 @@ just release
 ```
 
 It requires a clean `main` worktree, fetches current tags, shows the version and
-release-note commits, recommends a conventional-commit bump, runs `just agent
-check`, then creates and atomically pushes an annotated tag. The first release
+release-note commits, recommends a conventional-commit bump, runs the same
+runner-neutral release checks used by GitHub Actions, then creates and atomically
+pushes an annotated tag and waits for delivery to finish. The first release
 uses `v0.1.0`.
 
 Override the recommendation when needed:
@@ -266,8 +269,18 @@ just release v0.2.0-rc.1
 Use `--dry-run` to inspect the release without tagging or pushing, `--since TAG`
 to select the release-note base, and `--yes` to skip the final push prompt.
 
-The existing tag workflow handles the GitHub Release, npm publish, and Homebrew
-formula update after the push succeeds.
+If a delivery step fails after the tag exists, fix the workflow on `main` and
+resume that exact tag instead of creating another version:
 
-The Homebrew formula workflow is pinned to a reviewed `homebrew-tap` commit.
-Update that pin intentionally when changing the reusable formula pipeline.
+```sh
+just release --resume v0.2.0 --yes
+```
+
+The tag workflow verifies that the tag is annotated SemVer and merged into
+`main`. `just release` waits for its tag's delivery to finish before returning;
+manual tag pushes are unsupported. It resumes safely when npm already contains
+the expected package and reconciles an incomplete GitHub Release only after
+revalidating the exact annotated tag and its required asset checksums.
+
+The Homebrew formula workflow is called from `homebrew-tap` `main`, so changes
+to the shared pipeline take effect once that repository is pushed.
