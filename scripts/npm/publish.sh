@@ -75,8 +75,17 @@ NODE
 fi
 published_integrity="$(npm view "${package_name}@${package_version}" dist.integrity --json 2>/dev/null || true)"
 if [[ -n "$published_integrity" && "$published_integrity" != "null" ]]; then
+  published_integrity="$(node -e '
+const result = JSON.parse(process.argv[1]);
+if (typeof result === "string") {
+  process.stdout.write(result);
+} else if (result !== null && result?.error?.code !== "E404") {
+  throw new Error(`unexpected npm integrity response: ${JSON.stringify(result)}`);
+}
+' "$published_integrity")"
+fi
+if [[ -n "$published_integrity" ]]; then
   local_integrity="$(npm pack --dry-run --json "$package_dir" | node -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => process.stdout.write(JSON.parse(input)[0].integrity));')"
-  published_integrity="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]))' "$published_integrity")"
   if [[ "$local_integrity" == "$published_integrity" ]]; then
     if [[ "$current_dist_tag" != "$package_version" ]]; then
       echo "npm package already exists, but ${dist_tag} points to ${current_dist_tag:-nothing}; repair that dist-tag interactively before resuming" >&2

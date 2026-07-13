@@ -27,7 +27,15 @@ cat >"$mock_bin/npm" <<'EOF'
 set -euo pipefail
 case "$1" in
   view)
-    printf 'null\n'
+    if [[ "$*" == *"dist-tags"* ]]; then
+      printf '{"latest":"0.0.0-bootstrap.0"}\n'
+    else
+      integrity_response="${NPM_PUBLISH_TEST_INTEGRITY_RESPONSE:-}"
+      if [[ -z "$integrity_response" ]]; then
+        integrity_response='{"error":{"code":"E404"}}'
+      fi
+      printf '%s\n' "$integrity_response"
+    fi
     ;;
   publish)
     printf '%s\n%s\n' "${NODE_AUTH_TOKEN-}" "${NPM_TOKEN-}" >"${NPM_PUBLISH_TEST_MARKER:?}"
@@ -49,6 +57,13 @@ ACTIONS_ID_TOKEN_REQUEST_URL=https://token.actions.example.test \
 
 if [[ "$(wc -l <"$marker" | tr -d ' ')" != "2" || -n "$(tr -d '\n' <"$marker")" ]]; then
   fail "legacy npm authentication variables reached npm publish"
+fi
+
+if output="$(ACTIONS_ID_TOKEN_REQUEST_URL=https://token.actions.example.test NPM_PUBLISH_TEST_INTEGRITY_RESPONSE='{"error":{"code":"E500"}}' NPM_PUBLISH_TEST_MARKER="$marker" PATH="$mock_bin:$PATH" bash "$ROOT/scripts/npm/publish.sh" "$package_dir" latest 2>&1)"; then
+  fail "accepted an unexpected npm integrity response"
+fi
+if [[ "$output" != *"unexpected npm integrity response"* ]]; then
+  fail "unexpected integrity-response error: $output"
 fi
 
 if output="$(PATH="$mock_bin:$PATH" bash "$ROOT/scripts/npm/publish.sh" "$package_dir" latest 2>&1)"; then
