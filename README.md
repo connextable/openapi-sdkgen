@@ -249,10 +249,10 @@ Use the release helper instead of creating and pushing tags manually:
 just release
 ```
 
-It requires a clean `main` worktree, fetches current tags, recommends the next
-version from conventional commits, runs `just agent check`, creates an annotated
-tag, then atomically pushes `main` and the tag. The first release defaults to
-`v0.1.0`.
+It requires a clean `main` worktree, fetches current tags, shows the version and
+release-note commits, recommends a conventional-commit bump, runs `just agent
+check`, then creates and atomically pushes an annotated tag. The first release
+uses `v0.1.0`.
 
 Override the recommendation when needed:
 
@@ -262,6 +262,9 @@ just release minor
 just release major
 just release v0.2.0-rc.1
 ```
+
+Use `--dry-run` to inspect the release without tagging or pushing, `--since TAG`
+to select the release-note base, and `--yes` to skip the final push prompt.
 
 The existing tag workflow handles the GitHub Release, npm publish, and Homebrew
 formula update after the push succeeds.

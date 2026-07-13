@@ -20,7 +20,10 @@ fail() {
 assert_contains() {
   local output="$1"
   local expected="$2"
-  [[ "$output" == *"$expected"* ]] || fail "expected output to contain: $expected"
+  if [[ "$output" != *"$expected"* ]]; then
+    printf '%s\n' "$output" >&2
+    fail "expected output to contain: $expected"
+  fi
 }
 
 git init --bare "$origin" >/dev/null
@@ -28,8 +31,9 @@ git init --initial-branch=main "$repository" >/dev/null
 git -C "$repository" config user.name "release test"
 git -C "$repository" config user.email "release-test@example.test"
 git -C "$repository" remote add origin "$origin"
-mkdir -p "$repository/scripts/release" "$mock_bin"
+mkdir -p "$repository/scripts/release" "$repository/scripts/lib" "$mock_bin"
 cp "$ROOT/scripts/release/publish.sh" "$repository/scripts/release/publish.sh"
+cp "$ROOT/scripts/lib/ui.sh" "$repository/scripts/lib/ui.sh"
 chmod +x "$repository/scripts/release/publish.sh"
 
 cat >"$mock_bin/just" <<'EOF'
@@ -40,10 +44,13 @@ fi
 EOF
 chmod +x "$mock_bin/just"
 
-git -C "$repository" add scripts/release/publish.sh
+git -C "$repository" add scripts/release/publish.sh scripts/lib/ui.sh
 git -C "$repository" commit -m "feat: release helper" >/dev/null
 git -C "$repository" tag -a v1.0.0 -m v1.0.0
 git -C "$repository" push --follow-tags -u origin main >/dev/null
+if [[ -n "$(git -C "$repository" status --porcelain)" ]]; then
+  fail "test repository is unexpectedly dirty after setup"
+fi
 
 git -C "$repository" switch -c future >/dev/null
 git -C "$repository" commit --allow-empty -m "feat!: future breaking change" >/dev/null
@@ -57,32 +64,32 @@ run_release() {
   PATH="$mock_bin:$PATH" "$repository/scripts/release/publish.sh" "$@"
 }
 
-output="$(run_release --dry-run)"
-assert_contains "$output" "Previous stable tag: v1.0.0"
-assert_contains "$output" "Release tag: v1.0.1"
+output="$(run_release --since v1.0.0 --dry-run patch)"
+assert_contains "$output" "Last stable tag v1.0.0"
+assert_contains "$output" "Tag          v1.0.1"
 
-if output="$(run_release v0.9.0 2>&1)"; then
+if output="$(run_release --since v1.0.0 --dry-run v0.9.0 2>&1)"; then
   fail "accepted a version older than the reachable stable tag"
 fi
-assert_contains "$output" "version must be newer than reachable tag v1.0.0"
+assert_contains "$output" "Tag must be newer than reachable tag v1.0.0"
 
-if output="$(run_release v1.0.1-01 2>&1)"; then
+if output="$(run_release --since v1.0.0 --dry-run v1.0.1-01 2>&1)"; then
   fail "accepted a prerelease numeric identifier with a leading zero"
 fi
-assert_contains "$output" "numeric prerelease identifiers must not have leading zeroes"
+assert_contains "$output" "Numeric prerelease identifiers must not have leading zeroes"
 
 git -C "$repository" tag -a v1.1.0-rc.2 -m v1.1.0-rc.2
 git -C "$repository" push origin v1.1.0-rc.2 >/dev/null
-if output="$(run_release v1.1.0-beta.3 2>&1)"; then
+if output="$(run_release --since v1.0.0 --dry-run v1.1.0-beta.3 2>&1)"; then
   fail "accepted a prerelease older than the reachable prerelease"
 fi
-assert_contains "$output" "version must be newer than reachable tag v1.1.0-rc.2"
-output="$(run_release --dry-run)"
-assert_contains "$output" "Release tag: v1.1.0"
+assert_contains "$output" "Tag must be newer than reachable tag v1.1.0-rc.2"
+output="$(run_release --since v1.0.0 --dry-run)"
+assert_contains "$output" "Tag          v1.1.0"
 
-if output="$(RELEASE_TEST_MUTATE_HEAD=1 run_release patch 2>&1)"; then
+if output="$(RELEASE_TEST_MUTATE_HEAD=1 run_release --since v1.0.0 patch 2>&1)"; then
   fail "tagged a HEAD changed by the check command"
 fi
-assert_contains "$output" "HEAD changed while checks ran"
+assert_contains "$output" "branch or HEAD changed while checks ran"
 
 agent_note "ok release script test"

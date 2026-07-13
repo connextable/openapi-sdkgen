@@ -58,12 +58,12 @@ just docs lock
 ## User release command
 
 ```txt
-just release [patch|minor|major|vX.Y.Z[-prerelease]]
+just release [--dry-run|-n] [--yes|-y] [--since TAG] [patch|minor|major|vX.Y.Z[-prerelease]]
 ```
 
-`just release` validates the current `main` commit, creates an annotated tag,
-and atomically pushes the branch and tag. It is a user-facing release command,
-not an agent wrapper.
+`just release` is the user-facing release command, not an agent wrapper. It
+shows the commits and release-note base, recommends a conventional-commit bump,
+runs the full agent check, then atomically pushes `main` and the annotated tag.
 
 ## Output policy
 
