@@ -57,7 +57,11 @@ rm -rf "$fixture"
   --input "$TYPESCRIPT_ROOT/fixtures/contract.openapi.json" \
   --target typescript \
   --output "$fixture"
-corepack "pnpm@$PNPM_VERSION" --dir "$TYPESCRIPT_ROOT" --config.store-dir="$WORK_ROOT/pnpm-store" run conformance
+# Do not delegate through the `conformance` package script here. On a fresh
+# GitHub runner, `corepack pnpm` can execute pnpm without installing a global
+# `pnpm` shim, while a nested `pnpm run ...` cannot resolve that shim.
+corepack "pnpm@$PNPM_VERSION" --dir "$TYPESCRIPT_ROOT" --config.store-dir="$WORK_ROOT/pnpm-store" run typecheck
+corepack "pnpm@$PNPM_VERSION" --dir "$TYPESCRIPT_ROOT" --config.store-dir="$WORK_ROOT/pnpm-store" run test
 corepack "pnpm@$PNPM_VERSION" --dir "$TYPESCRIPT_ROOT" --config.store-dir="$WORK_ROOT/pnpm-store" run coverage
 
 SOURCE_ROOT="$ROOT" \

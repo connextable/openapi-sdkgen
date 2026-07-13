@@ -10,7 +10,7 @@
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "conformance": "pnpm run typecheck && pnpm run test"
+    "conformance": "corepack pnpm run typecheck && corepack pnpm run test"
   },
   "devDependencies": {
     "@types/node": "24.12.0",

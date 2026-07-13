@@ -4,6 +4,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh
 
 workflow="$ROOT/.github/workflows/release.yml"
 goreleaser="$ROOT/.goreleaser.yaml"
+release_check="$ROOT/scripts/release/check.sh"
 
 require_pattern() {
   local pattern="$1"
@@ -21,10 +22,26 @@ reject_pattern() {
   fi
 }
 
+reject_release_check_pattern() {
+  local pattern="$1"
+  if grep -Eq "$pattern" "$release_check"; then
+    echo "release check contains forbidden contract: $pattern" >&2
+    exit 1
+  fi
+}
+
 require_goreleaser_pattern() {
   local pattern="$1"
   if ! grep -Eq "$pattern" "$goreleaser"; then
     echo "GoReleaser config is missing required release contract: $pattern" >&2
+    exit 1
+  fi
+}
+
+require_release_check_pattern() {
+  local pattern="$1"
+  if ! grep -Eq "$pattern" "$release_check"; then
+    echo "release check is missing required contract: $pattern" >&2
     exit 1
   fi
 }
@@ -36,6 +53,8 @@ require_pattern 'Validate release tag'
 require_pattern 'Verify release inputs'
 require_pattern 'Run release checks'
 require_pattern 'scripts/release/check\.sh'
+require_pattern 'Enable Corepack pnpm shim'
+require_pattern 'corepack enable pnpm'
 require_pattern 'Verify immutable tag target'
 require_pattern 'scripts/npm/package\.sh'
 require_pattern 'scripts/npm/check\.sh'
@@ -48,5 +67,8 @@ require_goreleaser_pattern 'replace_existing_artifacts: true'
 require_goreleaser_pattern 'target_commitish:'
 require_pattern 'contents: write'
 reject_pattern 'just agent'
+require_release_check_pattern 'run typecheck'
+require_release_check_pattern 'run test'
+reject_release_check_pattern 'run conformance'
 
 agent_note "ok release workflow contract"

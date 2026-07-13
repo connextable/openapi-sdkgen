@@ -90,6 +90,8 @@ jobs:
         with:
           node-version: "24.18.0"
           package-manager-cache: false
+      - name: Enable Corepack pnpm shim
+        run: corepack enable pnpm
       - name: Verify immutable tag target
         run: test "$(git rev-parse HEAD)" = "${{ needs.validate-release.outputs.commit }}"
       - name: Run release checks
