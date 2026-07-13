@@ -74,6 +74,9 @@ example-capabilities:
 release-check:
     ./scripts/agent/release-check
 
+release-script-test:
+    ./scripts/agent/release-script-test
+
 npm-package version:
     ./scripts/agent/npm-package {{quote(version)}}
 

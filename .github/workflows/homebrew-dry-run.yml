@@ -1,0 +1,18 @@
+name: homebrew dry run
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@9bf477a17032965b53d7ba6bc849242393b76c9a # 9bf477a
+    with:
+      formula: openapi-sdkgen
+      ref: ${{ github.sha }}
+      dry-run: true

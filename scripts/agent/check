@@ -12,6 +12,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh
 "$ROOT/scripts/agent/conformance"
 "$ROOT/scripts/agent/coverage"
 "$ROOT/scripts/agent/release-check"
+"$ROOT/scripts/agent/release-script-test"
 todo_port="${TODO_API_PORT:-$((20000 + RANDOM % 10000))}"
 widget_port="${WIDGET_API_PORT:-$((30000 + RANDOM % 10000))}"
 capabilities_api_port="${CAPABILITIES_API_PORT:-$((50000 + RANDOM % 10000))}"

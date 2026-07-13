@@ -8,7 +8,8 @@
     "openapi-sdkgen": "./bin/openapi-sdkgen.js"
   },
   "files": [
-    "bin"
+    "bin",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=18"

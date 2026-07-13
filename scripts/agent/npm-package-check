@@ -20,6 +20,28 @@ if [[ -z "$tarball" ]]; then
   echo "npm package tarball was not created" >&2
   exit 1
 fi
+tarball_files="$test_dir/tarball-files.txt"
+tar -tzf "$tarball" >"$tarball_files"
+required_files=(
+  package/package.json
+  package/README.md
+  package/LICENSE
+  package/NOTICE
+  package/bin/openapi-sdkgen.js
+)
+for target in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64 windows-amd64 windows-arm64; do
+  executable="openapi-sdkgen"
+  if [[ "$target" == windows-* ]]; then
+    executable+=".exe"
+  fi
+  required_files+=("package/bin/$target/$executable")
+done
+for required_file in "${required_files[@]}"; do
+  if ! grep -Fqx "$required_file" "$tarball_files"; then
+    echo "npm package tarball is missing required file: $required_file" >&2
+    exit 1
+  fi
+done
 install_dir="$test_dir/install"
 agent_run "npm package install" npm install --ignore-scripts --no-audit --no-fund --offline --prefix "$install_dir" "$tarball"
 agent_run "npm package installed launcher" "$install_dir/node_modules/.bin/openapi-sdkgen" --help

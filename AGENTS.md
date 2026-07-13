@@ -37,6 +37,7 @@ just agent example-todo
 just agent example-advanced
 just agent example-capabilities
 just agent release-check
+just agent release-script-test
 just agent npm-package VERSION
 just agent npm-package-check [PACKAGE_DIRECTORY]
 just agent npm-publish PACKAGE_DIRECTORY [latest|next]
@@ -53,6 +54,16 @@ just docs build
 just docs preview
 just docs lock
 ```
+
+## User release command
+
+```txt
+just release [patch|minor|major|vX.Y.Z[-prerelease]]
+```
+
+`just release` validates the current `main` commit, creates an annotated tag,
+and atomically pushes the branch and tag. It is a user-facing release command,
+not an agent wrapper.
 
 ## Output policy
 

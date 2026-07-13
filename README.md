@@ -236,9 +236,35 @@ the first automated release, bootstrap the npm package once with an interactive
 
 - GitHub repository: `connextable/openapi-sdkgen`
 - Workflow filename: `release.yml`
-- Environment: `npm-publish`
 - Allowed action: `npm publish`
 
 The package must already exist before npm can attach a trusted publisher. After
-that one-time setup, protect the `npm-publish` GitHub environment and remove
-any unused npm publish tokens.
+that one-time setup, remove any unused npm publish tokens.
+
+## Releasing
+
+Use the release helper instead of creating and pushing tags manually:
+
+```sh
+just release
+```
+
+It requires a clean `main` worktree, fetches current tags, recommends the next
+version from conventional commits, runs `just agent check`, creates an annotated
+tag, then atomically pushes `main` and the tag. The first release defaults to
+`v0.1.0`.
+
+Override the recommendation when needed:
+
+```sh
+just release patch
+just release minor
+just release major
+just release v0.2.0-rc.1
+```
+
+The existing tag workflow handles the GitHub Release, npm publish, and Homebrew
+formula update after the push succeeds.
+
+The Homebrew formula workflow is pinned to a reviewed `homebrew-tap` commit.
+Update that pin intentionally when changing the reusable formula pipeline.
