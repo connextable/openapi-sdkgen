@@ -58,7 +58,7 @@ jobs:
 
   publish-homebrew:
     needs: release
-    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@ca59d9c42ad908c9d5cc146a607e7c114a17d17c # ca59d9c
+    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@ca59d9ca7f476daa09af2168440f20ad37ef3ac3 # ca59d9c
     with:
       formula: openapi-sdkgen
       ref: ${{ github.ref }}
