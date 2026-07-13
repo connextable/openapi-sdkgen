@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,17 +34,42 @@ func CompileFile(path string) (*ir.Document, error) {
 // reference and extension capabilities. It never fetches a remote reference
 // unless RemoteRefAllowlist is populated.
 func CompileFileWithOptions(path string, options CompileOptions) (*ir.Document, error) {
-	return compileFile(path, false, options)
+	if options.InputBase != "" || options.InputReader != nil {
+		return nil, errors.New("CompileFileWithOptions does not accept stdin input options")
+	}
+	source, err := loadFileInput(path)
+	if err != nil {
+		return nil, err
+	}
+	return compileInput(source, false, options)
+}
+
+// CompileInputWithOptions compiles an OpenAPI document read from a path, file
+// URL, HTTP(S) URL, or standard input (-).
+func CompileInputWithOptions(input string, options CompileOptions) (*ir.Document, error) {
+	source, err := loadInputSource(input, options)
+	if err != nil {
+		return nil, err
+	}
+	return compileInput(source, false, options)
 }
 
 func CompileProjectFile(path string) (*ir.Document, error) {
-	return compileFile(path, true, CompileOptions{})
+	source, err := loadFileInput(path)
+	if err != nil {
+		return nil, err
+	}
+	return compileInput(source, true, CompileOptions{})
 }
 
-func compileFile(path string, project bool, options CompileOptions) (*ir.Document, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read OpenAPI document: %w", err)
+func compileInput(source inputSource, project bool, options CompileOptions) (*ir.Document, error) {
+	data := source.data
+	if source.remoteBase != nil {
+		var err error
+		data, err = absolutizeRelativeRemoteReferences(data, source.remoteBase)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if project && (len(options.RemoteRefAllowlist) != 0 || len(options.SchemaExtensionManifests) != 0 || options.UpdateRefLock || options.Offline || options.RefLockPath != "") {
 		return nil, errors.New("project compilation does not support remote references or schema extensions")
@@ -52,35 +78,57 @@ func compileFile(path string, project bool, options CompileOptions) (*ir.Documen
 		if err := rejectProjectExternalReferences(data); err != nil {
 			return nil, err
 		}
-	} else if err := rejectEscapingFileReferencesWithRemote(path, filepath.Dir(path), len(options.RemoteRefAllowlist) != 0); err != nil {
-		return nil, err
 	}
-	needsLock := len(options.RemoteRefAllowlist) != 0 || len(options.SchemaExtensionManifests) != 0
+	if source.stdin && source.fileBase == "" && source.remoteBase == nil && hasRelativeExternalReference(data) {
+		return nil, errors.New("standard input contains a relative $ref; pass --input-base with the source document location")
+	}
 	lockPath := options.RefLockPath
-	if lockPath == "" {
-		lockPath = defaultReferenceLockPath(path)
+	if lockPath == "" && source.filePath != "" {
+		lockPath = defaultReferenceLockPath(source.filePath)
+	}
+	if lockPath == "" && len(options.SchemaExtensionManifests) != 0 {
+		return nil, errors.New("schema extensions with URL or stdin input require --ref-lock")
 	}
 	var lock *referenceLock
-	if needsLock {
+	shouldLoadLock := len(options.RemoteRefAllowlist) != 0 || len(options.SchemaExtensionManifests) != 0 || options.UpdateRefLock
+	if source.filePath == "" && options.RefLockPath != "" {
+		shouldLoadLock = true
+	}
+	if lockPath != "" && shouldLoadLock {
 		// A remote allowlist alone does not imply a network request. Defer a
 		// missing-lock failure until a remote document or extension is actually
 		// used, so offline documents stay reproducible without empty lockfiles.
+		var err error
 		lock, err = loadReferenceLock(lockPath, true)
 		if err != nil {
 			return nil, err
 		}
 	}
 	var remoteResolver *remoteReferenceResolver
-	if len(options.RemoteRefAllowlist) != 0 {
-		remoteResolver, err = newRemoteReferenceResolver(options, lock, filepath.Join(filepath.Dir(lockPath), ".openapi-sdkgen-cache"))
+	if len(options.RemoteRefAllowlist) != 0 || source.remoteBase != nil {
+		cache := ""
+		if lockPath != "" {
+			cache = filepath.Join(filepath.Dir(lockPath), ".openapi-sdkgen-cache")
+		}
+		var err error
+		remoteResolver, err = newRemoteReferenceResolver(options, lock, cache, source.remoteBase)
 		if err != nil {
 			return nil, err
 		}
 	}
+	if !project && source.filePath != "" {
+		if err := rejectEscapingFileReferencesWithRemote(source.filePath, source.fileBase, remoteResolver != nil); err != nil {
+			return nil, err
+		}
+	} else if !project && source.fileBase != "" {
+		if err := rejectEscapingFileReferenceData(data, source.fileBase, remoteResolver != nil); err != nil {
+			return nil, err
+		}
+	}
 	bundlerConfiguration := &datamodel.DocumentConfiguration{
-		BasePath:              filepath.Dir(path),
-		SpecFilePath:          path,
-		AllowFileReferences:   true,
+		BasePath:              source.fileBase,
+		SpecFilePath:          source.filePath,
+		AllowFileReferences:   source.fileBase != "",
 		AllowRemoteReferences: remoteResolver != nil,
 	}
 	if remoteResolver != nil {
@@ -99,11 +147,11 @@ func compileFile(path string, project bool, options CompileOptions) (*ir.Documen
 	if err := yaml.Unmarshal(bundled, &value); err != nil {
 		return nil, fmt.Errorf("decode bundled OpenAPI document: %w", err)
 	}
-	var source any
-	if err := yaml.Unmarshal(data, &source); err != nil {
+	var sourceDocument any
+	if err := yaml.Unmarshal(data, &sourceDocument); err != nil {
 		return nil, fmt.Errorf("decode source OpenAPI document: %w", err)
 	}
-	merged := mergeBundledDocument(source, value)
+	merged := mergeBundledDocument(sourceDocument, value)
 	merged, err = normalizeNestedSchemaReferences(merged)
 	if err != nil {
 		return nil, fmt.Errorf("normalize nested OpenAPI schema references: %w", err)
@@ -120,12 +168,54 @@ func compileFile(path string, project bool, options CompileOptions) (*ir.Documen
 	if err != nil {
 		return nil, err
 	}
-	if needsLock && options.UpdateRefLock {
+	if lock != nil && options.UpdateRefLock {
 		if err := writeReferenceLock(lockPath, lock); err != nil {
 			return nil, err
 		}
 	}
 	return document, nil
+}
+
+func absolutizeRelativeRemoteReferences(data []byte, base *url.URL) ([]byte, error) {
+	var document any
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("decode OpenAPI input for remote reference resolution: %w", err)
+	}
+	var visit func(any) error
+	visit = func(value any) error {
+		switch typed := value.(type) {
+		case map[string]any:
+			if reference, _ := typed["$ref"].(string); reference != "" && !strings.HasPrefix(reference, "#") {
+				parsed, err := url.Parse(reference)
+				if err != nil {
+					return fmt.Errorf("parse OpenAPI reference %q: %w", reference, err)
+				}
+				if !parsed.IsAbs() {
+					typed["$ref"] = base.ResolveReference(parsed).String()
+				}
+			}
+			for _, item := range typed {
+				if err := visit(item); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, item := range typed {
+				if err := visit(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit(document); err != nil {
+		return nil, err
+	}
+	normalized, err := yaml.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("normalize OpenAPI remote references: %w", err)
+	}
+	return normalized, nil
 }
 
 // mergeBundledDocument keeps extensions and newly standardized OpenAPI fields
@@ -169,6 +259,14 @@ func rejectEscapingFileReferencesWithRemote(path, root string, allowRemote bool)
 	return inspectReferenceFile(path, resolvedRoot, make(map[string]bool), allowRemote)
 }
 
+func rejectEscapingFileReferenceData(data []byte, root string, allowRemote bool) error {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve OpenAPI input directory: %w", err)
+	}
+	return inspectReferenceData(data, resolvedRoot, resolvedRoot, make(map[string]bool), allowRemote)
+}
+
 func inspectReferenceFile(path, root string, visited map[string]bool, allowRemote bool) error {
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -185,6 +283,10 @@ func inspectReferenceFile(path, root string, visited map[string]bool, allowRemot
 	if err != nil {
 		return fmt.Errorf("read OpenAPI reference file %s: %w", resolvedPath, err)
 	}
+	return inspectReferenceData(data, filepath.Dir(resolvedPath), root, visited, allowRemote)
+}
+
+func inspectReferenceData(data []byte, directory, root string, visited map[string]bool, allowRemote bool) error {
 	var document any
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return fmt.Errorf("inspect OpenAPI references: %w", err)
@@ -194,7 +296,7 @@ func inspectReferenceFile(path, root string, visited map[string]bool, allowRemot
 		switch typed := value.(type) {
 		case map[string]any:
 			if reference, _ := typed["$ref"].(string); reference != "" {
-				target, err := resolveContainedReference(reference, filepath.Dir(resolvedPath), root, allowRemote)
+				target, err := resolveContainedReference(reference, directory, root, allowRemote)
 				if err != nil {
 					return err
 				}
@@ -217,6 +319,38 @@ func inspectReferenceFile(path, root string, visited map[string]bool, allowRemot
 			}
 		}
 		return nil
+	}
+	return visit(document)
+}
+
+func hasRelativeExternalReference(data []byte) bool {
+	var document any
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(value any) bool {
+		switch typed := value.(type) {
+		case map[string]any:
+			if reference, _ := typed["$ref"].(string); reference != "" && !strings.HasPrefix(reference, "#") {
+				file, _, _ := strings.Cut(reference, "#")
+				if file != "" && !strings.Contains(file, "://") && !strings.HasPrefix(file, "file:") && !filepath.IsAbs(file) {
+					return true
+				}
+			}
+			for _, item := range typed {
+				if visit(item) {
+					return true
+				}
+			}
+		case []any:
+			for _, item := range typed {
+				if visit(item) {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	return visit(document)
 }

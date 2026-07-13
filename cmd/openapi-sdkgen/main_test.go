@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +11,106 @@ import (
 
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
+
+func TestGenerateReadsStandardInput(t *testing.T) {
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated-client")
+	previous := standardInput
+	standardInput = strings.NewReader(minimalDocument)
+	t.Cleanup(func() { standardInput = previous })
+	if err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(output, "index.ts")); err != nil {
+		t.Fatalf("generated stdin SDK: %v", err)
+	}
+}
+
+func TestGenerateDoesNotPublishOutputWhenInputFails(t *testing.T) {
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated-client")
+	err := run([]string{"generate", "--input", "git://example.test/openapi.yaml", "--target", "typescript", "--output", output})
+	if err == nil || !strings.Contains(err.Error(), "unsupported OpenAPI input scheme") {
+		t.Fatalf("generate error = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("failed input published output: %v", err)
+	}
+}
+
+func TestGenerateDoesNotPublishOutputWhenHTTPInputFails(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated-client")
+	err := run([]string{"generate", "--input", server.URL + "/openapi.json", "--target", "typescript", "--output", output})
+	if err == nil || !strings.Contains(err.Error(), "unexpected HTTP status") {
+		t.Fatalf("generate error = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("failed HTTP input published output: %v", err)
+	}
+}
+
+func TestGenerateDoesNotPublishOutputWhenInputIsMalformed(t *testing.T) {
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated-client")
+	previous := standardInput
+	standardInput = strings.NewReader("not: [valid")
+	t.Cleanup(func() { standardInput = previous })
+	err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
+	if err == nil || !strings.Contains(err.Error(), "compile") {
+		t.Fatalf("generate error = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("malformed input published output: %v", err)
+	}
+}
+
+func TestGenerateDoesNotPublishOutputWhenStandardInputIsEmptyOrOversized(t *testing.T) {
+	previous := standardInput
+	t.Cleanup(func() { standardInput = previous })
+	for _, test := range []struct {
+		name   string
+		reader io.Reader
+		want   string
+	}{
+		{name: "empty", reader: strings.NewReader(""), want: "empty"},
+		{name: "oversized", reader: &repeatingInput{remaining: 64<<20 + 1}, want: "exceeds"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			output := filepath.Join(directory, "generated-client")
+			standardInput = test.reader
+			err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("generate error = %v", err)
+			}
+			if _, err := os.Stat(output); !os.IsNotExist(err) {
+				t.Fatalf("failed stdin input published output: %v", err)
+			}
+		})
+	}
+}
+
+type repeatingInput struct {
+	remaining int
+}
+
+func (reader *repeatingInput) Read(buffer []byte) (int, error) {
+	if reader.remaining == 0 {
+		return 0, io.EOF
+	}
+	count := len(buffer)
+	if count > reader.remaining {
+		count = reader.remaining
+	}
+	for index := range buffer[:count] {
+		buffer[index] = 'x'
+	}
+	reader.remaining -= count
+	return count, nil
+}
 
 func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 	directory := t.TempDir()

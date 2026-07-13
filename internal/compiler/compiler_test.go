@@ -1,11 +1,223 @@
 package sdkgen
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestCompileInputAcceptsPathFileURLHTTPAndStandardInput(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "contract.yaml")
+	contents := []byte(`openapi: 3.2.0
+info:
+  title: Source inputs
+  version: "1"
+paths: {}
+`)
+	if err := os.WriteFile(input, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileURL := (&url.URL{Scheme: "file", Path: input}).String()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/openapi" {
+			http.NotFound(response, request)
+			return
+		}
+		response.Header().Set("Content-Type", "text/plain")
+		_, _ = response.Write(contents)
+	}))
+	defer server.Close()
+	var expected any
+	for _, test := range []struct {
+		name    string
+		input   string
+		options CompileOptions
+	}{
+		{name: "path", input: input},
+		{name: "file URL", input: fileURL},
+		{name: "HTTP URL", input: server.URL + "/openapi"},
+		{name: "standard input", input: "-", options: CompileOptions{InputReader: strings.NewReader(string(contents))}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := CompileInputWithOptions(test.input, test.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if document.OpenAPIVersion != "3.2.0" {
+				t.Fatalf("version = %q", document.OpenAPIVersion)
+			}
+			if expected == nil {
+				expected = document
+				return
+			}
+			if !reflect.DeepEqual(expected, document) {
+				t.Fatal("equivalent input sources produced different compiler documents")
+			}
+		})
+	}
+}
+
+func TestInputLocatorDoesNotTreatFilesystemPathsAsURLs(t *testing.T) {
+	for _, value := range []string{"C:\\work\\openapi.yaml", "schema:openapi.yaml", "./schema:openapi.yaml"} {
+		if isURLInput(value) {
+			t.Fatalf("filesystem input %q was classified as a URL", value)
+		}
+	}
+	if _, err := parseInputBase("C:\\work\\openapi.yaml"); err != nil {
+		t.Fatalf("Windows input base classification failed: %v", err)
+	}
+	for _, value := range []string{"file:///workspace/openapi.yaml", "http://localhost:4010/openapi.yaml", "https://api.example.test/openapi.yaml"} {
+		if !isURLInput(value) {
+			t.Fatalf("URL input %q was not classified as a URL", value)
+		}
+	}
+}
+
+func TestCompileInputResolvesRelativeReferencesFromURLAndStdinBase(t *testing.T) {
+	directory := t.TempDir()
+	schema := []byte(`Thing:
+  type: object
+  required: [id]
+  properties:
+    id: {type: string}
+`)
+	input := []byte(`openapi: 3.2.0
+info: {title: Relative reference, version: "1"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: schemas.yaml#/Thing}
+`)
+	if err := os.WriteFile(filepath.Join(directory, "schemas.yaml"), schema, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileInput := filepath.Join(directory, "openapi.yaml")
+	if err := os.WriteFile(fileInput, input, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := CompileInputWithOptions((&url.URL{Scheme: "file", Path: fileInput}).String(), CompileOptions{})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("file URL compilation = %#v, %v", compiled, err)
+	}
+	if _, err := CompileInputWithOptions("-", CompileOptions{InputReader: strings.NewReader(string(input))}); err == nil || !strings.Contains(err.Error(), "--input-base") {
+		t.Fatalf("stdin relative reference error = %v", err)
+	}
+	compiled, err = CompileInputWithOptions("-", CompileOptions{
+		InputReader: strings.NewReader(string(input)),
+		InputBase:   filepath.Join(directory, "openapi.yaml"),
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("stdin base compilation = %#v, %v", compiled, err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/openapi.yaml":
+			_, _ = response.Write(input)
+		case "/schemas.yaml":
+			_, _ = response.Write(schema)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	if _, err := CompileInputWithOptions(server.URL+"/openapi.yaml", CompileOptions{}); err == nil || !strings.Contains(err.Error(), "--ref-lock") {
+		t.Fatalf("URL relative reference without lock error = %v", err)
+	}
+	compiled, err = CompileInputWithOptions(server.URL+"/openapi.yaml", CompileOptions{
+		RefLockPath:   filepath.Join(directory, "remote.lock"),
+		UpdateRefLock: true,
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("URL base compilation = %#v, %v", compiled, err)
+	}
+	compiled, err = CompileInputWithOptions(server.URL+"/openapi.yaml", CompileOptions{
+		RefLockPath: filepath.Join(directory, "remote.lock"),
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("URL base locked compilation = %#v, %v", compiled, err)
+	}
+
+	crossOrigin := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write(schema)
+	}))
+	defer crossOrigin.Close()
+	crossDocument := strings.Replace(string(input), "schemas.yaml", crossOrigin.URL+"/schemas.yaml", 1)
+	root := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte(crossDocument))
+	}))
+	defer root.Close()
+	if _, err := CompileInputWithOptions(root.URL+"/openapi.yaml", CompileOptions{RefLockPath: filepath.Join(directory, "cross.lock"), UpdateRefLock: true}); err == nil {
+		t.Fatalf("cross-origin reference error = %v", err)
+	}
+	compiled, err = CompileInputWithOptions(root.URL+"/openapi.yaml", CompileOptions{
+		RemoteRefAllowlist:    []string{crossOrigin.URL},
+		RefLockPath:           filepath.Join(directory, "cross.lock"),
+		UpdateRefLock:         true,
+		remoteReferenceClient: crossOrigin.Client(),
+		remoteReferenceLookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		},
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("allowlisted cross-origin compilation = %#v, %v", compiled, err)
+	}
+}
+
+func TestCompileFileIgnoresUnusedSiblingReferenceLock(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.2.0","info":{"title":"Input","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input+".openapi-sdkgen.lock", []byte("not JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileFile(input); err != nil {
+		t.Fatalf("self-contained file read an unused lock: %v", err)
+	}
+}
+
+func TestCompileInputRejectsOfflineHTTPAndUnexpectedInputBase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("offline HTTP input opened a request")
+	}))
+	defer server.Close()
+	if _, err := CompileInputWithOptions(server.URL, CompileOptions{Offline: true}); err == nil || !strings.Contains(err.Error(), "--offline") {
+		t.Fatalf("offline error = %v", err)
+	}
+	if _, err := CompileInputWithOptions("-", CompileOptions{InputReader: strings.NewReader("")}); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty stdin error = %v", err)
+	}
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.2.0","info":{"title":"Input","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileInputWithOptions(input, CompileOptions{InputBase: input}); err == nil || !strings.Contains(err.Error(), "only valid") {
+		t.Fatalf("input base error = %v", err)
+	}
+}
+
+func TestReadInputRejectsOversizedDocument(t *testing.T) {
+	if _, err := readInput(strings.NewReader(strings.Repeat("x", inputMaxBytes+1)), "test input"); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized input error = %v", err)
+	}
+}
 
 func TestCompileBuildsValidatedIR(t *testing.T) {
 	input := []byte(`{

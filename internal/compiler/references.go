@@ -31,6 +31,13 @@ const (
 // CompileOptions controls explicitly opt-in compiler capabilities. Empty
 // options preserve the offline, contained-local-reference default.
 type CompileOptions struct {
+	// InputBase supplies the document location used to resolve relative $ref
+	// values when input is read from standard input. It is ignored for file and
+	// URL input, which already provide their own location.
+	InputBase string
+	// InputReader replaces standard input for --input -. A nil value uses
+	// os.Stdin; tests can provide a deterministic reader.
+	InputReader io.Reader
 	// RemoteRefAllowlist contains exact HTTPS origins permitted for remote $ref
 	// resolution, for example "https://schemas.example.test".
 	RemoteRefAllowlist []string
@@ -46,6 +53,11 @@ type CompileOptions struct {
 	// SchemaExtensionManifests registers trusted local JSON Schema vocabulary
 	// extensions. A manifest is never discovered implicitly.
 	SchemaExtensionManifests []string
+
+	// Tests may replace the remote transport and DNS resolver without exposing
+	// those hooks through the CLI contract.
+	remoteReferenceClient *http.Client
+	remoteReferenceLookup hostLookup
 }
 
 type referenceLock struct {
@@ -117,15 +129,17 @@ func writeReferenceLock(path string, lock *referenceLock) error {
 type hostLookup func(context.Context, string) ([]net.IPAddr, error)
 
 type remoteReferenceResolver struct {
-	origins map[string]struct{}
-	lock    *referenceLock
-	update  bool
-	offline bool
-	cache   string
-	client  *http.Client
-	lookup  hostLookup
-	mu      sync.Mutex
-	errs    []error
+	origins       map[string]struct{}
+	trustedOrigin string
+	lock          *referenceLock
+	update        bool
+	offline       bool
+	cache         string
+	client        *http.Client
+	trustedClient *http.Client
+	lookup        hostLookup
+	mu            sync.Mutex
+	errs          []error
 }
 
 func (r *remoteReferenceResolver) handle(rawURL string) (*http.Response, error) {
@@ -147,7 +161,7 @@ func (r *remoteReferenceResolver) firstError() error {
 	return r.errs[0]
 }
 
-func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cache string) (*remoteReferenceResolver, error) {
+func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cache string, trustedBase *url.URL) (*remoteReferenceResolver, error) {
 	origins := make(map[string]struct{}, len(options.RemoteRefAllowlist))
 	for _, value := range options.RemoteRefAllowlist {
 		origin, err := canonicalRemoteOrigin(value)
@@ -156,15 +170,39 @@ func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cac
 		}
 		origins[origin] = struct{}{}
 	}
-	if len(origins) == 0 {
+	trustedOrigin := ""
+	if trustedBase != nil {
+		var err error
+		trustedOrigin, err = inputURLOrigin(trustedBase)
+		if err != nil {
+			return nil, fmt.Errorf("invalid OpenAPI input URL base: %w", err)
+		}
+	}
+	if len(origins) == 0 && trustedOrigin == "" {
 		return nil, errors.New("remote references require at least one --allow-remote-ref HTTPS origin")
 	}
 	lookup := func(ctx context.Context, host string) ([]net.IPAddr, error) {
 		return net.DefaultResolver.LookupIPAddr(ctx, host)
 	}
-	resolver := &remoteReferenceResolver{origins: origins, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, lookup: lookup}
+	if options.remoteReferenceLookup != nil {
+		lookup = options.remoteReferenceLookup
+	}
+	resolver := &remoteReferenceResolver{origins: origins, trustedOrigin: trustedOrigin, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, lookup: lookup}
 	resolver.client = secureRemoteHTTPClient(resolver)
+	if options.remoteReferenceClient != nil {
+		resolver.client = options.remoteReferenceClient
+	}
+	if trustedOrigin != "" {
+		resolver.trustedClient = trustedRemoteHTTPClient(resolver)
+	}
 	return resolver, nil
+}
+
+func inputURLOrigin(value *url.URL) (string, error) {
+	if value == nil || (strings.ToLower(value.Scheme) != "http" && strings.ToLower(value.Scheme) != "https") || value.Host == "" || value.User != nil {
+		return "", errors.New("must be an unauthenticated HTTP(S) URL")
+	}
+	return strings.ToLower(value.Scheme) + "://" + strings.ToLower(value.Host), nil
 }
 
 func canonicalRemoteOrigin(value string) (string, error) {
@@ -188,7 +226,13 @@ func (r *remoteReferenceResolver) validateURL(ctx context.Context, rawURL string
 
 func (r *remoteReferenceResolver) validateURLSyntax(rawURL string) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u == nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+	if err != nil || u == nil || u.Host == "" || u.User != nil {
+		return nil, fmt.Errorf("remote reference %q must be an unauthenticated URL", rawURL)
+	}
+	if r.isTrustedURL(u) {
+		return u, nil
+	}
+	if u.Scheme != "https" {
 		return nil, fmt.Errorf("remote reference %q must be an unauthenticated HTTPS URL", rawURL)
 	}
 	origin := u.Scheme + "://" + strings.ToLower(u.Host)
@@ -196,6 +240,11 @@ func (r *remoteReferenceResolver) validateURLSyntax(rawURL string) (*url.URL, er
 		return nil, fmt.Errorf("remote reference %q origin %q is not allowlisted", rawURL, origin)
 	}
 	return u, nil
+}
+
+func (r *remoteReferenceResolver) isTrustedURL(value *url.URL) bool {
+	origin, err := inputURLOrigin(value)
+	return err == nil && origin == r.trustedOrigin
 }
 
 func (r *remoteReferenceResolver) validateHost(ctx context.Context, host string) error {
@@ -268,6 +317,21 @@ func secureRemoteHTTPClient(resolver *remoteReferenceResolver) *http.Client {
 	}
 }
 
+func trustedRemoteHTTPClient(resolver *remoteReferenceResolver) *http.Client {
+	return &http.Client{
+		Timeout: inputTimeout,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= remoteReferenceRedirect {
+				return errors.New("remote reference redirect limit exceeded")
+			}
+			if !resolver.isTrustedURL(request.URL) {
+				return fmt.Errorf("remote reference redirect %q leaves the OpenAPI input origin", request.URL)
+			}
+			return nil
+		},
+	}
+}
+
 func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteReferenceTimeout)
 	defer cancel()
@@ -275,11 +339,17 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r.lock == nil {
+		return nil, fmt.Errorf("remote reference %s requires --ref-lock for URL or stdin input", rawURL)
+	}
 	key := u.String()
 	if r.offline {
 		return r.fetchCached(key)
 	}
-	if err := r.validateHost(ctx, u.Hostname()); err != nil {
+	client := r.client
+	if r.isTrustedURL(u) {
+		client = r.trustedClient
+	} else if err := r.validateHost(ctx, u.Hostname()); err != nil {
 		return nil, fmt.Errorf("remote reference %q host: %w", rawURL, err)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -287,7 +357,7 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/json, application/yaml, text/yaml, */*;q=0.1")
-	response, err := r.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("fetch remote reference %s: %w", u.String(), err)
 	}

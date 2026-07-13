@@ -28,6 +28,19 @@ openapi-sdkgen generate \
 출력 디렉터리는 비어 있어야 합니다. 생성기는 모든 산출물을 staging 영역에 먼저 작성하고, 모든 단계가
 성공했을 때만 최종 디렉터리에 publish합니다.
 
+루트 문서는 `file://` URL, HTTP(S) development server, stdin에서도 받을 수 있습니다. 이는 remote `$ref`가
+아닌 입력 source입니다.
+
+```sh
+openapi-sdkgen generate \
+  --input http://localhost:4010/openapi.json \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+다른 명령이 문서를 출력한다면 `--input -`를 사용하세요. 문서에 상대 `$ref`가 있다면
+`--input-base <path-or-url>`를 추가합니다.
+
 ## 3. 웹 애플리케이션에서 클라이언트 import
 
 ```ts

@@ -31,6 +31,20 @@ ESM instead, use the explicit `./generated/api/index.js` path.
 
 The output directory must be fresh. The CLI stages every artifact and publishes it only after generation succeeds, rather than modifying an existing package tree.
 
+`--input` accepts a local path, `file://` URL, HTTP(S) URL, or `-` for stdin.
+An HTTP(S) input is the root document, not a remote `$ref`, so local OpenAPI
+servers work without a remote-reference allowlist:
+
+```sh
+openapi-sdkgen generate \
+  --input http://localhost:4010/openapi.json \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+Pipe any other document source through stdin. When it contains relative `$ref`
+values, pass `--input-base <path-or-url>` as the original document location.
+
 ### Locked remote references and schema vocabularies
 
 Compilation is offline by default. To resolve a remote `$ref`, explicitly allow

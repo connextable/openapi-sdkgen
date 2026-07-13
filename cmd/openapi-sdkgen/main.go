@@ -16,7 +16,9 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
 
-const usage = "usage: openapi-sdkgen generate --input <document> --target typescript --output <directory> [--with <addon> ...] [--allow-remote-ref <https-origin> ...] [--ref-lock <path>] [--update-ref-lock] [--offline] [--schema-extension <manifest> ...]"
+const usage = "usage: openapi-sdkgen generate --input <path|file-url|http-url|-> --target typescript --output <directory> [--input-base <document>] [--with <addon> ...] [--allow-remote-ref <https-origin> ...] [--ref-lock <path>] [--update-ref-lock] [--offline] [--schema-extension <manifest> ...]"
+
+var standardInput io.Reader = os.Stdin
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -39,7 +41,8 @@ func run(args []string) error {
 func generate(args []string) error {
 	flags := flag.NewFlagSet("generate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	input := flags.String("input", "", "OpenAPI document path")
+	input := flags.String("input", "", "OpenAPI document path, file URL, HTTP(S) URL, or - for stdin")
+	inputBase := flags.String("input-base", "", "document location used to resolve relative refs from stdin input")
 	targetName := flags.String("target", "", "SDK target")
 	output := flags.String("output", "", "output directory")
 	var with repeatedStrings
@@ -80,7 +83,9 @@ func generate(args []string) error {
 	if err := generator.ValidateTargetOptions(target, options); err != nil {
 		return err
 	}
-	document, err := compiler.CompileFileWithOptions(*input, compiler.CompileOptions{
+	document, err := compiler.CompileInputWithOptions(*input, compiler.CompileOptions{
+		InputBase:                *inputBase,
+		InputReader:              standardInput,
 		RemoteRefAllowlist:       remoteRefs,
 		RefLockPath:              *refLock,
 		UpdateRefLock:            *updateRefLock,

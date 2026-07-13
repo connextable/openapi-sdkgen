@@ -30,6 +30,19 @@ openapi-sdkgen generate \
 The output directory must be fresh. Generation writes all artifacts to a
 staging area and publishes them only after every artifact succeeds.
 
+The root document can also come from a `file://` URL, an HTTP(S) development
+server, or stdin. It is a source, not a remote `$ref`:
+
+```sh
+openapi-sdkgen generate \
+  --input http://localhost:4010/openapi.json \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+Use `--input -` when another command supplies the document. If that document
+uses relative `$ref` values, add `--input-base <path-or-url>`.
+
 ## 3. Import the client in your web application
 
 ```ts
