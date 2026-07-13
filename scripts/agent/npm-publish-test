@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/openapi-sdkgen-npm-publish-test.XXXXXX")"
+mock_bin="$test_root/bin"
+package_dir="$test_root/package"
+marker="$test_root/publish-environment"
+
+cleanup() {
+  rm -rf "$test_root"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "npm publish test: $*" >&2
+  exit 1
+}
+
+mkdir -p "$mock_bin" "$package_dir"
+cat >"$package_dir/package.json" <<'EOF'
+{"name":"openapi-sdkgen-test","version":"1.2.3"}
+EOF
+
+cat >"$mock_bin/npm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  view)
+    printf 'null\n'
+    ;;
+  publish)
+    printf '%s\n%s\n' "${NODE_AUTH_TOKEN-}" "${NPM_TOKEN-}" >"${NPM_PUBLISH_TEST_MARKER:?}"
+    ;;
+  *)
+    echo "unexpected npm command: $*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$mock_bin/npm"
+
+ACTIONS_ID_TOKEN_REQUEST_URL=https://token.actions.example.test \
+  NODE_AUTH_TOKEN=legacy-node-token \
+  NPM_TOKEN=legacy-npm-token \
+  NPM_PUBLISH_TEST_MARKER="$marker" \
+  PATH="$mock_bin:$PATH" \
+  bash "$ROOT/scripts/npm/publish.sh" "$package_dir" latest
+
+if [[ "$(wc -l <"$marker" | tr -d ' ')" != "2" || -n "$(tr -d '\n' <"$marker")" ]]; then
+  fail "legacy npm authentication variables reached npm publish"
+fi
+
+if output="$(PATH="$mock_bin:$PATH" bash "$ROOT/scripts/npm/publish.sh" "$package_dir" latest 2>&1)"; then
+  fail "accepted publishing without a GitHub OIDC token"
+fi
+if [[ "$output" != *"npm publishing requires a GitHub Actions OIDC token"* ]]; then
+  fail "unexpected missing-OIDC error: $output"
+fi
+
+agent_note "ok npm publish OIDC contract"

@@ -23,10 +23,11 @@ if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
   echo "npm publishing requires a GitHub Actions OIDC token" >&2
   exit 2
 fi
-if [[ -n "${NODE_AUTH_TOKEN:-}" || -n "${NPM_TOKEN:-}" ]]; then
-  echo "npm publishing must use OIDC without an npm token" >&2
-  exit 2
-fi
+
+# actions/setup-node creates an npmrc entry that refers to NODE_AUTH_TOKEN.
+# npm's trusted-publishing flow uses the GitHub OIDC token first, so remove
+# legacy token variables to prevent any fallback to token authentication.
+unset NODE_AUTH_TOKEN NPM_TOKEN
 
 package_name="$(node -p "require(process.argv[1]).name" "$package_dir/package.json")"
 package_version="$(node -p "require(process.argv[1]).version" "$package_dir/package.json")"

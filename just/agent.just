@@ -88,3 +88,6 @@ npm-package-check package_dir='.tmp/npm-package':
 
 npm-publish package_dir dist_tag:
     ./scripts/agent/npm-publish {{quote(package_dir)}} {{quote(dist_tag)}}
+
+npm-publish-test:
+    ./scripts/agent/npm-publish-test
