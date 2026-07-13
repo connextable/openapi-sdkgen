@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+cd "$ROOT"
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: just agent npm-publish <package-directory> <latest|next>" >&2
+  exit 2
+fi
+
+package_dir="$1"
+dist_tag="$2"
+if [[ "$dist_tag" != "latest" && "$dist_tag" != "next" ]]; then
+  echo "npm dist-tag must be latest or next: $dist_tag" >&2
+  exit 2
+fi
+if [[ ! -f "$package_dir/package.json" ]]; then
+  echo "npm package directory is missing package.json: $package_dir" >&2
+  exit 2
+fi
+if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+  echo "npm publishing requires a GitHub Actions OIDC token" >&2
+  exit 2
+fi
+if [[ -n "${NODE_AUTH_TOKEN:-}" || -n "${NPM_TOKEN:-}" ]]; then
+  echo "npm publishing must use OIDC without an npm token" >&2
+  exit 2
+fi
+
+agent_run "publish npm package" env npm_config_ignore_scripts=true npm publish "$package_dir" --access public --tag "$dist_tag"
+agent_note "ok npm publish $dist_tag"

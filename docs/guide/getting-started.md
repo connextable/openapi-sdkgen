@@ -11,11 +11,27 @@ describe the calls the client will expose.
 
 ## 1. Install the CLI
 
-Use the precompiled release binary in a normal application project. Go users
-can install the same CLI from the module:
+Use the precompiled npm CLI in a normal Node-based application project. It
+contains the platform executable, so consumers do not need Go:
+
+```sh
+pnpm dlx openapi-sdkgen generate \
+  --input ./openapi.yaml \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+You can also use the GitHub Release binary directly. Go users can install the
+same CLI from the module:
 
 ```sh
 go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
+```
+
+On macOS or Linux, Homebrew installs the CLI without a separate Go setup:
+
+```sh
+brew install connextable/tap/openapi-sdkgen
 ```
 
 ## 2. Generate into application source

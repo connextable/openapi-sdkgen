@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+cd "$ROOT"
+
+package_dir="${1:-$ROOT/.tmp/npm-package}"
+if [[ ! -f "$package_dir/package.json" || ! -f "$package_dir/bin/openapi-sdkgen.js" ]]; then
+  echo "npm package directory is incomplete: $package_dir" >&2
+  exit 2
+fi
+
+agent_run "npm package launcher" node "$package_dir/bin/openapi-sdkgen.js" --help
+agent_run "npm package archive" npm pack --dry-run --json "$package_dir"
+test_dir="$ROOT/.tmp/npm-package-install"
+rm -rf "$test_dir"
+mkdir -p "$test_dir"
+agent_run "npm package tarball" npm pack --ignore-scripts --pack-destination "$test_dir" "$package_dir"
+tarball="$(find "$test_dir" -maxdepth 1 -name '*.tgz' -print -quit)"
+if [[ -z "$tarball" ]]; then
+  echo "npm package tarball was not created" >&2
+  exit 1
+fi
+install_dir="$test_dir/install"
+agent_run "npm package install" npm install --ignore-scripts --no-audit --no-fund --offline --prefix "$install_dir" "$tarball"
+agent_run "npm package installed launcher" "$install_dir/node_modules/.bin/openapi-sdkgen" --help
+agent_note "ok npm package check"

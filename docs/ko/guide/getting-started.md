@@ -9,11 +9,27 @@
 
 ## 1. CLI 설치
 
-일반 애플리케이션 프로젝트에서는 사전 컴파일된 release binary를 사용합니다. Go 사용자는 모듈에서
+일반 Node 기반 애플리케이션 프로젝트에서는 사전 컴파일된 npm CLI를 사용합니다. 플랫폼별 실행 파일이
+포함되어 있으므로 소비자에게 Go는 필요하지 않습니다.
+
+```sh
+pnpm dlx openapi-sdkgen generate \
+  --input ./openapi.yaml \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+GitHub Release binary를 직접 사용해도 됩니다. Go 사용자는 모듈에서
 동일한 CLI를 설치할 수도 있습니다.
 
 ```sh
 go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
+```
+
+macOS 또는 Linux에서는 Go를 따로 준비하지 않고 Homebrew로 설치할 수 있습니다.
+
+```sh
+brew install connextable/tap/openapi-sdkgen
 ```
 
 ## 2. 앱 소스에 생성

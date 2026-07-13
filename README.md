@@ -9,6 +9,21 @@ The primary distribution is a precompiled CLI binary published through GitHub Re
 go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
 ```
 
+For Node-based projects, run the same precompiled CLI directly from npm:
+
+```sh
+pnpm dlx openapi-sdkgen generate \
+  --input ./openapi.yaml \
+  --target typescript \
+  --output ./src/generated/api
+```
+
+On macOS or Linux with Homebrew, install the same CLI with:
+
+```sh
+brew install connextable/tap/openapi-sdkgen
+```
+
 ## Generate TypeScript source
 
 ```sh
@@ -208,3 +223,22 @@ written to `docs/.vitepress/dist/` and is ignored by Git.
 Maintainers can refresh the pinned VitePress dependency graph with `just docs
 lock`; it deliberately rebuilds the lock from the repository's supply-chain
 policy before the next install.
+
+## npm publishing
+
+Every `v<semver>` tag builds the GitHub Release first, then packages the six
+supported CLI binaries into the public `openapi-sdkgen` npm package. Stable
+versions publish with the `latest` dist-tag; prereleases publish with `next`.
+
+The npm publish job uses GitHub Actions OIDC and accepts no npm token. Before
+the first automated release, bootstrap the npm package once with an interactive
+2FA-protected publish, then configure its trusted publisher as follows:
+
+- GitHub repository: `connextable/openapi-sdkgen`
+- Workflow filename: `release.yml`
+- Environment: `npm-publish`
+- Allowed action: `npm publish`
+
+The package must already exist before npm can attach a trusted publisher. After
+that one-time setup, protect the `npm-publish` GitHub environment and remove
+any unused npm publish tokens.

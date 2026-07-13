@@ -1,0 +1,27 @@
+{
+  "name": "openapi-sdkgen",
+  "version": "0.0.0",
+  "description": "Generate TypeScript SDK source from OpenAPI documents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "openapi-sdkgen": "./bin/openapi-sdkgen.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/connextable/openapi-sdkgen.git"
+  },
+  "bugs": {
+    "url": "https://github.com/connextable/openapi-sdkgen/issues"
+  },
+  "homepage": "https://github.com/connextable/openapi-sdkgen#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -37,6 +37,9 @@ just agent example-todo
 just agent example-advanced
 just agent example-capabilities
 just agent release-check
+just agent npm-package VERSION
+just agent npm-package-check [PACKAGE_DIRECTORY]
+just agent npm-publish PACKAGE_DIRECTORY [latest|next]
 ```
 
 ## Documentation commands

@@ -20,10 +20,14 @@ builds:
 
 archives:
   - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - LICENSE
+      - NOTICE
 
 checksum:
   name_template: checksums.txt

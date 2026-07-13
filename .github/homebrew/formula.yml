@@ -1,0 +1,10 @@
+desc: Generate TypeScript SDK source from OpenAPI documents
+homepage: https://github.com/connextable/openapi-sdkgen
+license: Apache-2.0
+dependencies:
+  build:
+    - go
+install: |
+  system "go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin/"openapi-sdkgen", "./cmd/openapi-sdkgen"
+test: |
+  system "#{bin}/openapi-sdkgen", "--help"
