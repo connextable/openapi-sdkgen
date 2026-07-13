@@ -9,16 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  verify-homebrew:
-    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@9bf477a17032965b53d7ba6bc849242393b76c9a # 9bf477a
-    with:
-      formula: openapi-sdkgen
-      ref: ${{ github.ref }}
-      version: ${{ github.ref_name }}
-      dry-run: true
-
   release:
-    needs: verify-homebrew
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -67,7 +58,7 @@ jobs:
 
   publish-homebrew:
     needs: release
-    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@9bf477a17032965b53d7ba6bc849242393b76c9a # 9bf477a
+    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@ca59d9c42ad908c9d5cc146a607e7c114a17d17c # ca59d9c
     with:
       formula: openapi-sdkgen
       ref: ${{ github.ref }}
