@@ -9,7 +9,7 @@ import (
 	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
 )
 
-func TestVersionFeatureFixturesGenerateForTypeScriptAndJavaScript(t *testing.T) {
+func TestVersionFeatureFixturesGenerateForTypeScript(t *testing.T) {
 	for _, test := range []struct {
 		fixture string
 		version string
@@ -35,15 +35,8 @@ func TestVersionFeatureFixturesGenerateForTypeScriptAndJavaScript(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			javascriptArtifacts, err := JavaScriptSourceArtifacts(document)
-			if err != nil {
-				t.Fatal(err)
-			}
 			if source := string(artifactByPath(t, typescriptArtifacts, "generated/types.ts")) + string(artifactByPath(t, typescriptArtifacts, "generated/client.ts")); !strings.Contains(source, test.want) {
 				t.Fatalf("TypeScript source missing %q:\n%s", test.want, source)
-			}
-			if source := string(artifactByPath(t, javascriptArtifacts, "generated/client.js")); !strings.Contains(source, test.want) && test.version == "3.2.0" {
-				t.Fatalf("JavaScript source missing %q:\n%s", test.want, source)
 			}
 		})
 	}

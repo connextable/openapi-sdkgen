@@ -71,6 +71,11 @@ const callbackHandlers = createCallbackHandlers({
     }
     return { status: 204, headers: { "x-callback-delivery": "accepted" } };
   },
+}, {
+  authenticate: ({ request }) =>
+    request.headers.get("x-webhook-signature") === "example-signature"
+      ? undefined
+      : new Response("Unauthorized", { status: 401 }),
 });
 
 const apiServer = createServer(async (request, response) => {
@@ -130,7 +135,7 @@ const apiServer = createServer(async (request, response) => {
       status?: string;
       callbackURL?: string;
     };
-    if (body.name === "") {
+    if (body.name === "server-rejected") {
       writeJSON(response, 422, {
         error: {
           code: "validation_failed",
@@ -144,7 +149,7 @@ const apiServer = createServer(async (request, response) => {
     if (body.callbackURL !== undefined) {
       const callbackResponse = await fetch(body.callbackURL, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-webhook-signature": "example-signature" },
         body: JSON.stringify({ id: item.id, kind: "changed", attempt: 1 }),
       });
       if (callbackResponse.status !== 204 || callbackResponse.headers.get("x-callback-delivery") !== "accepted") {

@@ -34,12 +34,26 @@ func TestSchemaTypeMapsCompositeOpenAPISchemas(t *testing.T) {
 	}
 }
 
-func TestSourceArtifactsRejectsClosedObjectSchemasWithoutRuntimeValidation(t *testing.T) {
-	_, err := SourceArtifacts(&ir.Document{ComponentSchemas: map[string]map[string]any{
+func TestSourceArtifactsEmitsClosedObjectRuntimeValidation(t *testing.T) {
+	artifacts, err := SourceArtifacts(&ir.Document{ComponentSchemas: map[string]map[string]any{
 		"Closed": {"type": "object", "additionalProperties": false},
-	}})
-	if err == nil || !strings.Contains(err.Error(), "#/components/schemas/Closed/additionalProperties (closed-object validation)") {
-		t.Fatalf("error = %v", err)
+	}, Operations: []ir.Operation{{
+		OperationID: "getClosed", Method: "GET", Path: "/closed",
+		Raw: map[string]any{
+			"responses": map[string]any{
+				"200": map[string]any{
+					"content": map[string]any{
+						"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Closed"}},
+					},
+				},
+			},
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `additionalProperties: false`) {
+		t.Fatalf("closed schema descriptor missing:\n%s", source)
 	}
 }
 

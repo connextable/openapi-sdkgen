@@ -9,16 +9,17 @@ import (
 )
 
 type operationParameter struct {
-	Name        string
-	Property    string
-	Description string
-	Location    string
-	Style       string
-	Explode     bool
-	Required    bool
-	Deprecated  bool
-	ContentType string
-	Schema      map[string]any
+	Name          string
+	Property      string
+	Description   string
+	Location      string
+	Style         string
+	Explode       bool
+	Required      bool
+	Deprecated    bool
+	AllowReserved bool
+	ContentType   string
+	Schema        any
 }
 
 func operationParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
@@ -50,7 +51,7 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			if !hasExplode {
 				explode = style == "form"
 			}
-			schema, _ := raw["schema"].(map[string]any)
+			schema := raw["schema"]
 			contentType := ""
 			if content, ok := raw["content"].(map[string]any); ok {
 				mediaTypes := make([]string, 0, len(content))
@@ -61,7 +62,11 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 				if len(mediaTypes) > 0 {
 					contentType = mediaTypes[0]
 					media, _ := content[contentType].(map[string]any)
-					schema, _ = media["schema"].(map[string]any)
+					media, err = resolveMediaTypeObject(document, media)
+					if err != nil {
+						return nil, err
+					}
+					schema = media["schema"]
 				}
 			}
 			key := location + "\x00" + name
@@ -71,7 +76,7 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			description, _ := raw["description"].(string)
 			merged[key] = operationParameter{
 				Name: name, Property: property, Description: description, Location: location, Style: style,
-				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), ContentType: contentType, Schema: schema,
+				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
 			}
 		}
 	}

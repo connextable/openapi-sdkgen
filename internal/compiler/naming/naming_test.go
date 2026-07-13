@@ -43,3 +43,15 @@ func TestPropertyEscapesReservedWords(t *testing.T) {
 		t.Fatalf("property = %q", value)
 	}
 }
+
+func TestPropertyEscapesStrictAndTypeScriptReservedWords(t *testing.T) {
+	for _, input := range []string{"protected", "await", "interface", "type"} {
+		value, err := Property(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value != input+"Value" {
+			t.Fatalf("Property(%q) = %q", input, value)
+		}
+	}
+}

@@ -11,6 +11,13 @@ func resolveComponentObject(document *ir.Document, object map[string]any, compon
 	return resolveComponentObjectRecursive(document, object, component, make(map[string]bool))
 }
 
+// resolveMediaTypeObject resolves an OpenAPI 3.2 Media Type Object reference.
+// It shares the Component Object merge semantics used by other reusable
+// OpenAPI surfaces.
+func resolveMediaTypeObject(document *ir.Document, object map[string]any) (map[string]any, error) {
+	return resolveComponentObject(document, object, "mediaTypes")
+}
+
 func resolveComponentObjectRecursive(document *ir.Document, object map[string]any, component string, resolving map[string]bool) (map[string]any, error) {
 	reference, _ := object["$ref"].(string)
 	if reference == "" {

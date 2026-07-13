@@ -6,7 +6,14 @@ import {
 } from "./generated/widget-sdk/index.js";
 
 const baseURL = process.env.WIDGET_API_BASE_URL ?? "http://127.0.0.1:18788/v1";
-const api = createClient({ baseURL, authorization: "Bearer example-token" });
+const api = createClient({
+  baseURL,
+  authorization: "Bearer example-token",
+  transport: {
+    fetch: globalThis.fetch,
+    capabilities: { cookieJar: true },
+  },
+});
 
 // Cursor pagination: the generated helper follows `pagination.nextCursor`.
 const paginatedWidgets = [];

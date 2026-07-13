@@ -325,16 +325,16 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 		"orderCreated?: (context: OrderCreatedWebhookContext)",
 		"export type WebhookRoutes = Readonly<Partial<Record<keyof WebhookHandlers, string>>>",
 		"export function createWebhookRouter",
-		"request.method === \"POST\" && pathname === routes.orderCreated",
+		"request.method === \"POST\" && orderCreatedWebhookPathParameters !== undefined",
 		"operationID: orderCreatedWebhook.operationID",
-		"const denied = await options.authenticate?.(context)",
+		"const denied = await options.authenticate(context)",
 	} {
 		if !strings.Contains(webhooks, expected) {
 			t.Fatalf("webhook source missing %q:\n%s", expected, webhooks)
 		}
 	}
 	runtime := string(artifactByPath(t, artifacts, "server/runtime.ts"))
-	for _, expected := range []string{"export type Authenticate", "new Response(\"Unsupported Media Type\", { status: 415 })", "export function responseFromHandler"} {
+	for _, expected := range []string{"export type Authenticate", "new Response(\"Unsupported Media Type\", { status: 415 })", "export async function responseFromHandler"} {
 		if !strings.Contains(runtime, expected) {
 			t.Fatalf("server runtime missing %q:\n%s", expected, runtime)
 		}

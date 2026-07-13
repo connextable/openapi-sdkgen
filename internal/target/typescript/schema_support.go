@@ -115,55 +115,17 @@ func isLiteralOpenAPIValue(key string) bool {
 
 func unsupportedSchemaFeatures(value any, path string) []string {
 	if _, ok := value.(bool); ok {
-		// JSON Schema boolean schemas have assertion semantics (`true` accepts
-		// everything; `false` accepts nothing). The current wire/type lowering
-		// cannot preserve those semantics, so reject them rather than widening a
-		// contract to unknown.
-		return []string{fmt.Sprintf("%s (boolean schemas)", path)}
+		return nil
 	}
 	schema, ok := value.(map[string]any)
 	if !ok {
 		return nil
 	}
 	var result []string
-	if reference, _ := schema["$ref"].(string); reference != "" {
-		for _, key := range sortedAnyKeys(schema) {
-			if key == "$ref" || strings.HasPrefix(key, "x-") || schemaReferenceMetadataKeywords[key] {
-				continue
-			}
-			// In JSON Schema 2020-12, siblings of $ref combine with its target.
-			// The target currently emits only a component reference, so allowing a
-			// constraint/projection sibling would erase its assertion on the wire.
-			result = append(result, fmt.Sprintf("%s ($ref sibling schema semantics)", appendOpenAPIPointer(path, key)))
-		}
-	}
 	unsupported := map[string]string{
-		"$anchor":               "anchor-based reference resolution",
-		"$comment":              "JSON Schema comments",
-		"$defs":                 "JSON Schema local definitions",
-		"$dynamicAnchor":        "dynamic anchor resolution",
-		"$dynamicRef":           "dynamic reference resolution",
-		"$id":                   "JSON Schema base URI resolution",
-		"$schema":               "per-schema dialect selection",
-		"$vocabulary":           "custom JSON Schema vocabularies",
-		"contains":              "array contains validation",
-		"contentSchema":         "content schema validation",
-		"discriminator":         "polymorphic discriminator dispatch",
-		"dependentRequired":     "dependent required properties",
-		"dependentSchemas":      "dependent schemas",
-		"else":                  "conditional schemas",
-		"if":                    "conditional schemas",
-		"maxContains":           "array contains validation",
-		"minContains":           "array contains validation",
-		"not":                   "schema negation",
-		"oneOf":                 "one-of wire branch selection",
-		"anyOf":                 "any-of wire branch selection",
-		"patternProperties":     "pattern-property wire transformation",
-		"propertyNames":         "property-name validation",
-		"then":                  "conditional schemas",
-		"unevaluatedItems":      "unevaluated item validation",
-		"unevaluatedProperties": "unevaluated property validation",
-		"xml":                   "XML serialization",
+		"$anchor":        "anchor-based reference resolution",
+		"$dynamicAnchor": "dynamic anchor resolution",
+		"$dynamicRef":    "dynamic reference resolution",
 	}
 	keys := make([]string, 0, len(schema))
 	for key := range schema {
@@ -182,12 +144,26 @@ func unsupportedSchemaFeatures(value any, path string) []string {
 		if feature, exists := unsupported[key]; exists {
 			result = append(result, fmt.Sprintf("%s (%s)", appendOpenAPIPointer(path, key), feature))
 		}
-		if key == "additionalProperties" && value == false {
-			result = append(result, fmt.Sprintf("%s (closed-object validation)", appendOpenAPIPointer(path, key)))
+		if key == "$vocabulary" && hasUnsupportedRequiredVocabulary(value) {
+			result = append(result, fmt.Sprintf("%s (custom JSON Schema vocabularies)", appendOpenAPIPointer(path, key)))
 		}
 		result = append(result, unsupportedSchemaChildren(key, value, appendOpenAPIPointer(path, key))...)
 	}
 	return result
+}
+
+func hasUnsupportedRequiredVocabulary(value any) bool {
+	vocabularies, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	for uri, enabled := range vocabularies {
+		required, _ := enabled.(bool)
+		if required && !strings.HasPrefix(uri, "https://json-schema.org/draft/2020-12/vocab/") && uri != "https://spec.openapis.org/oas/3.1/dialect/base" {
+			return true
+		}
+	}
+	return false
 }
 
 var schemaReferenceMetadataKeywords = map[string]bool{
@@ -207,9 +183,14 @@ func unsupportedSchemaChildren(key string, value any, path string) []string {
 			result = append(result, unsupportedSchemaFeatures(item, appendOpenAPIPointer(path, fmt.Sprint(index)))...)
 		}
 		return result
-	case "additionalProperties", "contains", "contentSchema", "else", "if", "items", "not", "propertyNames", "then", "unevaluatedItems", "unevaluatedProperties":
+	case "additionalProperties":
+		if _, ok := value.(bool); ok {
+			return nil
+		}
 		return unsupportedSchemaFeatures(value, path)
-	case "dependentSchemas", "patternProperties", "properties":
+	case "contentSchema", "else", "if", "items", "not", "then", "unevaluatedItems", "unevaluatedProperties":
+		return unsupportedSchemaFeatures(value, path)
+	case "properties", "patternProperties", "dependentSchemas":
 		values, _ := value.(map[string]any)
 		keys := make([]string, 0, len(values))
 		for name := range values {

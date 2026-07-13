@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -30,6 +31,7 @@ func Build(document *openapidoc.Document) (*Document, error) {
 		OpenAPIVersionLine: string(versionLine),
 		Servers:            readServers(document.Raw["servers"]),
 		ComponentSchemas:   readComponentSchemas(document.Raw),
+		Schemas:            readCompiledSchemas(document.Raw, versionLine),
 		Raw:                document.Raw,
 	}
 
@@ -83,6 +85,61 @@ func Build(document *openapidoc.Document) (*Document, error) {
 		return result.Operations[i].Path < result.Operations[j].Path
 	})
 	return result, nil
+}
+
+func readCompiledSchemas(raw map[string]any, version openapidoc.VersionLine) map[string]Schema {
+	components, _ := raw["components"].(map[string]any)
+	values, _ := components["schemas"].(map[string]any)
+	result := make(map[string]Schema, len(values))
+	dialect := defaultSchemaDialect(raw, version)
+	base := documentResourceURI(raw)
+	for _, name := range sortedKeys(values) {
+		value := values[name]
+		pointer := jsonPointer("components", "schemas", name)
+		resource := base + "#" + pointer
+		schemaDialect := dialect
+		if object, ok := value.(map[string]any); ok {
+			if identifier, ok := object["$id"].(string); ok && identifier != "" {
+				resource = resolveSchemaResourceURI(base, identifier)
+			}
+			if declaredDialect, ok := object["$schema"].(string); ok && declaredDialect != "" {
+				schemaDialect = declaredDialect
+			}
+		}
+		result[name] = Schema{Name: name, Pointer: pointer, ResourceURI: resource, Dialect: schemaDialect, Value: value}
+	}
+	return result
+}
+
+func documentResourceURI(raw map[string]any) string {
+	for _, key := range []string{"$self", "$id"} {
+		if value, ok := raw[key].(string); ok && value != "" {
+			return strings.TrimSuffix(value, "#")
+		}
+	}
+	return "urn:openapi-sdkgen:document"
+}
+
+func defaultSchemaDialect(raw map[string]any, version openapidoc.VersionLine) string {
+	if value, ok := raw["jsonSchemaDialect"].(string); ok && value != "" {
+		return value
+	}
+	if version == openapidoc.Version30 {
+		return "https://spec.openapis.org/oas/3.0/dialect/base"
+	}
+	return "https://spec.openapis.org/oas/3.1/dialect/base"
+}
+
+func resolveSchemaResourceURI(base, identifier string) string {
+	if base == "" || strings.HasPrefix(base, "urn:") {
+		return identifier
+	}
+	baseURI, baseErr := url.Parse(base)
+	identifierURI, identifierErr := url.Parse(identifier)
+	if baseErr != nil || identifierErr != nil {
+		return identifier
+	}
+	return baseURI.ResolveReference(identifierURI).String()
 }
 
 func jsonPointer(parts ...string) string {

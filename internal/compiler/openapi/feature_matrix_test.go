@@ -189,8 +189,8 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 	if manifest.SchemaVersion != 1 || len(manifest.States) != 3 {
 		t.Fatalf("unexpected feature manifest header: %#v", manifest)
 	}
-	if !sameStrings(manifest.Targets, []string{"typescript", "javascript"}) {
-		t.Fatalf("feature manifest targets = %#v, want TypeScript and JavaScript", manifest.Targets)
+	if !sameStrings(manifest.Targets, []string{"typescript"}) {
+		t.Fatalf("feature manifest targets = %#v, want TypeScript", manifest.Targets)
 	}
 	root := filepath.Join("..", "..", "..")
 	seen := make(map[string]manifestFeature, len(manifest.Features))
@@ -247,7 +247,7 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		}
 	}
 	sort.Strings(manifestContracts)
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "d56ebaa4f3c5801bee38aeddb03b372d88c1cb875c879c2d64555260904e7426" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "cec621bfaa6b6e6f37d4c2c2c16c8c7b9a27a5add7e90d2b58984342c8558190" {
 		t.Errorf("manifest feature/evidence contract changed: %s", got)
 	}
 

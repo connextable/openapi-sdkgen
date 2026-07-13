@@ -16,21 +16,23 @@ func TestJSDocTypeReferenceFlattensInlineObjectComments(t *testing.T) {
 }
 
 func TestOperationServerURLPrefersOperationThenPathOverride(t *testing.T) {
-	document := &ir.Document{Servers: []ir.Server{{URL: "https://api.example.test/v1"}}}
+	document := &ir.Document{Raw: map[string]any{"servers": []any{map[string]any{"url": "https://api.example.test/v1"}}}}
 	operation := ir.Operation{
+		Path:        "/widgets",
+		Method:      "GET",
 		Raw:         map[string]any{"servers": []any{map[string]any{"url": "https://operations.example.test/v2"}}},
 		PathItemRaw: map[string]any{"servers": []any{map[string]any{"url": "https://paths.example.test/v3"}}},
 	}
-	if value := operationServerURL(document, operation); value != "https://operations.example.test/v2" {
-		t.Fatalf("operation server URL = %q", value)
+	if value := operationServers(document, operation); !strings.Contains(value, "operations.example.test/v2") || !strings.Contains(value, `#/paths/~1widgets/get/servers/0`) {
+		t.Fatalf("operation servers = %q", value)
 	}
 	delete(operation.Raw, "servers")
-	if value := operationServerURL(document, operation); value != "https://paths.example.test/v3" {
-		t.Fatalf("path server URL = %q", value)
+	if value := operationServers(document, operation); !strings.Contains(value, "paths.example.test/v3") || !strings.Contains(value, `#/paths/~1widgets/servers/0`) {
+		t.Fatalf("path servers = %q", value)
 	}
-	operation.PathItemRaw = map[string]any{"servers": []any{map[string]any{"url": "https://api.example.test/v1"}}}
-	if value := operationServerURL(document, operation); value != "" {
-		t.Fatalf("default server override = %q", value)
+	operation.PathItemRaw = map[string]any{}
+	if value := operationServers(document, operation); !strings.Contains(value, "api.example.test/v1") || !strings.Contains(value, `#/servers/0`) {
+		t.Fatalf("root servers = %q", value)
 	}
 }
 

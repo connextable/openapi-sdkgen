@@ -2,6 +2,7 @@ package sdkgen
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,31 +26,72 @@ func CompileProject(data []byte) (*ir.Document, error) {
 }
 
 func CompileFile(path string) (*ir.Document, error) {
-	return compileFile(path, false)
+	return CompileFileWithOptions(path, CompileOptions{})
+}
+
+// CompileFileWithOptions compiles an OpenAPI document using explicit opt-in
+// reference and extension capabilities. It never fetches a remote reference
+// unless RemoteRefAllowlist is populated.
+func CompileFileWithOptions(path string, options CompileOptions) (*ir.Document, error) {
+	return compileFile(path, false, options)
 }
 
 func CompileProjectFile(path string) (*ir.Document, error) {
-	return compileFile(path, true)
+	return compileFile(path, true, CompileOptions{})
 }
 
-func compileFile(path string, project bool) (*ir.Document, error) {
+func compileFile(path string, project bool, options CompileOptions) (*ir.Document, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read OpenAPI document: %w", err)
+	}
+	if project && (len(options.RemoteRefAllowlist) != 0 || len(options.SchemaExtensionManifests) != 0 || options.UpdateRefLock || options.Offline || options.RefLockPath != "") {
+		return nil, errors.New("project compilation does not support remote references or schema extensions")
 	}
 	if project {
 		if err := rejectProjectExternalReferences(data); err != nil {
 			return nil, err
 		}
-	} else if err := rejectEscapingFileReferences(path, filepath.Dir(path)); err != nil {
+	} else if err := rejectEscapingFileReferencesWithRemote(path, filepath.Dir(path), len(options.RemoteRefAllowlist) != 0); err != nil {
 		return nil, err
 	}
-	bundled, err := bundler.BundleBytesComposed(data, &datamodel.DocumentConfiguration{
+	needsLock := len(options.RemoteRefAllowlist) != 0 || len(options.SchemaExtensionManifests) != 0
+	lockPath := options.RefLockPath
+	if lockPath == "" {
+		lockPath = defaultReferenceLockPath(path)
+	}
+	var lock *referenceLock
+	if needsLock {
+		// A remote allowlist alone does not imply a network request. Defer a
+		// missing-lock failure until a remote document or extension is actually
+		// used, so offline documents stay reproducible without empty lockfiles.
+		lock, err = loadReferenceLock(lockPath, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var remoteResolver *remoteReferenceResolver
+	if len(options.RemoteRefAllowlist) != 0 {
+		remoteResolver, err = newRemoteReferenceResolver(options, lock, filepath.Join(filepath.Dir(lockPath), ".openapi-sdkgen-cache"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	bundlerConfiguration := &datamodel.DocumentConfiguration{
 		BasePath:              filepath.Dir(path),
 		SpecFilePath:          path,
 		AllowFileReferences:   true,
-		AllowRemoteReferences: false,
-	}, nil)
+		AllowRemoteReferences: remoteResolver != nil,
+	}
+	if remoteResolver != nil {
+		bundlerConfiguration.RemoteURLHandler = remoteResolver.handle
+	}
+	bundled, err := bundler.BundleBytesComposed(data, bundlerConfiguration, nil)
+	if remoteResolver != nil {
+		if remoteErr := remoteResolver.firstError(); remoteErr != nil {
+			return nil, fmt.Errorf("resolve OpenAPI references: %w", remoteErr)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve OpenAPI references: %w", err)
 	}
@@ -61,11 +103,29 @@ func compileFile(path string, project bool) (*ir.Document, error) {
 	if err := yaml.Unmarshal(data, &source); err != nil {
 		return nil, fmt.Errorf("decode source OpenAPI document: %w", err)
 	}
-	normalized, err := json.Marshal(mergeBundledDocument(source, value))
+	merged := mergeBundledDocument(source, value)
+	merged, err = normalizeNestedSchemaReferences(merged)
+	if err != nil {
+		return nil, fmt.Errorf("normalize nested OpenAPI schema references: %w", err)
+	}
+	normalized, err := json.Marshal(merged)
 	if err != nil {
 		return nil, fmt.Errorf("normalize bundled OpenAPI document: %w", err)
 	}
-	return compile(normalized, project)
+	normalized, err = lowerSchemaExtensions(normalized, options, lock)
+	if err != nil {
+		return nil, err
+	}
+	document, err := compile(normalized, project)
+	if err != nil {
+		return nil, err
+	}
+	if needsLock && options.UpdateRefLock {
+		if err := writeReferenceLock(lockPath, lock); err != nil {
+			return nil, err
+		}
+	}
+	return document, nil
 }
 
 // mergeBundledDocument keeps extensions and newly standardized OpenAPI fields
@@ -98,14 +158,18 @@ func mergeBundledDocument(source, bundled any) any {
 }
 
 func rejectEscapingFileReferences(path, root string) error {
+	return rejectEscapingFileReferencesWithRemote(path, root, false)
+}
+
+func rejectEscapingFileReferencesWithRemote(path, root string, allowRemote bool) error {
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return fmt.Errorf("resolve OpenAPI input directory: %w", err)
 	}
-	return inspectReferenceFile(path, resolvedRoot, make(map[string]bool))
+	return inspectReferenceFile(path, resolvedRoot, make(map[string]bool), allowRemote)
 }
 
-func inspectReferenceFile(path, root string, visited map[string]bool) error {
+func inspectReferenceFile(path, root string, visited map[string]bool, allowRemote bool) error {
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return fmt.Errorf("resolve OpenAPI reference file %s: %w", path, err)
@@ -130,12 +194,12 @@ func inspectReferenceFile(path, root string, visited map[string]bool) error {
 		switch typed := value.(type) {
 		case map[string]any:
 			if reference, _ := typed["$ref"].(string); reference != "" {
-				target, err := resolveContainedReference(reference, filepath.Dir(resolvedPath), root)
+				target, err := resolveContainedReference(reference, filepath.Dir(resolvedPath), root, allowRemote)
 				if err != nil {
 					return err
 				}
 				if target != "" {
-					if err := inspectReferenceFile(target, root, visited); err != nil {
+					if err := inspectReferenceFile(target, root, visited, allowRemote); err != nil {
 						return err
 					}
 				}
@@ -157,9 +221,12 @@ func inspectReferenceFile(path, root string, visited map[string]bool) error {
 	return visit(document)
 }
 
-func resolveContainedReference(reference, directory, root string) (string, error) {
+func resolveContainedReference(reference, directory, root string, allowRemote bool) (string, error) {
 	file, _, _ := strings.Cut(reference, "#")
 	if file == "" {
+		return "", nil
+	}
+	if allowRemote && (strings.HasPrefix(file, "https://") || strings.HasPrefix(file, "http://")) {
 		return "", nil
 	}
 	if filepath.IsAbs(file) || strings.Contains(file, "://") || strings.HasPrefix(file, "file:") {
@@ -214,10 +281,31 @@ func rejectProjectExternalReferences(data []byte) error {
 }
 
 func compile(data []byte, project bool) (*ir.Document, error) {
-	document, err := openapidoc.Read(data)
+	// libopenapi resolves `$ref` while it reads. JSON Schema anchors are valid
+	// in OpenAPI 3.1/3.2 but are not component pointers, so normalize them
+	// before the library's OpenAPI reference resolver sees the document.
+	var raw any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("decode OpenAPI document: %w", err)
+	}
+	normalized, err := normalizeNestedSchemaReferences(raw)
+	if err != nil {
+		return nil, fmt.Errorf("normalize nested OpenAPI schema references: %w", err)
+	}
+	normalizedDocument, ok := normalized.(map[string]any)
+	if !ok {
+		return nil, errors.New("normalized OpenAPI document must be an object")
+	}
+	normalizedData, err := json.Marshal(normalizedDocument)
+	if err != nil {
+		return nil, fmt.Errorf("encode normalized OpenAPI document: %w", err)
+	}
+	document, err := openapidoc.Read(normalizedData)
 	if err != nil {
 		return nil, err
 	}
+	// Retain normalization metadata not modeled by libopenapi.
+	document.Raw = normalizedDocument
 	model, err := ir.Build(document)
 	if err != nil {
 		return nil, err

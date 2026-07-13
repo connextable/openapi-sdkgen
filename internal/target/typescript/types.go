@@ -262,7 +262,17 @@ func componentDeclarations(name string, schema map[string]any) []componentDeclar
 	}
 }
 
-func schemaType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+func schemaType(document *ir.Document, value any, direction projection) (string, error) {
+	if boolean, ok := value.(bool); ok {
+		if boolean {
+			return "unknown", nil
+		}
+		return "never", nil
+	}
+	schema, ok := value.(map[string]any)
+	if !ok {
+		return "unknown", nil
+	}
 	// OpenAPI 3.0 expresses nullability independently of `type`, unlike the
 	// JSON Schema type array used by OpenAPI 3.1 and 3.2.
 	if document.OpenAPIVersionLine != "3.1" && document.OpenAPIVersionLine != "3.2" && boolValue(schema, "nullable") {
@@ -277,6 +287,31 @@ func schemaType(document *ir.Document, schema map[string]any, direction projecti
 			return "", err
 		}
 		return addUnionMember(value, "null"), nil
+	}
+	if dynamicReference, ok := schema["x-sdkgen-dynamic-reference"].(map[string]any); ok {
+		reference, _ := dynamicReference["reference"].(string)
+		name, err := componentSchemaReferenceName(reference)
+		if err != nil {
+			return "", err
+		}
+		referenced, err := referencedType(document, name, direction)
+		if err != nil || len(schema) == 1 {
+			return referenced, err
+		}
+		siblings := make(map[string]any, len(schema)-1)
+		for key, value := range schema {
+			if key != "x-sdkgen-dynamic-reference" && isTypeAffectingSchemaKeyword(key) {
+				siblings[key] = value
+			}
+		}
+		if len(siblings) == 0 {
+			return referenced, nil
+		}
+		siblingType, err := schemaType(document, siblings, direction)
+		if err != nil {
+			return "", err
+		}
+		return "(" + referenced + ") & (" + siblingType + ")", nil
 	}
 	if reference, _ := schema["$ref"].(string); reference != "" {
 		name, err := componentSchemaReferenceName(reference)
@@ -387,7 +422,7 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 		if err != nil {
 			return "", err
 		}
-		if items, ok := schema["items"].(map[string]any); ok {
+		if items, exists := schema["items"]; exists {
 			itemType, err := schemaType(document, items, direction)
 			if err != nil {
 				return "", err
@@ -400,7 +435,10 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 		}
 		return "readonly [" + strings.Join(parts, ", ") + "]", nil
 	}
-	items, _ := schema["items"].(map[string]any)
+	items, exists := schema["items"]
+	if !exists {
+		return "readonly unknown[]", nil
+	}
 	itemType, err := schemaType(document, items, direction)
 	if err != nil {
 		return "", err
@@ -411,7 +449,7 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 func objectType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
 	properties, _ := schema["properties"].(map[string]any)
 	if len(properties) == 0 {
-		if additional, ok := schema["additionalProperties"].(map[string]any); ok {
+		if additional, exists := schema["additionalProperties"]; exists {
 			valueType, err := schemaType(document, additional, direction)
 			if err != nil {
 				return "", err
@@ -440,14 +478,15 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 	output.WriteString("{\n")
 	propertySources := make(map[string]string, len(keys))
 	for _, wireName := range keys {
-		propertySchema, _ := properties[wireName].(map[string]any)
+		propertyValue := properties[wireName]
+		propertySchema, _ := propertyValue.(map[string]any)
 		if direction == projectionInput && boolValue(propertySchema, "readOnly") {
 			continue
 		}
 		if direction == projectionOutput && boolValue(propertySchema, "writeOnly") {
 			continue
 		}
-		propertyType, err := schemaType(document, propertySchema, direction)
+		propertyType, err := schemaType(document, propertyValue, direction)
 		if err != nil {
 			return "", err
 		}
@@ -486,7 +525,10 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 // generated documentation/contract metadata.
 func objectAdditionalType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
 	var values []string
-	if additional, ok := schema["additionalProperties"].(map[string]any); ok {
+	if additional, exists := schema["additionalProperties"]; exists {
+		if boolean, ok := additional.(bool); ok && !boolean {
+			return "", nil
+		}
 		value, err := schemaType(document, additional, direction)
 		if err != nil {
 			return "", err
@@ -500,11 +542,7 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 	}
 	sort.Strings(patternNames)
 	for _, pattern := range patternNames {
-		value, ok := patterns[pattern].(map[string]any)
-		if !ok {
-			continue
-		}
-		typeValue, err := schemaType(document, value, direction)
+		typeValue, err := schemaType(document, patterns[pattern], direction)
 		if err != nil {
 			return "", err
 		}
@@ -516,6 +554,14 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 func referencedType(document *ir.Document, name string, direction projection) (string, error) {
 	schema, exists := document.ComponentSchemas[name]
 	if !exists {
+		if compiled, ok := document.Schemas[name]; ok {
+			if boolean, ok := compiled.Value.(bool); ok {
+				if boolean {
+					return "unknown", nil
+				}
+				return "never", nil
+			}
+		}
 		return naming.Public(name)
 	}
 	declarations := componentDeclarations(name, schema)
@@ -562,6 +608,10 @@ func operationOutputType(document *ir.Document, operation ir.Operation) (string,
 		sort.Strings(mediaTypes)
 		for _, mediaType := range mediaTypes {
 			media, _ := content[mediaType].(map[string]any)
+			media, err := resolveMediaTypeObject(document, media)
+			if err != nil {
+				return "", err
+			}
 			schema, hasSchema := media["schema"].(map[string]any)
 			if !hasSchema {
 				// A Media Type Object without a Schema Object still has a body.
@@ -616,8 +666,12 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 			statusType = status
 		}
 		content, _ := response["content"].(map[string]any)
+		headerType, err := responseHeaderType(document, response)
+		if err != nil {
+			return "", err
+		}
 		if len(content) == 0 {
-			result = append(result, "RawResponseFor<"+statusType+", undefined, void>")
+			result = append(result, "RawResponseFor<"+statusType+", undefined, void, "+headerType+">")
 			continue
 		}
 		mediaTypes := make([]string, 0, len(content))
@@ -627,16 +681,21 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 		sort.Strings(mediaTypes)
 		for _, mediaType := range mediaTypes {
 			media, _ := content[mediaType].(map[string]any)
-			schema, _ := media["schema"].(map[string]any)
+			media, err := resolveMediaTypeObject(document, media)
+			if err != nil {
+				return "", err
+			}
+			schema := media["schema"]
+			schemaObject, _ := schema.(map[string]any)
 			valueType := "void"
-			if len(schema) > 0 {
-				if isBinaryMedia(mediaType, schema) {
+			if schema != nil {
+				if isBinaryMedia(mediaType, schemaObject) {
 					valueType = "ReadableStream<Uint8Array>"
 				} else if isTextMedia(mediaType) {
 					valueType = "string"
 				} else {
 					if operation.Envelope == "data" {
-						if dataSchema := envelopeDataSchema(document, schema, make(map[string]bool)); len(dataSchema) > 0 {
+						if dataSchema := envelopeDataSchema(document, schemaObject, make(map[string]bool)); len(dataSchema) > 0 {
 							schema = dataSchema
 						}
 					}
@@ -646,13 +705,64 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 					}
 				}
 			}
-			result = append(result, "RawResponseFor<"+statusType+", "+quoteTS(mediaType)+", "+valueType+">")
+			result = append(result, "RawResponseFor<"+statusType+", "+quoteTS(mediaType)+", "+valueType+", "+headerType+">")
 		}
 	}
 	if len(result) == 0 {
 		return "RawResponseFor<number, string | undefined, void>", nil
 	}
 	return strings.Join(uniqueStrings(result), " | "), nil
+}
+
+func responseHeaderType(document *ir.Document, response map[string]any) (string, error) {
+	headers, _ := response["headers"].(map[string]any)
+	if len(headers) == 0 {
+		return "Readonly<Record<string, never>>", nil
+	}
+	names := sortedAnyKeys(headers)
+	fields := make([]string, 0, len(names))
+	for _, name := range names {
+		header, _ := headers[name].(map[string]any)
+		resolved, err := resolveComponentObject(document, header, "headers")
+		if err != nil {
+			return "", err
+		}
+		schema, _, err := responseHeaderSchema(document, resolved)
+		if err != nil {
+			return "", err
+		}
+		valueType, err := schemaType(document, schema, projectionOutput)
+		if err != nil {
+			return "", err
+		}
+		property, err := naming.Property(name)
+		if err != nil {
+			property = quoteTS(name)
+		}
+		optional := "?"
+		if boolValue(resolved, "required") {
+			optional = ""
+		}
+		fields = append(fields, "readonly "+property+optional+": "+valueType)
+	}
+	return "{ " + strings.Join(fields, "; ") + " }", nil
+}
+
+func responseHeaderSchema(document *ir.Document, header map[string]any) (any, string, error) {
+	content, _ := header["content"].(map[string]any)
+	if len(content) == 0 {
+		return header["schema"], "", nil
+	}
+	if len(content) != 1 {
+		return nil, "", fmt.Errorf("Header Object content must define exactly one media type")
+	}
+	mediaType := sortedAnyKeys(content)[0]
+	media, _ := content[mediaType].(map[string]any)
+	media, err := resolveMediaTypeObject(document, media)
+	if err != nil {
+		return nil, "", err
+	}
+	return media["schema"], mediaType, nil
 }
 
 func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (map[string]string, error) {
@@ -674,16 +784,21 @@ func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (m
 		content, _ := response["content"].(map[string]any)
 		for mediaType, value := range content {
 			media, _ := value.(map[string]any)
-			schema, _ := media["schema"].(map[string]any)
+			media, err := resolveMediaTypeObject(document, media)
+			if err != nil {
+				return nil, err
+			}
+			schema := media["schema"]
+			schemaObject, _ := schema.(map[string]any)
 			valueType := "void"
-			if len(schema) > 0 {
-				if isBinaryMedia(mediaType, schema) {
+			if schema != nil {
+				if isBinaryMedia(mediaType, schemaObject) {
 					valueType = "ReadableStream<Uint8Array>"
 				} else if isTextMedia(mediaType) {
 					valueType = "string"
 				} else {
 					if operation.Envelope == "data" {
-						if dataSchema := envelopeDataSchema(document, schema, make(map[string]bool)); len(dataSchema) > 0 {
+						if dataSchema := envelopeDataSchema(document, schemaObject, make(map[string]bool)); len(dataSchema) > 0 {
 							schema = dataSchema
 						}
 					}
@@ -715,7 +830,7 @@ func isBinaryMedia(mediaType string, schema map[string]any) bool {
 
 func isTextMedia(mediaType string) bool {
 	mediaType = strings.ToLower(mediaType)
-	return strings.HasPrefix(mediaType, "text/") || strings.Contains(mediaType, "xml")
+	return strings.HasPrefix(mediaType, "text/") && !strings.Contains(mediaType, "xml")
 }
 
 func isJSONMediaType(mediaType string) bool {
@@ -763,6 +878,10 @@ func operationSuccessSchema(document *ir.Document, operation ir.Operation) (map[
 		sort.Strings(mediaTypes)
 		for _, mediaType := range mediaTypes {
 			media, _ := content[mediaType].(map[string]any)
+			media, err := resolveMediaTypeObject(document, media)
+			if err != nil {
+				return nil, false, err
+			}
 			schema, _ := media["schema"].(map[string]any)
 			if len(schema) == 0 {
 				continue
@@ -825,7 +944,7 @@ func operationInputTypes(document *ir.Document, operation ir.Operation) ([]strin
 	} else if len(parameters) > 0 {
 		result = append(result, name+"PathInput")
 	}
-	if parameters, err := parametersIn(document, operation, "query"); err != nil {
+	if parameters, err := queryParameters(document, operation); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 || operation.Pagination != "" || operation.Raw["x-sort"] != nil {
 		result = append(result, name+"QueryInput")

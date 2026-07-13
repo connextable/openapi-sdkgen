@@ -301,6 +301,32 @@ func TestBuildResolvesLocalPathsPathItemReferences(t *testing.T) {
 	}
 }
 
+func TestBuildRegistersLosslessSchemaResources(t *testing.T) {
+	document := &openapidoc.Document{Raw: map[string]any{
+		"openapi":           "3.2.0",
+		"$self":             "https://api.example.test/openapi.json",
+		"jsonSchemaDialect": "https://example.test/dialect/root",
+		"info":              map[string]any{"title": "Schemas", "version": "1"},
+		"paths":             map[string]any{},
+		"components": map[string]any{"schemas": map[string]any{
+			"Never": false,
+			"Thing": map[string]any{"$id": "schemas/thing", "$schema": "https://example.test/dialect/thing", "type": "object"},
+		}},
+	}}
+	model, err := Build(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	never, ok := model.Schemas["Never"]
+	if !ok || never.Value != false || never.Pointer != "/components/schemas/Never" || never.Dialect != "https://example.test/dialect/root" {
+		t.Fatalf("Never schema = %#v", never)
+	}
+	thing := model.Schemas["Thing"]
+	if thing.ResourceURI != "https://api.example.test/schemas/thing" || thing.Dialect != "https://example.test/dialect/thing" {
+		t.Fatalf("Thing schema = %#v", thing)
+	}
+}
+
 func operationFixture(operationID string) map[string]any {
 	return map[string]any{
 		"operationId":      operationID,

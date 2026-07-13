@@ -189,6 +189,121 @@ func TestCompileFilePreservesOpenAPI32AdditionalOperations(t *testing.T) {
 	}
 }
 
+func TestCompileNormalizesNestedComponentSchemaReferences(t *testing.T) {
+	document, err := Compile([]byte(`{
+  "openapi":"3.1.0",
+  "info":{"title":"Nested","version":"1"},
+  "paths":{"/holder":{"get":{"operationId":"getHolder","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Holder"}}}}}}}},
+  "components":{"schemas":{
+    "Thing":{"type":"object","properties":{"id":{"type":"string"}}},
+    "Holder":{"type":"object","properties":{"id":{"$ref":"#/components/schemas/Thing/properties/id"}}}
+  }}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := document.ComponentSchemas["Holder"]
+	properties, _ := holder["properties"].(map[string]any)
+	id, _ := properties["id"].(map[string]any)
+	if id["type"] != "string" || id["$ref"] != nil {
+		t.Fatalf("normalized nested schema = %#v", id)
+	}
+}
+
+func TestCompileNormalizesLocalSchemaAnchorReferences(t *testing.T) {
+	document, err := Compile([]byte(`{
+  "openapi":"3.1.0",
+  "info":{"title":"Anchors","version":"1"},
+  "paths":{},
+  "components":{"schemas":{
+    "Node":{
+      "$id":"https://schemas.example.test/node",
+      "$anchor":"node",
+      "type":"object",
+      "properties":{"next":{"$ref":"#node"}}
+    },
+    "Envelope":{
+      "type":"object",
+      "properties":{"node":{"$ref":"https://schemas.example.test/node#node"}}
+    }
+  }}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := document.ComponentSchemas["Node"]
+	if _, exists := node["$anchor"]; exists {
+		t.Fatalf("anchor was not lowered: %#v", node)
+	}
+	properties, _ := node["properties"].(map[string]any)
+	next, _ := properties["next"].(map[string]any)
+	if next["$ref"] != "#/components/schemas/Node" {
+		t.Fatalf("anchored reference = %#v", next)
+	}
+	envelope := document.ComponentSchemas["Envelope"]
+	envelopeProperties, _ := envelope["properties"].(map[string]any)
+	child, _ := envelopeProperties["node"].(map[string]any)
+	if child["$ref"] != "#/components/schemas/Node" {
+		t.Fatalf("anchored reference = %#v", child)
+	}
+}
+
+func TestCompileUsesOpenAPI32SelfAsSchemaResourceBase(t *testing.T) {
+	document, err := Compile([]byte(`{
+  "openapi":"3.2.0", "$self":"https://schemas.example.test/openapi.json",
+  "info":{"title":"Self base","version":"1"}, "paths":{},
+  "components":{"schemas":{
+    "Node":{"$id":"schemas/node","$anchor":"node","type":"object"},
+    "Envelope":{"type":"object","properties":{"node":{"$ref":"https://schemas.example.test/schemas/node#node"}}}
+  }}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := document.ComponentSchemas["Envelope"]
+	properties, _ := envelope["properties"].(map[string]any)
+	node, _ := properties["node"].(map[string]any)
+	if node["$ref"] != "#/components/schemas/Node" {
+		t.Fatalf("$self-relative anchor reference = %#v", node)
+	}
+}
+
+func TestCompileLowersDynamicSchemaReferenceMetadata(t *testing.T) {
+	document, err := Compile([]byte(`{
+  "openapi":"3.1.0", "info":{"title":"Anchors","version":"1"}, "paths":{},
+  "components":{"schemas":{"Node":{"$dynamicAnchor":"node","type":"object","properties":{"child":{"$dynamicRef":"#node"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := document.ComponentSchemas["Node"]
+	if node[dynamicAnchorMetadataKey] != "node" {
+		t.Fatalf("dynamic anchor metadata = %#v", node)
+	}
+	properties, _ := node["properties"].(map[string]any)
+	child, _ := properties["child"].(map[string]any)
+	dynamic, _ := child[dynamicReferenceMetadataKey].(map[string]any)
+	if dynamic["anchor"] != "node" || dynamic["reference"] != "#/components/schemas/Node" {
+		t.Fatalf("dynamic reference metadata = %#v", child)
+	}
+}
+
+func TestCompileDoesNotInterpretExampleReferenceLikeValuesAsSchemas(t *testing.T) {
+	document, err := Compile([]byte(`{
+  "openapi":"3.1.0", "info":{"title":"Examples","version":"1"}, "paths":{},
+  "components":{"schemas":{"Thing":{"type":"object","properties":{"id":{"type":"string"}}},"Example":{"type":"object","examples":[{"$ref":"#/components/schemas/Thing/properties/id"}]}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	example := document.ComponentSchemas["Example"]
+	examples, _ := example["examples"].([]any)
+	value, _ := examples[0].(map[string]any)
+	if value["$ref"] != "#/components/schemas/Thing/properties/id" {
+		t.Fatalf("example value changed: %#v", value)
+	}
+}
+
 func TestCompileProjectValidatesResolvedPathItemParameters(t *testing.T) {
 	input := []byte(`{
 		"openapi":"3.2.0",

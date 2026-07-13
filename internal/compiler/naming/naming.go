@@ -36,7 +36,15 @@ var reserved = map[string]struct{}{
 	"in": {}, "instanceof": {}, "new": {}, "null": {}, "return": {},
 	"super": {}, "switch": {}, "this": {}, "throw": {}, "true": {},
 	"try": {}, "typeof": {}, "var": {}, "void": {}, "while": {},
-	"with": {}, "yield": {},
+	"with": {}, "yield": {}, "await": {}, "implements": {}, "interface": {},
+	"let": {}, "package": {}, "private": {}, "protected": {}, "public": {},
+	"static": {}, "abstract": {}, "arguments": {}, "as": {}, "asserts": {},
+	"any": {}, "async": {}, "bigint": {}, "constructor": {}, "declare": {},
+	"from": {}, "get": {}, "global": {}, "infer": {}, "is": {}, "keyof": {},
+	"module": {}, "namespace": {}, "never": {}, "of": {}, "override": {},
+	"readonly": {}, "require": {}, "set": {}, "satisfies": {}, "symbol": {},
+	"target": {}, "type": {}, "undefined": {}, "unique": {}, "unknown": {},
+	"using": {}, "value": {}, "where": {},
 }
 
 func Public(value string) (string, error) {

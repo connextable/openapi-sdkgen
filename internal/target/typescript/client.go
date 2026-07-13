@@ -16,6 +16,14 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	links, err := generatedLinks(document, manifest)
+	if err != nil {
+		return nil, err
+	}
+	streams, err := generatedStreams(document, manifest)
+	if err != nil {
+		return nil, err
+	}
 	hasPathOperations := resourceTreeHasPathOperations(tree)
 	hasPagination := resourceTreeHasPagination(tree)
 	var output bytes.Buffer
@@ -28,6 +36,12 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		output.WriteString("  createPaginator,\n")
 	}
 	output.WriteString("  createRequest,\n")
+	if len(links) > 0 {
+		output.WriteString("  mergeLinkInput,\n")
+		output.WriteString("  resolveLinkInput,\n")
+		output.WriteString("  type APIError,\n")
+		output.WriteString("  type LinkInvocation,\n")
+	}
 	output.WriteString("  type ClientOptions,\n")
 	output.WriteString("  type BinaryBody,\n")
 	if hasPagination {
@@ -57,7 +71,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	output.WriteString("  isAPIError,\n")
 	output.WriteString("  isErrorCode,\n")
 	output.WriteString("} from \"./runtime.js\"\n")
-	output.WriteString("export type { ClientOptions, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, TransportError } from \"./runtime.js\"\n\n")
+	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
 
 	operationsByID := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
@@ -113,6 +127,12 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		fmt.Fprintf(&output, "    readonly %s: %s\n", property, operationFunctionType(document, operation))
 	}
 	output.WriteString("  }\n")
+	if err := emitLinkInterface(&output, document, links); err != nil {
+		return nil, err
+	}
+	if err := emitStreamInterface(&output, document, streams); err != nil {
+		return nil, err
+	}
 	if err := emitResourceTreeInterface(&output, document, tree); err != nil {
 		return nil, err
 	}
@@ -161,6 +181,12 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			fmt.Fprintf(&output, "  const paginate%s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", operationTypeName(operation.OperationID), qualifyClientType(document, itemType), operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), property, quoteTS(operation.Pagination))
 		}
 	}
+	if err := emitLinkValues(&output, document, links); err != nil {
+		return nil, err
+	}
+	if err := emitStreamValues(&output, document, streams); err != nil {
+		return nil, err
+	}
 	output.WriteString("\n")
 	if err := emitResourceTreeValues(&output, document, tree); err != nil {
 		return nil, err
@@ -175,6 +201,12 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		fmt.Fprintf(&output, "      %s,\n", property)
 	}
 	output.WriteString("    },\n")
+	if err := emitLinkReturnValue(&output, links); err != nil {
+		return nil, err
+	}
+	if err := emitStreamReturnValue(&output, streams); err != nil {
+		return nil, err
+	}
 	for _, name := range sortedResourceChildNames(tree) {
 		fmt.Fprintf(&output, "    %s,\n", name)
 	}
@@ -195,7 +227,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 			return err
 		}
 	}
-	if parameters, err := parametersIn(document, operation, "query"); err != nil {
+	if parameters, err := queryParameters(document, operation); err != nil {
 		return err
 	} else if len(parameters) > 0 || operation.Pagination != "" {
 		if err := emitQueryTypes(output, document, operation, operationName, parameters); err != nil {
@@ -287,6 +319,18 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 		return err
 	}
 	return nil
+}
+
+func queryParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
+	query, err := parametersIn(document, operation, "query")
+	if err != nil {
+		return nil, err
+	}
+	querystring, err := parametersIn(document, operation, "querystring")
+	if err != nil {
+		return nil, err
+	}
+	return append(query, querystring...), nil
 }
 
 func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, item ManifestOperation) error {
@@ -423,9 +467,11 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 }
 
 func emitOperationParameterJSDoc(output *bytes.Buffer, indent string, parameter operationParameter, locationLabel string) {
-	documentation := make(map[string]any, len(parameter.Schema)+2)
-	for key, value := range parameter.Schema {
-		documentation[key] = value
+	documentation := make(map[string]any, 2)
+	if schema, ok := parameter.Schema.(map[string]any); ok {
+		for key, value := range schema {
+			documentation[key] = value
+		}
 	}
 	if parameter.Description != "" {
 		documentation["description"] = parameter.Description
@@ -713,13 +759,29 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 	if len(mediaTypes) == 0 {
 		return "unknown", nil
 	}
-	if len(mediaTypes) == 1 {
+	if len(mediaTypes) == 1 && !strings.Contains(mediaTypes[0], "*") {
+		media, _ := content[mediaTypes[0]].(map[string]any)
+		media, err := resolveMediaTypeObject(document, media)
+		if err != nil {
+			return "", err
+		}
+		if isStreamingRequestMediaType(mediaTypes[0], media) {
+			itemSchema, exists := media["itemSchema"]
+			if !exists {
+				return "", fmt.Errorf("streaming request body %s has no itemSchema", mediaTypes[0])
+			}
+			itemType, err := schemaType(document, itemSchema, projectionInput)
+			if err != nil {
+				return "", err
+			}
+			return "AsyncIterable<" + itemType + ">", nil
+		}
 		if isTextMedia(mediaTypes[0]) {
 			return "string", nil
 		}
-		media, _ := content[mediaTypes[0]].(map[string]any)
-		schema, _ := media["schema"].(map[string]any)
-		if isBinaryMedia(mediaTypes[0], schema) {
+		schema := media["schema"]
+		schemaObject, _ := schema.(map[string]any)
+		if isBinaryMedia(mediaTypes[0], schemaObject) {
 			return "BinaryBody", nil
 		}
 		return schemaType(document, schema, projectionInput)
@@ -727,11 +789,25 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 	variants := make([]string, 0, len(mediaTypes))
 	for _, mediaType := range mediaTypes {
 		media, _ := content[mediaType].(map[string]any)
-		schema, _ := media["schema"].(map[string]any)
+		media, err := resolveMediaTypeObject(document, media)
+		if err != nil {
+			return "", err
+		}
+		schema := media["schema"]
+		schemaObject, _ := schema.(map[string]any)
 		valueType := "string"
-		var err error
-		if !isTextMedia(mediaType) {
-			if isBinaryMedia(mediaType, schema) {
+		if isStreamingRequestMediaType(mediaType, media) {
+			itemSchema, exists := media["itemSchema"]
+			if !exists {
+				return "", fmt.Errorf("streaming request body %s has no itemSchema", mediaType)
+			}
+			itemType, err := schemaType(document, itemSchema, projectionInput)
+			if err != nil {
+				return "", err
+			}
+			valueType = "AsyncIterable<" + itemType + ">"
+		} else if !isTextMedia(mediaType) {
+			if isBinaryMedia(mediaType, schemaObject) {
 				valueType = "BinaryBody"
 			} else {
 				valueType, err = schemaType(document, schema, projectionInput)
@@ -743,6 +819,11 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 		variants = append(variants, fmt.Sprintf("{ readonly contentType: %s; readonly value: %s }", quoteTS(mediaType), valueType))
 	}
 	return strings.Join(variants, " | "), nil
+}
+
+func isStreamingRequestMediaType(mediaType string, media map[string]any) bool {
+	_, hasItemSchema := media["itemSchema"]
+	return hasItemSchema
 }
 
 type resourceNode struct {
@@ -1109,6 +1190,9 @@ func hasVisibleResponseBodies(document *ir.Document) bool {
 				if content, ok := resolved["content"].(map[string]any); ok && len(content) > 0 {
 					return true
 				}
+				if headers, ok := resolved["headers"].(map[string]any); ok && len(headers) > 0 {
+					return true
+				}
 			}
 		}
 	}
@@ -1141,6 +1225,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 				"property: " + quoteTS(parameter.Property),
 				"style: " + quoteTS(parameter.Style),
 				fmt.Sprintf("explode: %t", parameter.Explode),
+				fmt.Sprintf("allowReserved: %t", parameter.AllowReserved),
 				fmt.Sprintf("required: %t", parameter.Required),
 				"schema: " + descriptor,
 			}
@@ -1178,6 +1263,13 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 	if hasResponseBodies {
 		fields = append(fields, "outputSchemas: outputSchemas", "responses: "+responseBodies)
 	}
+	security, hasSecurity, err := operationSecurityDefinition(document, irOperation)
+	if err != nil {
+		return "", err
+	}
+	if hasSecurity {
+		fields = append(fields, "security: "+security)
+	}
 	contentTypes, err := requestBodyContentTypes(document, irOperation)
 	if err != nil {
 		return "", err
@@ -1185,9 +1277,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 	if len(contentTypes) == 1 {
 		fields = append(fields, "contentType: "+quoteTS(contentTypes[0]))
 	}
-	if serverURL := operationServerURL(document, irOperation); serverURL != "" {
-		fields = append(fields, "serverURL: "+quoteTS(serverURL))
-	}
+	fields = append(fields, "servers: "+operationServers(document, irOperation))
 	return "{ " + strings.Join(fields, ", ") + " }", nil
 }
 
@@ -1206,20 +1296,53 @@ func requestBodyContentTypes(document *ir.Document, operation ir.Operation) ([]s
 	return result, nil
 }
 
-func operationServerURL(document *ir.Document, operation ir.Operation) string {
-	for _, source := range []any{operation.Raw["servers"], operation.PathItemRaw["servers"]} {
-		servers, _ := source.([]any)
-		if len(servers) == 0 {
-			continue
-		}
-		server, _ := servers[0].(map[string]any)
-		url, _ := server["url"].(string)
-		if len(document.Servers) == 0 || url != document.Servers[0].URL {
-			return url
-		}
-		return ""
+func operationServers(document *ir.Document, operation ir.Operation) string {
+	values, pointer := effectiveOperationServers(document, operation)
+	if len(values) == 0 {
+		return `[{ id: "#", url: "/" }]`
 	}
-	return ""
+	entries := make([]string, 0, len(values))
+	for index, value := range values {
+		server, _ := value.(map[string]any)
+		url, _ := server["url"].(string)
+		fields := []string{"id: " + quoteTS(fmt.Sprintf("%s/%d", pointer, index)), "url: " + quoteTS(url)}
+		variables, _ := server["variables"].(map[string]any)
+		if len(variables) > 0 {
+			names := sortedAnyKeys(variables)
+			items := make([]string, 0, len(names))
+			for _, name := range names {
+				variable, _ := variables[name].(map[string]any)
+				defaultValue, _ := variable["default"].(string)
+				item := "{ name: " + quoteTS(name) + ", defaultValue: " + quoteTS(defaultValue)
+				if enum, ok := variable["enum"].([]any); ok && len(enum) > 0 {
+					values := make([]string, 0, len(enum))
+					for _, value := range enum {
+						if text, ok := value.(string); ok {
+							values = append(values, quoteTS(text))
+						}
+					}
+					item += ", enumValues: [" + strings.Join(values, ", ") + "]"
+				}
+				items = append(items, item+" }")
+			}
+			fields = append(fields, "variables: ["+strings.Join(items, ", ")+"]")
+		}
+		entries = append(entries, "{ "+strings.Join(fields, ", ")+" }")
+	}
+	return "[" + strings.Join(entries, ", ") + "]"
+}
+
+func effectiveOperationServers(document *ir.Document, operation ir.Operation) ([]any, string) {
+	if values, exists := operation.Raw["servers"]; exists {
+		servers, _ := values.([]any)
+		return servers, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "servers")
+	}
+	if values, exists := operation.PathItemRaw["servers"]; exists {
+		servers, _ := values.([]any)
+		return servers, openAPIPointer("paths", operation.Path, "servers")
+	}
+	servers, _ := document.Raw["servers"].([]any)
+	return servers, openAPIPointer("servers")
 }
 
 func emitOutputJSDoc(output *bytes.Buffer, operation ir.Operation, item ManifestOperation, outputType string) {

@@ -9,6 +9,8 @@ import {
   getErrorCode,
   isAPIError,
   isErrorCode,
+  mergeLinkInput,
+  resolveLinkInput,
 } from "../fixtures/generated/client/generated/runtime.js";
 import type {
   OperationDefinition,
@@ -37,6 +39,51 @@ const collect = async <Item>(items: AsyncIterable<Item>): Promise<Item[]> => {
 };
 
 describe("generated runtime", () => {
+  it("resolves OpenAPI Link runtime expressions into target operation input", () => {
+    const response = {
+      status: 201,
+      data: { order: { id: "order-1" }, items: [{ id: "item-1" }] },
+      headers: {},
+      request: {},
+      response: new Response(null, { headers: { "x-trace": "trace-1" } }),
+    } as never;
+    expect(
+      resolveLinkInput(
+        response,
+        {
+          parameters: [
+            { location: "path", property: "orderID", value: "$response.body#/order/id" },
+            { location: "query", property: "item", value: "$response.body#/items/0/id" },
+            { location: "headerParams", property: "trace", value: "$response.header.X-Trace" },
+            { location: "cookieParams", property: "status", value: "$response.statusCode" },
+          ],
+          requestBody: "$request.body#/payload",
+        },
+        { body: { payload: { linked: true } } },
+      ),
+    ).toEqual({
+      path: { orderID: "order-1" },
+      query: { item: "item-1" },
+      headerParams: { trace: "trace-1" },
+      cookieParams: { status: 201 },
+      body: { linked: true },
+    });
+    expect(() => resolveLinkInput(response, { requestBody: "$method" })).toThrow(
+      "unsupported OpenAPI Link runtime expression",
+    );
+  });
+  it("lets an explicit Link target input override derived defaults by section", () => {
+    expect(
+      mergeLinkInput(
+        { path: { orderID: "derived" }, query: { page: 1, size: 20 }, body: { state: "derived" } },
+        { path: { orderID: "explicit" }, query: { size: 100 }, body: { state: "explicit" } },
+      ),
+    ).toEqual({
+      path: { orderID: "explicit" },
+      query: { page: 1, size: 100 },
+      body: { state: "explicit" },
+    });
+  });
   it("serializes paths, query styles, headers, cookies, and wire names", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const url = new URL(String(input));
@@ -57,7 +104,7 @@ describe("generated runtime", () => {
     });
     const request = createRequest({
       baseURL: "https://api.example.test/v1/",
-      fetch,
+      transport: { fetch, capabilities: { cookieJar: true } },
       authorization: "Bearer client",
     });
 
@@ -392,14 +439,17 @@ describe("generated runtime", () => {
   it("serializes OpenAPI style variants for paths, query objects, headers, and cookies", async () => {
     const request = createRequest({
       baseURL: "https://api.example.test",
-      fetch: async (input, init) => {
-        const url = new URL(String(input));
-        expect(url.pathname).toBe("/styles/.one.two/;first=1;second=two");
-        expect(url.searchParams.get("filter")).toBe("first,1,second,two");
-        const headers = new Headers(init?.headers);
-        expect(headers.get("x-context")).toBe('{"scope":"all"}');
-        expect(headers.get("cookie")).toBe("flags=one%2Ctwo");
-        return jsonResponse({ ok: true });
+      transport: {
+        capabilities: { cookieJar: true },
+        fetch: async (input, init) => {
+          const url = new URL(String(input));
+          expect(url.pathname).toBe("/styles/.one.two/;first=1;second=two");
+          expect(url.searchParams.get("filter")).toBe("first,1,second,two");
+          const headers = new Headers(init?.headers);
+          expect(headers.get("x-context")).toBe('{"scope":"all"}');
+          expect(headers.get("cookie")).toBe("flags=one%2Ctwo");
+          return jsonResponse({ ok: true });
+        },
       },
     });
     await expect(
@@ -441,6 +491,103 @@ describe("generated runtime", () => {
         },
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("applies Encoding Object rules to urlencoded request-body properties", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        expect(new Headers(init?.headers).get("content-type")).toBe(
+          "application/x-www-form-urlencoded",
+        );
+        expect(String(init?.body)).toBe(
+          "tags=one%2Ctwo&filter=first%2C1%2Csecond%2Ctwo&payload=%7B%22ok%22%3Atrue%7D",
+        );
+        return jsonResponse({ ok: true });
+      },
+    });
+    await expect(
+      request(
+        operation({
+          path: "/form",
+          requestBodies: [
+            {
+              contentType: "application/x-www-form-urlencoded",
+              schema: {},
+              encoding: [
+                { name: "tags", explode: false },
+                { name: "filter", style: "form", explode: false },
+                { name: "payload", contentType: "application/json" },
+              ],
+            },
+          ],
+          contentType: "application/x-www-form-urlencoded",
+        }),
+        {
+          body: {
+            tags: ["one", "two"],
+            filter: { first: 1, second: "two" },
+            payload: { ok: true },
+          },
+        },
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("writes declared multipart part media types and headers without allowing undeclared headers", async () => {
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        const contentType = new Headers(init?.headers).get("content-type");
+        expect(contentType).toMatch(/^multipart\/form-data; boundary=----openapi-sdkgen-/);
+        const body = init?.body;
+        expect(body).toBeInstanceOf(Blob);
+        const text = await (body as Blob).text();
+        expect(text).toContain('Content-Disposition: form-data; name="metadata"');
+        expect(text).toContain("Content-Type: application/json");
+        expect(text).toContain("x-part-id: part-42");
+        expect(text).toContain('{"title":"hello"}');
+        return jsonResponse({ ok: true });
+      },
+    });
+    const multipart = operation({
+      path: "/multipart",
+      contentType: "multipart/form-data",
+      requestBodies: [
+        {
+          contentType: "multipart/form-data",
+          schema: {},
+          encoding: [
+            {
+              name: "metadata",
+              contentType: "application/json",
+              headers: [{ name: "X-Part-ID", required: true, schema: { types: ["string"] } }],
+            },
+          ],
+        },
+      ],
+    });
+    await expect(
+      request(
+        multipart,
+        {
+          body: { metadata: { title: "hello" } },
+        },
+        { multipartHeaders: { metadata: { "X-Part-ID": "part-42" } } },
+      ),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      request(multipart, { body: { metadata: { title: "hello" } } }),
+    ).rejects.toMatchObject({
+      code: TransportErrorCode.REQUEST_ENCODE_FAILED,
+    });
+    await expect(
+      request(
+        multipart,
+        { body: { metadata: { title: "hello" } } },
+        { multipartHeaders: { metadata: { "X-Unknown": "no" } } },
+      ),
+    ).rejects.toMatchObject({ code: TransportErrorCode.REQUEST_ENCODE_FAILED });
   });
 
   it("selects and transforms declared multi-representation request bodies", async () => {
@@ -628,13 +775,13 @@ describe("generated runtime", () => {
     expect(getErrorCode(new Error("plain"))).toBeUndefined();
   });
 
-  it("uses operation server overrides and request-level transport options", async () => {
+  it("gives explicit base URLs precedence over operation servers and applies request-level transport options", async () => {
     const request = createRequest({
       baseURL: "https://api.example.test/v1",
       credentials: "include",
       headers: { "x-client-version": "one" },
       fetch: async (input, init) => {
-        expect(String(input)).toBe("https://alternate.example.test/v2/health");
+        expect(String(input)).toBe("https://api.example.test/v1/health");
         expect(init?.credentials).toBe("omit");
         expect(new Headers(init?.headers).get("x-client-version")).toBe("one");
         return jsonResponse({ ok: true });
@@ -644,7 +791,9 @@ describe("generated runtime", () => {
       request(
         operation({
           path: "health",
-          serverURL: "https://alternate.example.test/v2/",
+          servers: [
+            { id: "#/paths/~1health/get/servers/0", url: "https://alternate.example.test/v2/" },
+          ],
         }),
         undefined,
         { credentials: "omit" },

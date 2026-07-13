@@ -9,7 +9,13 @@ import { openapi } from "./generated/capabilities-sdk/metadata.js";
 const apiBaseURL = process.env.CAPABILITIES_API_BASE_URL ?? "http://127.0.0.1:18790/v1";
 const webhookBaseURL = process.env.CAPABILITIES_WEBHOOK_BASE_URL ?? "http://127.0.0.1:18791";
 const callbackBaseURL = process.env.CAPABILITIES_CALLBACK_BASE_URL ?? webhookBaseURL;
-const api = createClient({ baseURL: apiBaseURL });
+const api = createClient({
+  baseURL: apiBaseURL,
+  transport: {
+    fetch: globalThis.fetch,
+    capabilities: { cookieJar: true },
+  },
+});
 
 const assert: (condition: unknown, message: string) => asserts condition = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -57,7 +63,7 @@ assert(created.data.id === "item-3" && !("secret" in created.data), "item projec
 
 // Generated error guards expose the server's declared error code and details.
 const invalid = await api.items
-  .create({ body: { name: "", status: "draft", callbackURL: `${callbackBaseURL}/callbacks/delivery` } })
+  .create({ body: { name: "server-rejected", status: "draft", callbackURL: `${callbackBaseURL}/callbacks/delivery` } })
   .catch((error: unknown) => error);
 assert(isValidationFailedError(invalid), "typed validation error was not preserved");
 assert(invalid.details?.name === "must not be empty", "validation details changed");

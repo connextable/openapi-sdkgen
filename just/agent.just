@@ -68,9 +68,6 @@ example-todo:
 example-advanced:
     ./scripts/agent/example-advanced
 
-example-javascript:
-    ./scripts/agent/example-javascript
-
 example-capabilities:
     ./scripts/agent/example-capabilities
 

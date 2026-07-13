@@ -85,42 +85,28 @@ func rootSecurityIsInboundOnly(document *ir.Document) bool {
 
 func unsupportedRootFeatures(document *ir.Document, root map[string]any) []string {
 	var result []string
-	if self, _ := root["$self"].(string); self != "" {
-		result = append(result, "#/$self (base URI resolution)")
-	}
-	if dialect, _ := root["jsonSchemaDialect"].(string); dialect != "" {
-		result = append(result, "#/jsonSchemaDialect (dialect selection)")
-	}
 	for _, feature := range []struct {
 		key     string
 		detail  string
 		present func(any) bool
 	}{
 		{"webhooks", "generated inbound webhook contracts", hasNonEmptyObject},
-		{"security", "security requirement planning", hasNonEmptyList},
 	} {
 		if feature.present(root[feature.key]) {
 			result = append(result, fmt.Sprintf("%s (%s)", openAPIPointer(feature.key), feature.detail))
 		}
 	}
-	result = append(result, unsupportedServerVariables(root["servers"], openAPIPointer("servers"))...)
 	components, _ := root["components"].(map[string]any)
 	for _, feature := range []struct {
 		key    string
 		detail string
 	}{
 		{"callbacks", "generated callback contracts"},
-		{"links", "generated link helpers"},
-		{"mediaTypes", "reusable media type definitions"},
 	} {
 		if hasNonEmptyObject(components[feature.key]) {
 			result = append(result, fmt.Sprintf("%s (%s)", openAPIPointer("components", feature.key), feature.detail))
 		}
 	}
-	if hasNonEmptyObject(components["headers"]) {
-		result = append(result, "#/components/headers (typed response header contracts)")
-	}
-	result = append(result, unsupportedSecuritySchemeFeatures(components["securitySchemes"], openAPIPointer("components", "securitySchemes"))...)
 	result = append(result, unsupportedReusableComponentFeatures(document, components)...)
 	return result
 }
@@ -170,16 +156,9 @@ func unsupportedReusableComponentFeatures(document *ir.Document, components map[
 
 func unsupportedOperationFeatures(document *ir.Document, operation map[string]any, path string) []string {
 	var result []string
-	if servers, _ := operation["servers"].([]any); len(servers) > 1 {
-		result = append(result, appendOpenAPIPointer(path, "servers")+" (scoped server selection)")
-	}
-	if hasNonEmptyList(operation["security"]) {
-		result = append(result, fmt.Sprintf("%s (security requirement planning)", appendOpenAPIPointer(path, "security")))
-	}
 	if hasNonEmptyObject(operation["callbacks"]) {
 		result = append(result, fmt.Sprintf("%s (generated callback contracts)", appendOpenAPIPointer(path, "callbacks")))
 	}
-	result = append(result, unsupportedServerVariables(operation["servers"], appendOpenAPIPointer(path, "servers"))...)
 	result = append(result, unsupportedParameterFeatures(document, operation["parameters"], appendOpenAPIPointer(path, "parameters"))...)
 	result = append(result, unsupportedRequestBodyFeatures(document, operation["requestBody"], appendOpenAPIPointer(path, "requestBody"))...)
 	result = append(result, unsupportedResponseFeatures(document, operation["responses"], appendOpenAPIPointer(path, "responses"))...)
@@ -210,33 +189,19 @@ func unsupportedParameterFeatures(document *ir.Document, value any, path string)
 func unsupportedParameterObjectFeatures(document *ir.Document, value any, path string) []string {
 	parameter, _ := value.(map[string]any)
 	var result []string
-	if parameter["in"] == "querystring" {
-		result = append(result, appendOpenAPIPointer(path, "in")+" (whole-querystring serialization)")
-	}
-	if allowReserved, _ := parameter["allowReserved"].(bool); allowReserved {
-		result = append(result, appendOpenAPIPointer(path, "allowReserved")+" (reserved query character serialization)")
-	}
-	if allowEmptyValue, _ := parameter["allowEmptyValue"].(bool); allowEmptyValue {
-		result = append(result, appendOpenAPIPointer(path, "allowEmptyValue")+" (empty-value parameter serialization)")
-	}
 	if content, _ := parameter["content"].(map[string]any); len(content) > 1 {
 		result = append(result, appendOpenAPIPointer(path, "content")+" (Parameter Object content must define exactly one media type)")
 	}
 	if content, _ := parameter["content"].(map[string]any); len(content) == 1 {
 		for _, mediaType := range sortedAnyKeys(content) {
 			media, _ := content[mediaType].(map[string]any)
-			schema, _ := media["schema"].(map[string]any)
-			if !isJSONMediaType(mediaType) && schemaMayBeStructured(document, schema) {
-				result = append(result, appendOpenAPIPointer(appendOpenAPIPointer(path, "content"), mediaType)+" (structured parameter content serialization)")
+			resolved, err := resolveMediaTypeObject(document, media)
+			if err != nil {
+				result = append(result, appendOpenAPIPointer(appendOpenAPIPointer(path, "content"), mediaType)+" (reusable Media Type Object resolution)")
+				continue
 			}
+			_ = resolved
 		}
-	}
-	style, _ := parameter["style"].(string)
-	if style == "cookie" {
-		result = append(result, appendOpenAPIPointer(path, "style")+" (cookie parameter serialization)")
-	}
-	if (style == "spaceDelimited" || style == "pipeDelimited") && schemaMayBeObject(document, parameter["schema"]) {
-		result = append(result, appendOpenAPIPointer(path, "style")+" (object serialization for "+style+")")
 	}
 	return result
 }
@@ -280,14 +245,28 @@ func unsupportedResponseFeatures(document *ir.Document, value any, path string) 
 
 func unsupportedResponseObjectFeatures(document *ir.Document, response map[string]any, path string) []string {
 	var result []string
-	if hasNonEmptyObject(response["headers"]) {
-		result = append(result, appendOpenAPIPointer(path, "headers")+" (typed response header contracts)")
-	}
-	if hasNonEmptyObject(response["links"]) {
-		result = append(result, appendOpenAPIPointer(path, "links")+" (generated link helpers)")
-	}
+	result = append(result, unsupportedResponseHeaderFeatures(document, response["headers"], appendOpenAPIPointer(path, "headers"))...)
 	content, _ := response["content"].(map[string]any)
 	return append(result, unsupportedMediaFeatures(document, content, appendOpenAPIPointer(path, "content"), false)...)
+}
+
+func unsupportedResponseHeaderFeatures(document *ir.Document, value any, path string) []string {
+	headers, _ := value.(map[string]any)
+	var result []string
+	for _, name := range sortedAnyKeys(headers) {
+		header, _ := headers[name].(map[string]any)
+		resolved, err := resolveComponentObject(document, header, "headers")
+		if err != nil {
+			continue
+		}
+		content, _ := resolved["content"].(map[string]any)
+		if len(content) > 1 {
+			result = append(result, appendOpenAPIPointer(appendOpenAPIPointer(path, name), "content")+" (Header Object content must define exactly one media type)")
+			continue
+		}
+		result = append(result, unsupportedMediaFeatures(document, content, appendOpenAPIPointer(appendOpenAPIPointer(path, name), "content"), false)...)
+	}
+	return result
 }
 
 func unsupportedMediaFeatures(document *ir.Document, content map[string]any, path string, request bool) []string {
@@ -295,29 +274,29 @@ func unsupportedMediaFeatures(document *ir.Document, content map[string]any, pat
 	for _, mediaType := range sortedAnyKeys(content) {
 		media, _ := content[mediaType].(map[string]any)
 		itemPath := appendOpenAPIPointer(path, mediaType)
+		resolved, err := resolveMediaTypeObject(document, media)
+		if err != nil {
+			result = append(result, itemPath+" (reusable Media Type Object resolution)")
+			continue
+		}
+		media = resolved
 		normalizedMediaType := strings.ToLower(mediaType)
-		schema, _ := media["schema"].(map[string]any)
-		if strings.Contains(normalizedMediaType, "*") {
-			result = append(result, itemPath+" (media-type wildcard negotiation)")
-		}
-		if strings.Contains(normalizedMediaType, "xml") {
-			result = append(result, itemPath+" (XML media-type codec)")
-		}
-		if strings.Contains(normalizedMediaType, "event-stream") || strings.Contains(normalizedMediaType, "json-seq") || strings.Contains(normalizedMediaType, "ndjson") {
+		streamingMultipart := strings.HasPrefix(normalizedMediaType, "multipart/") && media["itemSchema"] != nil
+		streaming := isStreamMediaType(normalizedMediaType) || media["itemSchema"] != nil
+		if streaming {
 			if request {
-				result = append(result, itemPath+" (streaming request encoder)")
-			} else {
+				if _, hasItemSchema := media["itemSchema"]; !hasItemSchema {
+					result = append(result, itemPath+" (streaming request encoder requires itemSchema)")
+				}
+			} else if _, hasItemSchema := media["itemSchema"]; !hasItemSchema {
 				result = append(result, itemPath+" (streaming response API)")
 			}
 		}
-		if !isRuntimeMediaType(normalizedMediaType, schema) {
-			result = append(result, itemPath+" (runtime media-type codec)")
+		if hasNonEmptyObject(media["encoding"]) && (!request || (!strings.HasPrefix(normalizedMediaType, "multipart/") && normalizedMediaType != "application/x-www-form-urlencoded")) {
+			result = append(result, appendOpenAPIPointer(itemPath, "encoding")+" (Encoding Object requires a form request media type)")
 		}
-		if request && normalizedMediaType == "multipart/form-data" && multipartHasStructuredProperties(document, schema) {
-			result = append(result, itemPath+" (structured multipart default encoding)")
-		}
-		if hasNonEmptyObject(media["encoding"]) {
-			result = append(result, appendOpenAPIPointer(itemPath, "encoding")+" (multipart/form encoding)")
+		if hasNonEmptyObject(media["encoding"]) && (media["prefixEncoding"] != nil || media["itemEncoding"] != nil) {
+			result = append(result, itemPath+" (encoding cannot be combined with prefixEncoding or itemEncoding)")
 		}
 		for _, feature := range []struct {
 			key    string
@@ -328,7 +307,12 @@ func unsupportedMediaFeatures(document *ir.Document, content map[string]any, pat
 			{"itemEncoding", "streaming multipart item encoding"},
 		} {
 			if _, exists := media[feature.key]; exists {
-				result = append(result, appendOpenAPIPointer(itemPath, feature.key)+" ("+feature.detail+")")
+				supported := feature.key == "itemSchema" && streaming ||
+					feature.key == "prefixEncoding" && strings.HasPrefix(normalizedMediaType, "multipart/") ||
+					feature.key == "itemEncoding" && (request && strings.HasPrefix(normalizedMediaType, "multipart/") || streamingMultipart)
+				if !supported {
+					result = append(result, appendOpenAPIPointer(itemPath, feature.key)+" ("+feature.detail+")")
+				}
 			}
 		}
 	}

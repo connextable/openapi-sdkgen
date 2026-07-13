@@ -81,20 +81,19 @@ func TestGenerateRejectsUnknownTarget(t *testing.T) {
 	}
 }
 
-func TestGenerateJavaScriptTarget(t *testing.T) {
+func TestGenerateRejectsRemovedJavaScriptTarget(t *testing.T) {
 	directory := t.TempDir()
 	input := filepath.Join(directory, "openapi.json")
 	output := filepath.Join(directory, "generated")
-	if err := os.WriteFile(input, []byte(`{"openapi":"3.0.3","info":{"title":"JavaScript","version":"1"},"paths":{}}`), 0o600); err != nil {
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.0.3","info":{"title":"Removed target","version":"1"},"paths":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"generate", "--input", input, "--target", "javascript", "--output", output}); err != nil {
-		t.Fatal(err)
+	err := run([]string{"generate", "--input", input, "--target", "javascript", "--output", output})
+	if err == nil || !strings.Contains(err.Error(), "unsupported SDK target") {
+		t.Fatalf("error = %v", err)
 	}
-	for _, path := range []string{"index.js", "metadata.js", "generated/client.js", "generated/runtime.js"} {
-		if _, err := os.Stat(filepath.Join(output, path)); err != nil {
-			t.Fatalf("missing JavaScript artifact %s: %v", path, err)
-		}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("unexpected output stat error = %v", err)
 	}
 }
 
@@ -111,15 +110,10 @@ func TestGenerateParsesRepeatableWithAddons(t *testing.T) {
 	}{
 		{name: "unknown", args: []string{"--with", "worker"}, want: "unsupported SDK add-on"},
 		{name: "duplicate", args: []string{"--with", "server", "--with", "server"}, want: "specified more than once"},
-		{name: "javascript incompatible", args: []string{"--with", "server"}, want: `target "javascript" does not support add-on "server"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output := filepath.Join(directory, test.name)
-			target := "typescript"
-			if test.name == "javascript incompatible" {
-				target = "javascript"
-			}
-			args := append([]string{"generate", "--input", input, "--target", target, "--output", output}, test.args...)
+			args := append([]string{"generate", "--input", input, "--target", "typescript", "--output", output}, test.args...)
 			err := run(args)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v", err)
@@ -128,6 +122,27 @@ func TestGenerateParsesRepeatableWithAddons(t *testing.T) {
 				t.Fatalf("unexpected output stat error = %v", err)
 			}
 		})
+	}
+}
+
+func TestGenerateAcceptsExplicitRemoteReferenceOptionsWithoutFetching(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	if err := os.WriteFile(input, []byte(`{"openapi":"3.1.0","info":{"title":"Offline","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(directory, "generated")
+	if err := run([]string{
+		"generate", "--input", input, "--target", "typescript", "--output", output,
+		"--allow-remote-ref", "https://schemas.example.test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(output, "index.ts")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(input + ".openapi-sdkgen.lock"); !os.IsNotExist(err) {
+		t.Fatalf("implicit lockfile stat error = %v", err)
 	}
 }
 

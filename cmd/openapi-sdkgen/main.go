@@ -16,7 +16,7 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
 
-const usage = "usage: openapi-sdkgen generate --input <document> --target <target> --output <directory> [--with <addon> ...]"
+const usage = "usage: openapi-sdkgen generate --input <document> --target typescript --output <directory> [--with <addon> ...] [--allow-remote-ref <https-origin> ...] [--ref-lock <path>] [--update-ref-lock] [--offline] [--schema-extension <manifest> ...]"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -43,7 +43,14 @@ func generate(args []string) error {
 	targetName := flags.String("target", "", "SDK target")
 	output := flags.String("output", "", "output directory")
 	var with repeatedStrings
+	var remoteRefs repeatedStrings
+	var schemaExtensions repeatedStrings
+	refLock := flags.String("ref-lock", "", "remote-reference and extension lock path")
+	updateRefLock := flags.Bool("update-ref-lock", false, "update the remote-reference and extension lock")
+	offline := flags.Bool("offline", false, "use only locked cached remote references")
 	flags.Var(&with, "with", "optional generated add-on (repeatable)")
+	flags.Var(&remoteRefs, "allow-remote-ref", "allow an exact HTTPS remote-reference origin (repeatable)")
+	flags.Var(&schemaExtensions, "schema-extension", "trusted schema-extension manifest (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("parse generate arguments: %w", err)
 	}
@@ -54,7 +61,7 @@ func generate(args []string) error {
 		return errors.New("--input, --target, and --output are required")
 	}
 
-	registry, err := generator.NewRegistry(typescript.Generator{}, typescript.JavaScriptGenerator{})
+	registry, err := generator.NewRegistry(typescript.Generator{})
 	if err != nil {
 		return err
 	}
@@ -73,7 +80,13 @@ func generate(args []string) error {
 	if err := generator.ValidateTargetOptions(target, options); err != nil {
 		return err
 	}
-	document, err := compiler.CompileFile(*input)
+	document, err := compiler.CompileFileWithOptions(*input, compiler.CompileOptions{
+		RemoteRefAllowlist:       remoteRefs,
+		RefLockPath:              *refLock,
+		UpdateRefLock:            *updateRefLock,
+		Offline:                  *offline,
+		SchemaExtensionManifests: schemaExtensions,
+	})
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", *input, err)
 	}

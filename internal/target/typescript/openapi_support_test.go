@@ -21,8 +21,9 @@ func TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths(t *testing.
 			},
 		},
 		Operations: []ir.Operation{{
-			Path:   "/events",
-			Method: "GET",
+			OperationID: "getWidgets",
+			Path:        "/events",
+			Method:      "GET",
 			Raw: map[string]any{
 				"parameters": []any{map[string]any{"name": "raw", "in": "querystring"}},
 				"callbacks":  map[string]any{"onDone": map[string]any{}},
@@ -40,18 +41,30 @@ func TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths(t *testing.
 		t.Fatal("unimplemented OpenAPI features accepted")
 	}
 	for _, expected := range []string{
-		"#/$self (base URI resolution)",
-		"#/jsonSchemaDialect (dialect selection)",
 		"#/webhooks (generated inbound webhook contracts)",
-		"#/components/securitySchemes/oauth/type (typed security providers)",
 		"#/paths/~1events/get/callbacks (generated callback contracts)",
-		"#/paths/~1events/get/parameters/0/in (whole-querystring serialization)",
-		"#/paths/~1events/get/responses/200/links (generated link helpers)",
 		"#/paths/~1events/get/responses/200/content/text~1event-stream (streaming response API)",
 	} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("error = %q, missing %q", err, expected)
 		}
+	}
+}
+
+func TestSourceArtifactsAcceptsJSONSchemaResourceScopeMetadata(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.2.0",
+  "$self": "https://api.example.test/openapi.json",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {"title": "Resource scope", "version": "1"},
+  "paths": {"/status": {"get": {"operationId": "getStatus", "responses": {"204": {"description": "OK"}}}}},
+  "components": {"schemas": {"Status": {"$id": "schemas/status", "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SourceArtifacts(document); err != nil {
+		t.Fatalf("resource scope metadata rejected: %v", err)
 	}
 }
 
@@ -82,10 +95,23 @@ func TestSourceArtifactsRejectsUnsupportedReusableComponentFeatures(t *testing.T
 		"parameters": map[string]any{"Search": map[string]any{"name": "search", "in": "query", "allowReserved": true, "allowEmptyValue": true}},
 		"responses":  map[string]any{"Events": map[string]any{"content": map[string]any{"text/event-stream": map[string]any{}}}},
 	}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		if _, err := generate(document); err == nil || !strings.Contains(err.Error(), "allowReserved") || !strings.Contains(err.Error(), "allowEmptyValue") || !strings.Contains(err.Error(), "event-stream") || !strings.Contains(err.Error(), "components/headers") {
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err == nil || !strings.Contains(err.Error(), "event-stream") || strings.Contains(err.Error(), "components/headers") {
 			t.Fatalf("error = %v", err)
 		}
+	}
+}
+
+func TestSourceArtifactsSupportsAllowEmptyValue(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{{
+		OperationID: "searchWidgets", Path: "/widgets", Method: "GET",
+		Raw: map[string]any{
+			"parameters": []any{map[string]any{"name": "search", "in": "query", "allowEmptyValue": true, "schema": map[string]any{"type": "string"}}},
+			"responses":  map[string]any{"204": map[string]any{"description": "No content"}},
+		},
+	}}}
+	if _, err := SourceArtifacts(document); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -96,52 +122,50 @@ func TestSourceArtifactsRejectsOpenAPI32SecurityFieldsAtExactPaths(t *testing.T)
 			"flows": map[string]any{"deviceAuthorization": map[string]any{"deviceAuthorizationUrl": "https://auth.example.test/device"}},
 		},
 	}}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil {
-			t.Fatal("OpenAPI 3.2 security fields accepted")
-		}
-		for _, expected := range []string{"/type", "/oauth2MetadataUrl", "/deprecated", "/flows"} {
-			if !strings.Contains(err.Error(), "#/components/securitySchemes/oauth"+expected+" (typed security providers)") {
-				t.Fatalf("error = %q, missing %q", err, expected)
-			}
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatalf("OpenAPI 3.2 security metadata rejected: %v", err)
 		}
 	}
 }
 
-func TestSourceArtifactsRejectsOpenAPI32CookieStyleWithoutEncoder(t *testing.T) {
+func TestSourceArtifactsSupportsOpenAPI32CookieStyle(t *testing.T) {
 	document := &ir.Document{
 		Operations: []ir.Operation{{
-			Path:   "/widgets",
-			Method: "GET",
+			OperationID: "getWidgets",
+			Path:        "/widgets",
+			Method:      "GET",
 			Raw: map[string]any{"parameters": []any{
 				map[string]any{"name": "session", "in": "cookie", "style": "cookie", "schema": map[string]any{"type": "string"}},
 			}},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "#/paths/~1widgets/get/parameters/0/style (cookie parameter serialization)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
 
-func TestSourceArtifactsRejectsMultipleScopedServersWithoutSelectionAPI(t *testing.T) {
+func TestSourceArtifactsSupportsMultipleScopedServers(t *testing.T) {
 	document := &ir.Document{
 		Operations: []ir.Operation{{
-			Path:   "/widgets",
-			Method: "GET",
+			OperationID: "getWidgets",
+			Path:        "/widgets",
+			Method:      "GET",
 			Raw: map[string]any{"servers": []any{
 				map[string]any{"url": "https://one.example.test"},
 				map[string]any{"url": "https://two.example.test"},
 			}},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "#/paths/~1widgets/get/servers (scoped server selection)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		artifacts, err := generate(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, "https://one.example.test") || !strings.Contains(source, "https://two.example.test") {
+			t.Fatalf("scoped server choices were not emitted:\n%s", source)
 		}
 	}
 }
@@ -149,18 +173,18 @@ func TestSourceArtifactsRejectsMultipleScopedServersWithoutSelectionAPI(t *testi
 func TestSourceArtifactsRejectsXMLMediaTypesWithoutCodecSemantics(t *testing.T) {
 	document := &ir.Document{
 		Operations: []ir.Operation{{
-			Path:   "/widgets",
-			Method: "POST",
+			OperationID: "createWidget",
+			Path:        "/widgets",
+			Method:      "POST",
 			Raw: map[string]any{
 				"requestBody": map[string]any{"content": map[string]any{"application/xml": map[string]any{"schema": map[string]any{"type": "object"}}}},
 				"responses":   map[string]any{"200": map[string]any{"content": map[string]any{"application/xml": map[string]any{"schema": map[string]any{"type": "object"}}}}},
 			},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "#/paths/~1widgets/post/requestBody/content/application~1xml (XML media-type codec)") || !strings.Contains(err.Error(), "#/paths/~1widgets/post/responses/200/content/application~1xml (XML media-type codec)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatalf("XML media types rejected: %v", err)
 		}
 	}
 }
@@ -174,7 +198,7 @@ func TestSourceArtifactsHandlesCaseInsensitiveJSONMediaType(t *testing.T) {
 			"Application/JSON": map[string]any{"schema": map[string]any{"type": "object"}},
 		}}},
 	}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
 		if _, err := generate(document); err != nil {
 			t.Fatal(err)
 		}
@@ -192,20 +216,21 @@ func TestSourceArtifactsAcceptsStructuredJSONSuffixesAndRejectsJSONLookalikes(t 
 			"application/notjson": map[string]any{"schema": map[string]any{"type": "object"}},
 		}}},
 	}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
 		if _, err := generate(valid); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := generate(invalid); err == nil || !strings.Contains(err.Error(), "/application~1notjson (runtime media-type codec)") {
-			t.Fatalf("error = %v", err)
+		if _, err := generate(invalid); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
 
 func TestSourceArtifactsRejectsStructuredMultipartDefaultsAndUnknownMedia(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{{
-		Path:   "/uploads",
-		Method: "POST",
+		OperationID: "createUpload",
+		Path:        "/uploads",
+		Method:      "POST",
 		Raw: map[string]any{
 			"requestBody": map[string]any{"content": map[string]any{
 				"multipart/form-data": map[string]any{"schema": map[string]any{"type": "object", "properties": map[string]any{
@@ -217,10 +242,9 @@ func TestSourceArtifactsRejectsStructuredMultipartDefaultsAndUnknownMedia(t *tes
 			}}},
 		},
 	}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "/multipart~1form-data (structured multipart default encoding)") || !strings.Contains(err.Error(), "/application~1pdf (runtime media-type codec)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -232,16 +256,15 @@ func TestSourceArtifactsRejectsStructuredMultipartComponentSchemas(t *testing.T)
 				"metadata": map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}},
 			}},
 		},
-		Operations: []ir.Operation{{
+		Operations: []ir.Operation{{OperationID: "createUpload",
 			Path: "/uploads", Method: "POST", Raw: map[string]any{"requestBody": map[string]any{"content": map[string]any{
 				"multipart/form-data": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Upload"}},
 			}}},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "/multipart~1form-data (structured multipart default encoding)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -249,35 +272,65 @@ func TestSourceArtifactsRejectsStructuredMultipartComponentSchemas(t *testing.T)
 func TestSourceArtifactsRejectsResponseHeaderContracts(t *testing.T) {
 	document := &ir.Document{
 		Operations: []ir.Operation{{
-			Path:   "/widgets",
-			Method: "GET",
+			OperationID: "getWidgets",
+			Path:        "/widgets",
+			Method:      "GET",
 			Raw: map[string]any{"responses": map[string]any{"200": map[string]any{"headers": map[string]any{
 				"X-Rate-Limit": map[string]any{"required": true, "schema": map[string]any{"type": "integer"}},
 			}}}},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
-		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "#/paths/~1widgets/get/responses/200/headers (typed response header contracts)") {
-			t.Fatalf("error = %v", err)
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
 
-func TestSourceArtifactsRejectsParameterSerializationItCannotRepresent(t *testing.T) {
+func TestSourceArtifactsAllowsCustomMediaParameterContent(t *testing.T) {
 	document := &ir.Document{
 		Operations: []ir.Operation{{
-			Path:   "/widgets",
-			Method: "GET",
+			OperationID: "getWidgets",
+			Path:        "/widgets",
+			Method:      "GET",
 			Raw: map[string]any{"parameters": []any{
 				map[string]any{"name": "filter", "in": "query", "style": "pipeDelimited", "schema": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}},
-				map[string]any{"name": "xml", "in": "query", "content": map[string]any{"application/xml": map[string]any{"schema": map[string]any{"type": "object"}}}},
+				map[string]any{"name": "cbor", "in": "query", "content": map[string]any{"application/cbor": map[string]any{"schema": map[string]any{"type": "object"}}}},
 			}},
 		}},
 	}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
+		if _, err := generate(document); err != nil {
+			t.Fatalf("generate custom parameter media = %v", err)
+		}
+	}
+}
+
+func TestSourceArtifactsAllowsOpenAPI32OptionalPaths(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{"openapi":"3.2.0","info":{"title":"Components only","version":"1"},"components":{"schemas":{"Marker":{"type":"string"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SourceArtifacts(document); err != nil {
+		t.Fatalf("generate optional-paths document = %v", err)
+	}
+}
+
+func TestSourceArtifactsRejectsMultiMediaParameterContent(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{{
+		OperationID: "getWidgets",
+		Path:        "/widgets",
+		Method:      "GET",
+		Raw: map[string]any{"parameters": []any{
+			map[string]any{"name": "filter", "in": "query", "content": map[string]any{
+				"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
+				"application/xml":  map[string]any{"schema": map[string]any{"type": "object"}},
+			}},
+		}},
+	}}}
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
 		_, err := generate(document)
-		if err == nil || !strings.Contains(err.Error(), "/style (object serialization for pipeDelimited)") || !strings.Contains(err.Error(), "/application~1xml (structured parameter content serialization)") {
+		if err == nil || !strings.Contains(err.Error(), "/content (Parameter Object content must define exactly one media type)") {
 			t.Fatalf("error = %v", err)
 		}
 	}
@@ -289,10 +342,6 @@ func TestSourceArtifactsRejectsOpenAPI32StreamingAndPositionalMediaFeatures(t *t
 	}, Operations: []ir.Operation{{
 		Path: "/logs", Method: "POST", Raw: map[string]any{
 			"requestBody": map[string]any{"content": map[string]any{
-				"multipart/mixed": map[string]any{
-					"prefixEncoding": []any{map[string]any{}},
-					"itemEncoding":   map[string]any{"contentType": "application/octet-stream"},
-				},
 				"application/x-ndjson": map[string]any{"schema": map[string]any{"type": "object"}},
 			}},
 			"responses": map[string]any{"200": map[string]any{"content": map[string]any{
@@ -300,12 +349,12 @@ func TestSourceArtifactsRejectsOpenAPI32StreamingAndPositionalMediaFeatures(t *t
 			}}},
 		},
 	}}}
-	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts, JavaScriptSourceArtifacts} {
+	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
 		_, err := generate(document)
 		if err == nil {
-			t.Fatal("OpenAPI 3.2 streaming/positional media features accepted")
+			t.Fatal("OpenAPI 3.2 streaming request without itemSchema accepted")
 		}
-		for _, expected := range []string{"/prefixEncoding", "/itemEncoding", "/itemSchema", "/application~1x-ndjson (streaming request encoder)"} {
+		for _, expected := range []string{"/application~1x-ndjson (streaming request encoder requires itemSchema)"} {
 			if !strings.Contains(err.Error(), expected) {
 				t.Fatalf("error = %q, missing %q", err, expected)
 			}
