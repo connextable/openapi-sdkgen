@@ -12,9 +12,6 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-
 concurrency:
   group: openapi-sdkgen-release
   cancel-in-progress: false
@@ -23,6 +20,8 @@ jobs:
   validate-release:
     name: Validate release tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       ref: ${{ steps.release.outputs.ref }}
