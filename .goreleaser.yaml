@@ -31,7 +31,6 @@ checksum:
 release:
   mode: keep-existing
   replace_existing_artifacts: true
-  target_commitish: "{{ .Commit }}"
 
 retry:
   attempts: 5

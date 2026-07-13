@@ -64,7 +64,10 @@ require_pattern 'publish-formula\.yml@main'
 require_pattern 'Publish GitHub Release'
 require_pattern 'release-tools/\.goreleaser\.yaml'
 require_goreleaser_pattern 'replace_existing_artifacts: true'
-require_goreleaser_pattern 'target_commitish:'
+if grep -Eq 'target_commitish:' "$goreleaser"; then
+  echo "GoReleaser must not override the target of an existing release tag" >&2
+  exit 1
+fi
 require_pattern 'contents: write'
 reject_pattern 'just agent'
 require_release_check_pattern 'run typecheck'
