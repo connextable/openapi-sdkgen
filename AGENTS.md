@@ -58,7 +58,8 @@ just docs lock
 ## User release command
 
 ```txt
-just release [--dry-run|-n] [--yes|-y] [--since TAG] [patch|minor|major|vX.Y.Z[-prerelease]]
+just release [patch|minor|major|vX.Y.Z[-prerelease]]
+just release -- [--dry-run|-n] [--yes|-y] [--since TAG] [--resume TAG] [patch|minor|major|vX.Y.Z[-prerelease]]
 ```
 
 `just release` is the user-facing release command, not an agent wrapper. It

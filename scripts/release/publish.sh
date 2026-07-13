@@ -47,6 +47,8 @@ while [ "$#" -gt 0 ]; do
   [ -n "$arg" ] || continue
 
   case "$arg" in
+    --)
+      ;;
     --dry-run|-n)
       DRY_RUN=1
       ;;
@@ -907,22 +909,22 @@ if [ "$DRY_RUN" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ "$DRY_RUN" -eq 1 ]; then
-  ui_section "Dry run"
-  ui_kv "Tag" "$PATCH_TAG"
-  ui_kv "Target" "$TARGET_SHA"
-  ui_note "No tag or push was created."
-  exit 0
-fi
-
 run_checks
 if [ "$(git symbolic-ref --short HEAD)" != "main" ] || [ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]; then
   ui_error "branch or HEAD changed while checks ran."
   exit 1
 fi
-if [ -n "$(working_tree_changes)" ]; then
+if [ "$DRY_RUN" -eq 0 ] && [ -n "$(working_tree_changes)" ]; then
   ui_error "working tree changed while checks ran."
   exit 1
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  ui_section "Dry run"
+  ui_kv "Tag" "$PATCH_TAG"
+  ui_kv "Target" "$TARGET_SHA"
+  ui_note "Release checks passed. No tag or push was created."
+  exit 0
 fi
 
 if ! confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then

@@ -266,14 +266,15 @@ just release major
 just release v0.2.0-rc.1
 ```
 
-Use `--dry-run` to inspect the release without tagging or pushing, `--since TAG`
-to select the release-note base, and `--yes` to skip the final push prompt.
+Use `just release -- --dry-run` to validate without tagging or pushing,
+`--since TAG` to select the release-note base, and `--yes` to skip the final
+push prompt. The `--` separates release-helper options from `just` options.
 
 If a delivery step fails after the tag exists, fix the workflow on `main` and
 resume that exact tag instead of creating another version:
 
 ```sh
-just release --resume v0.2.0 --yes
+just release -- --resume v0.2.0 --yes
 ```
 
 The tag workflow verifies that the tag is annotated SemVer and merged into

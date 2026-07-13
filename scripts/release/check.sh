@@ -18,7 +18,8 @@ if ! command -v corepack >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -rf "$WORK_ROOT"
+# Go makes module-cache directories read-only after download. Reuse this
+# private work directory instead of deleting it at the start of every release.
 mkdir -p "$WORK_ROOT/go-build" "$WORK_ROOT/go-mod" "$WORK_ROOT/pnpm-store" "$WORK_ROOT/corepack" "$WORK_ROOT/node-cache"
 chmod 700 "$WORK_ROOT" "$WORK_ROOT"/*
 

@@ -4,9 +4,9 @@ set no-cd := true
 mod agent 'just/agent.just'
 mod docs 'just/docs.just'
 
-[doc('inspect, validate, tag, and publish a release; accepts release helper options')]
-release version='':
-    ./scripts/release/publish.sh {{quote(version)}}
+[doc('inspect, validate, tag, and publish a release; forward helper options after --')]
+release *args:
+    ./scripts/release/publish.sh {{args}}
 
 [private]
 default:
