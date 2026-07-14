@@ -283,63 +283,23 @@ resume_release() {
     esac
   fi
 
-  existing_run_ids="$(release_workflow_run_ids "$tag" workflow_dispatch)"
   gh workflow run release.yml --ref main -f "tag=$tag"
-  wait_for_release_workflow "$tag" workflow_dispatch "$existing_run_ids"
+  report_release_workflow "$tag"
   exit 0
 }
 
-release_workflow_run_ids() {
+report_release_workflow() {
   local tag="$1"
-  local event="$2"
   local repo
 
   repo="${GITHUB_REPOSITORY:-}"
   if [[ -z "$repo" ]]; then
-    repo="$(origin_repo_slug)" || return 1
+    repo="$(origin_repo_slug 2>/dev/null || true)"
   fi
-  [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || return 1
-  gh run list --repo "$repo" --workflow release.yml --event "$event" --limit 100 --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"Release $tag\") | .databaseId"
-}
-
-wait_for_release_workflow() {
-  local tag="$1"
-  local event="$2"
-  local existing_run_ids="${3:-}"
-  local repo
-  local run_id=""
-  local attempt
-
-  repo="${GITHUB_REPOSITORY:-}"
-  if [[ -z "$repo" ]]; then
-    repo="$(origin_repo_slug)" || {
-      ui_error "Could not identify the GitHub repository for release monitoring."
-      exit 1
-    }
+  ui_ok "release workflow dispatched for $tag"
+  if [[ "$repo" =~ ^[^/]+/[^/]+$ ]]; then
+    ui_note "GitHub Actions: https://github.com/$repo/actions/workflows/release.yml"
   fi
-  if [[ ! "$repo" =~ ^[^/]+/[^/]+$ ]]; then
-    ui_error "Could not identify the GitHub repository for release monitoring."
-    exit 1
-  fi
-  for attempt in {1..30}; do
-    while IFS= read -r candidate; do
-      [[ -n "$candidate" ]] || continue
-      if ! grep -Fqx "$candidate" <<<"$existing_run_ids"; then
-        run_id="$candidate"
-        break
-      fi
-    done < <(release_workflow_run_ids "$tag" "$event")
-    [[ -n "$run_id" ]] && break
-    sleep 2
-  done
-  if [[ -z "$run_id" ]]; then
-    ui_error "Could not find the release workflow run for $tag. Check GitHub Actions."
-    exit 1
-  fi
-
-  ui_note "Watching release workflow $run_id"
-  gh run watch "$run_id" --repo "$repo" --exit-status
-  ui_ok "release workflow completed for $tag"
 }
 
 semver_from_tag() {
@@ -904,11 +864,6 @@ if [ "$DRY_RUN" -eq 0 ] && git ls-remote --exit-code --tags origin "refs/tags/$P
   exit 1
 fi
 
-if [ "$DRY_RUN" -eq 0 ] && ! command -v gh >/dev/null 2>&1; then
-  ui_error "Release requires GitHub CLI (gh) so it can wait for the published workflow."
-  exit 1
-fi
-
 run_checks
 if [ "$(git symbolic-ref --short HEAD)" != "main" ] || [ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]; then
   ui_error "branch or HEAD changed while checks ran."
@@ -940,4 +895,4 @@ if ! git push --atomic origin HEAD:main "refs/tags/$PATCH_TAG:refs/tags/$PATCH_T
 	exit 1
 fi
 ui_ok "created and pushed tag $PATCH_TAG"
-wait_for_release_workflow "$PATCH_TAG" push
+report_release_workflow "$PATCH_TAG"

@@ -26,6 +26,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local output="$1"
+  local unexpected="$2"
+  if [[ "$output" == *"$unexpected"* ]]; then
+    printf '%s\n' "$output" >&2
+    fail "expected output not to contain: $unexpected"
+  fi
+}
+
 git init --bare "$origin" >/dev/null
 git init --initial-branch=main "$repository" >/dev/null
 git -C "$repository" config user.name "release test"
@@ -53,18 +62,6 @@ chmod +x "$repository/scripts/release/check.sh"
 cat >"$mock_bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${RELEASE_TEST_GH_ARGS:?}"
-if [[ "$1 $2 $3" == "run list --repo" ]]; then
-  count_file="${RELEASE_TEST_GH_LIST_COUNT:?}"
-  count=0
-  if [[ -f "$count_file" ]]; then count="$(cat "$count_file")"; fi
-  count=$((count + 1))
-  printf '%s\n' "$count" >"$count_file"
-  if [[ "$count" == 1 ]]; then
-    printf '111\n'
-  else
-    printf '111\n222\n'
-  fi
-fi
 EOF
 chmod +x "$mock_bin/gh"
 
@@ -127,11 +124,21 @@ fi
 assert_contains "$output" "branch or HEAD changed while checks ran"
 
 resume_args="$test_root/resume-args"
-resume_list_count="$test_root/resume-list-count"
-RELEASE_TEST_GH_ARGS="$resume_args" RELEASE_TEST_GH_LIST_COUNT="$resume_list_count" run_release --resume v1.0.0 --yes
+resume_run_output="$(RELEASE_TEST_GH_ARGS="$resume_args" run_release --resume v1.0.0 --yes)"
 resume_output="$(cat "$resume_args")"
 assert_contains "$resume_output" "workflow run release.yml --ref main -f tag=v1.0.0"
-assert_contains "$resume_output" "run watch 222 --repo test/repository --exit-status"
+assert_not_contains "$resume_output" "run watch"
+assert_contains "$resume_run_output" "release workflow dispatched for v1.0.0"
+assert_contains "$resume_run_output" "https://github.com/test/repository/actions/workflows/release.yml"
+
+release_args="$test_root/release-args"
+release_output="$(RELEASE_TEST_GH_ARGS="$release_args" run_release --since v1.0.0 --yes v1.1.0)"
+assert_contains "$release_output" "created and pushed tag v1.1.0"
+assert_contains "$release_output" "release workflow dispatched for v1.1.0"
+assert_contains "$release_output" "https://github.com/test/repository/actions/workflows/release.yml"
+if [[ -e "$release_args" ]]; then
+  fail "normal tag release unexpectedly invoked gh"
+fi
 
 release_recipe="$(just --justfile "$ROOT/justfile" --show release)"
 assert_contains "$release_recipe" 'publish.sh {{ args }}'
