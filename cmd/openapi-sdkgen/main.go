@@ -16,13 +16,14 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
 
-const usage = "usage: openapi-sdkgen generate --input <path|file-url|http-url|-> --target typescript --output <directory> [--input-base <document>] [--with <addon> ...] [--allow-remote-ref <https-origin> ...] [--ref-lock <path>] [--update-ref-lock] [--offline] [--schema-extension <manifest> ...]"
+const usage = "usage: openapi-sdkgen generate --input <path|file-url|http-url|-> --target typescript --output <directory> [--input-base <document>] [--http-header-env <Header-Name=ENV_VAR> ...] [--tls-client-cert <path> --tls-client-key <path>] [--tls-ca-file <path>] [--with <addon> ...] [--allow-remote-ref <https-origin> ...] [--ref-lock <path>] [--update-ref-lock] [--offline] [--schema-extension <manifest> ...]"
 
 var standardInput io.Reader = os.Stdin
+var standardError io.Writer = os.Stderr
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "openapi-sdkgen: %v\n", err)
+		fmt.Fprintf(standardError, "openapi-sdkgen: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -48,12 +49,17 @@ func generate(args []string) error {
 	var with repeatedStrings
 	var remoteRefs repeatedStrings
 	var schemaExtensions repeatedStrings
+	var httpHeaderEnv rawStrings
 	refLock := flags.String("ref-lock", "", "remote-reference and extension lock path")
 	updateRefLock := flags.Bool("update-ref-lock", false, "update the remote-reference and extension lock")
 	offline := flags.Bool("offline", false, "use only locked cached remote references")
+	tlsClientCert := flags.String("tls-client-cert", "", "PEM client certificate for an HTTPS OpenAPI input")
+	tlsClientKey := flags.String("tls-client-key", "", "PEM private key for an HTTPS OpenAPI input")
+	tlsCAFile := flags.String("tls-ca-file", "", "additional PEM certificate authorities for an HTTPS OpenAPI input")
 	flags.Var(&with, "with", "optional generated add-on (repeatable)")
 	flags.Var(&remoteRefs, "allow-remote-ref", "allow an exact HTTPS remote-reference origin (repeatable)")
 	flags.Var(&schemaExtensions, "schema-extension", "trusted schema-extension manifest (repeatable)")
+	flags.Var(&httpHeaderEnv, "http-header-env", "map an HTTP request header to an environment variable (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("parse generate arguments: %w", err)
 	}
@@ -91,6 +97,11 @@ func generate(args []string) error {
 		UpdateRefLock:            *updateRefLock,
 		Offline:                  *offline,
 		SchemaExtensionManifests: schemaExtensions,
+		HTTPHeaderEnv:            httpHeaderEnv,
+		TLSClientCert:            *tlsClientCert,
+		TLSClientKey:             *tlsClientKey,
+		TLSCAFile:                *tlsCAFile,
+		HTTPWarningWriter:        standardError,
 	})
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", *input, err)
@@ -109,6 +120,17 @@ type repeatedStrings []string
 
 func (values *repeatedStrings) String() string {
 	return strings.Join(*values, ",")
+}
+
+type rawStrings []string
+
+func (values *rawStrings) String() string {
+	return strings.Join(*values, ",")
+}
+
+func (values *rawStrings) Set(value string) error {
+	*values = append(*values, value)
+	return nil
 }
 
 func (values *repeatedStrings) Set(value string) error {

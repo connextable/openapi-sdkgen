@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -175,6 +176,129 @@ paths:
 	})
 	if err != nil || len(compiled.Operations) != 1 {
 		t.Fatalf("allowlisted cross-origin compilation = %#v, %v", compiled, err)
+	}
+}
+
+func TestProtectedHTTPInputSettingsApplyOnlyToSameOriginReferences(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows fails protected same-origin reference caching before persistence")
+	}
+	const token = "credential-sentinel"
+	t.Setenv("SDKGEN_HTTP_TOKEN", token)
+	schema := []byte(`Thing:
+  type: object
+  required: [id]
+  properties:
+    id: {type: string}
+`)
+	document := []byte(`openapi: 3.2.0
+info: {title: Protected reference, version: "1"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: schemas.yaml#/Thing}
+`)
+	root := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/openapi.yaml":
+			_, _ = response.Write(document)
+		case "/schemas.yaml":
+			if got := request.Header.Get("Authorization"); got != token {
+				t.Errorf("same-origin Authorization = %q", got)
+			}
+			if got := request.Header.Get("Accept"); got != token {
+				t.Errorf("same-origin Accept = %q", got)
+			}
+			_, _ = response.Write(schema)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer root.Close()
+	directory := t.TempDir()
+	compiled, err := CompileInputWithOptions(root.URL+"/openapi.yaml", CompileOptions{
+		HTTPHeaderEnv: []string{
+			"Authorization=SDKGEN_HTTP_TOKEN",
+			"Accept=SDKGEN_HTTP_TOKEN",
+		},
+		RefLockPath:   filepath.Join(directory, "same-origin.lock"),
+		UpdateRefLock: true,
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("same-origin compilation = %#v, %v", compiled, err)
+	}
+
+	crossOrigin := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Authorization"); got != "" {
+			t.Errorf("cross-origin Authorization = %q", got)
+		}
+		_, _ = response.Write(schema)
+	}))
+	defer crossOrigin.Close()
+	crossDocument := strings.Replace(string(document), "schemas.yaml", crossOrigin.URL+"/schemas.yaml", 1)
+	crossRoot := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte(crossDocument))
+	}))
+	defer crossRoot.Close()
+	compiled, err = CompileInputWithOptions(crossRoot.URL+"/openapi.yaml", CompileOptions{
+		HTTPHeaderEnv:         []string{"Authorization=SDKGEN_HTTP_TOKEN"},
+		RemoteRefAllowlist:    []string{crossOrigin.URL},
+		RefLockPath:           filepath.Join(directory, "cross-origin.lock"),
+		UpdateRefLock:         true,
+		remoteReferenceClient: crossOrigin.Client(),
+		remoteReferenceLookup: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		},
+	})
+	if err != nil || len(compiled.Operations) != 1 {
+		t.Fatalf("cross-origin compilation = %#v, %v", compiled, err)
+	}
+}
+
+func TestUnprotectedSameOriginReferenceCannotRedirectCrossOrigin(t *testing.T) {
+	crossOriginCalled := false
+	crossOrigin := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		crossOriginCalled = true
+	}))
+	defer crossOrigin.Close()
+	root := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/openapi.yaml":
+			_, _ = response.Write([]byte(`openapi: 3.2.0
+info: {title: Redirect, version: "1"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: schemas.yaml#/Thing}
+`))
+		case "/schemas.yaml":
+			http.Redirect(response, request, crossOrigin.URL+"/schema.yaml", http.StatusFound)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer root.Close()
+	_, err := CompileInputWithOptions(root.URL+"/openapi.yaml", CompileOptions{
+		RefLockPath:   filepath.Join(t.TempDir(), "refs.lock"),
+		UpdateRefLock: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "leaves the OpenAPI input origin") {
+		t.Fatalf("cross-origin same-origin reference redirect error = %v", err)
+	}
+	if crossOriginCalled {
+		t.Fatal("same-origin reference redirect opened a cross-origin request")
 	}
 }
 

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -49,6 +52,104 @@ func TestGenerateDoesNotPublishOutputWhenHTTPInputFails(t *testing.T) {
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatalf("failed HTTP input published output: %v", err)
+	}
+}
+
+func TestGenerateDoesNotPersistHTTPHeaderCredentialSentinel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows fails protected same-origin reference caching before persistence")
+	}
+	const sentinel = "credential-sentinel"
+	t.Setenv("SDKGEN_CREDENTIAL_SENTINEL", sentinel)
+	var successfulRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Authorization"); got != sentinel {
+			t.Errorf("Authorization = %q", got)
+		}
+		successfulRequests++
+		switch request.URL.Path {
+		case "/openapi.yaml":
+			_, _ = response.Write([]byte(`openapi: 3.2.0
+info: {title: Sentinel, version: "1"}
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: schemas.yaml#/Thing}
+`))
+		case "/schemas.yaml":
+			_, _ = response.Write([]byte("Thing:\n  type: object\n  properties:\n    id: {type: string}\n"))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated")
+	lock := filepath.Join(directory, "refs.lock")
+	previousError := standardError
+	var diagnostics bytes.Buffer
+	standardError = &diagnostics
+	t.Cleanup(func() { standardError = previousError })
+	args := []string{
+		"generate", "--input", server.URL + "/openapi.yaml",
+		"--http-header-env", "Authorization=SDKGEN_CREDENTIAL_SENTINEL",
+		"--ref-lock", lock, "--update-ref-lock",
+		"--target", "typescript", "--output", output,
+	}
+	if err := run(args); err != nil {
+		t.Fatal(err)
+	}
+	if successfulRequests != 2 {
+		t.Fatalf("authenticated requests = %d", successfulRequests)
+	}
+	assertDirectoryDoesNotContain(t, directory, sentinel)
+	if strings.Contains(diagnostics.String(), sentinel) {
+		t.Fatalf("diagnostics leaked sentinel: %q", diagnostics.String())
+	}
+
+	failedOutput := filepath.Join(directory, "failed")
+	err := run([]string{
+		"generate", "--input", server.URL + "/missing.yaml",
+		"--http-header-env", "Authorization=SDKGEN_CREDENTIAL_SENTINEL",
+		"--target", "typescript", "--output", failedOutput,
+	})
+	if err == nil {
+		t.Fatal("missing authenticated input succeeded")
+	}
+	if strings.Contains(err.Error(), sentinel) || strings.Contains(diagnostics.String(), sentinel) {
+		t.Fatalf("failure leaked sentinel: error=%q diagnostics=%q", err, diagnostics.String())
+	}
+	if _, statErr := os.Stat(failedOutput); !os.IsNotExist(statErr) {
+		t.Fatalf("failed authenticated input published output: %v", statErr)
+	}
+}
+
+func assertDirectoryDoesNotContain(t *testing.T, directory, forbidden string) {
+	t.Helper()
+	err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(contents), forbidden) {
+			return fmt.Errorf("%s contains credential sentinel", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

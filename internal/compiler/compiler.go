@@ -37,6 +37,9 @@ func CompileFileWithOptions(path string, options CompileOptions) (*ir.Document, 
 	if options.InputBase != "" || options.InputReader != nil {
 		return nil, errors.New("CompileFileWithOptions does not accept stdin input options")
 	}
+	if err := validateNonHTTPInputOptions(options); err != nil {
+		return nil, err
+	}
 	source, err := loadFileInput(path)
 	if err != nil {
 		return nil, err
@@ -111,7 +114,7 @@ func compileInput(source inputSource, project bool, options CompileOptions) (*ir
 			cache = filepath.Join(filepath.Dir(lockPath), ".openapi-sdkgen-cache")
 		}
 		var err error
-		remoteResolver, err = newRemoteReferenceResolver(options, lock, cache, source.remoteBase)
+		remoteResolver, err = newRemoteReferenceResolver(options, lock, cache, source.remoteBase, source.httpConfig)
 		if err != nil {
 			return nil, err
 		}

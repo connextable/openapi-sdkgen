@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -53,6 +54,20 @@ type CompileOptions struct {
 	// SchemaExtensionManifests registers trusted local JSON Schema vocabulary
 	// extensions. A manifest is never discovered implicitly.
 	SchemaExtensionManifests []string
+	// HTTPHeaderEnv maps outbound HTTP request header names to environment
+	// variable names. Each value has the form Header-Name=ENV_VAR and is only
+	// valid for an HTTP(S) --input URL.
+	HTTPHeaderEnv []string
+	// TLSClientCert and TLSClientKey provide an optional client certificate for
+	// an HTTPS --input URL. They must be supplied together.
+	TLSClientCert string
+	TLSClientKey  string
+	// TLSCAFile contains additional PEM certificate authorities trusted for an
+	// HTTPS --input URL.
+	TLSCAFile string
+	// HTTPWarningWriter receives non-secret diagnostics about HTTP input
+	// transport risks. A nil writer disables diagnostics for library callers.
+	HTTPWarningWriter io.Writer
 
 	// Tests may replace the remote transport and DNS resolver without exposing
 	// those hooks through the CLI contract.
@@ -137,6 +152,7 @@ type remoteReferenceResolver struct {
 	cache         string
 	client        *http.Client
 	trustedClient *http.Client
+	trustedConfig *httpInputConfig
 	lookup        hostLookup
 	mu            sync.Mutex
 	errs          []error
@@ -161,7 +177,7 @@ func (r *remoteReferenceResolver) firstError() error {
 	return r.errs[0]
 }
 
-func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cache string, trustedBase *url.URL) (*remoteReferenceResolver, error) {
+func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cache string, trustedBase *url.URL, trustedConfig *httpInputConfig) (*remoteReferenceResolver, error) {
 	origins := make(map[string]struct{}, len(options.RemoteRefAllowlist))
 	for _, value := range options.RemoteRefAllowlist {
 		origin, err := canonicalRemoteOrigin(value)
@@ -194,6 +210,14 @@ func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cac
 	}
 	if trustedOrigin != "" {
 		resolver.trustedClient = trustedRemoteHTTPClient(resolver)
+		if trustedConfig != nil && trustedConfig.protected {
+			client, err := trustedConfig.newClient(trustedBase)
+			if err != nil {
+				return nil, fmt.Errorf("configure trusted remote reference HTTP client: %w", err)
+			}
+			resolver.trustedClient = client
+			resolver.trustedConfig = trustedConfig
+		}
 	}
 	return resolver, nil
 }
@@ -356,18 +380,27 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "application/json, application/yaml, text/yaml, */*;q=0.1")
+	var requestConfig *httpInputConfig
+	if r.isTrustedURL(u) && r.trustedConfig != nil {
+		requestConfig = r.trustedConfig
+		requestConfig.applyHeaders(request)
+	} else {
+		request.Header.Set("Accept", defaultOpenAPIInputAccept)
+	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("fetch remote reference %s: %w", u.String(), err)
+		return nil, fmt.Errorf("fetch remote reference %s: %w", u.String(), sanitizeHTTPClientError(err, requestConfig))
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		response.Body.Close()
-		return nil, fmt.Errorf("fetch remote reference %s: unexpected HTTP status %s", u.String(), response.Status)
+		return nil, fmt.Errorf("fetch remote reference %s: unexpected HTTP status %s", u.String(), safeHTTPStatus(response.StatusCode))
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, remoteReferenceMaxBytes+1))
 	response.Body.Close()
 	if err != nil {
+		if requestConfig != nil && requestConfig.protected {
+			return nil, fmt.Errorf("read protected remote reference %s response failed", u.String())
+		}
 		return nil, fmt.Errorf("read remote reference %s: %w", u.String(), err)
 	}
 	if len(body) > remoteReferenceMaxBytes {
@@ -385,7 +418,8 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	} else {
 		r.lock.References[key] = encoded
 	}
-	if err := r.cacheBody(encoded, body); err != nil {
+	protectedCache := r.isTrustedURL(u) && r.trustedConfig != nil && r.trustedConfig.protected
+	if err := r.cacheBody(encoded, body, protectedCache); err != nil {
 		return nil, err
 	}
 	response.Body = io.NopCloser(bytes.NewReader(body))
@@ -401,7 +435,16 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 	if len(digest) != sha256.Size*2 {
 		return nil, fmt.Errorf("offline remote reference %s has an invalid lock digest", key)
 	}
-	data, err := os.ReadFile(filepath.Join(r.cache, digest))
+	protectedCache := false
+	if u, err := url.Parse(key); err == nil {
+		protectedCache = r.isTrustedURL(u) && r.trustedConfig != nil && r.trustedConfig.protected
+	}
+	cache, err := openReferenceCache(r.cache, protectedCache)
+	if err != nil {
+		return nil, err
+	}
+	defer cache.Close()
+	data, err := readReferenceCacheEntry(cache, digest, protectedCache)
 	if err != nil {
 		return nil, fmt.Errorf("read cached remote reference %s: %w", key, err)
 	}
@@ -418,42 +461,226 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 	}, nil
 }
 
-func (r *remoteReferenceResolver) cacheBody(digest string, body []byte) error {
-	if r.cache == "" {
-		return errors.New("remote reference cache path is empty")
+func (r *remoteReferenceResolver) cacheBody(digest string, body []byte, protected bool) error {
+	cache, err := openReferenceCache(r.cache, protected)
+	if err != nil {
+		return err
 	}
-	if err := os.MkdirAll(r.cache, 0o755); err != nil {
-		return fmt.Errorf("create remote reference cache: %w", err)
-	}
-	path := filepath.Join(r.cache, digest)
-	if existing, err := os.ReadFile(path); err == nil {
+	defer cache.Close()
+	existing, err := readReferenceCacheEntry(cache, digest, protected)
+	if err == nil {
 		actual := sha256.Sum256(existing)
 		if hex.EncodeToString(actual[:]) == digest {
 			return nil
 		}
-		return fmt.Errorf("cached remote reference %s has unexpected content", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read remote reference cache %s: %w", path, err)
+		return fmt.Errorf("cached remote reference %s has unexpected content", digest)
 	}
-	temporary, err := os.CreateTemp(r.cache, ".openapi-sdkgen-ref-*")
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read remote reference cache %s: %w", digest, err)
+	}
+	return writeReferenceCacheEntry(cache, digest, body, protected)
+}
+
+func openReferenceCache(path string, protected bool) (*os.Root, error) {
+	if path == "" {
+		return nil, errors.New("remote reference cache path is empty")
+	}
+	if protected && runtime.GOOS == "windows" {
+		return nil, errors.New("protected remote reference caching is not supported on Windows because owner-only cache permissions cannot be enforced")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create remote reference cache parent: %w", err)
+	}
+	parent, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
-		return fmt.Errorf("create remote reference cache entry: %w", err)
+		return nil, fmt.Errorf("open remote reference cache parent: %w", err)
 	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if _, err := temporary.Write(body); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write remote reference cache entry: %w", err)
+	defer parent.Close()
+	name := filepath.Base(path)
+	info, err := parent.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		mode := os.FileMode(0o755)
+		if protected {
+			mode = 0o700
+		}
+		if err := parent.Mkdir(name, mode); err != nil && !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create remote reference cache: %w", err)
+		}
+		info, err = parent.Lstat(name)
 	}
-	if err := temporary.Chmod(0o644); err != nil {
-		temporary.Close()
-		return fmt.Errorf("set remote reference cache mode: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("inspect remote reference cache: %w", err)
 	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close remote reference cache entry: %w", err)
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, fmt.Errorf("remote reference cache %s must be a non-symlink directory", path)
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("publish remote reference cache entry: %w", err)
+	cache, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, fmt.Errorf("open remote reference cache: %w", err)
+	}
+	directory, err := cache.Open(".")
+	if err != nil {
+		cache.Close()
+		return nil, fmt.Errorf("inspect opened remote reference cache: %w", err)
+	}
+	openedInfo, err := directory.Stat()
+	if err != nil || !openedInfo.IsDir() || !os.SameFile(info, openedInfo) {
+		directory.Close()
+		cache.Close()
+		if err != nil {
+			return nil, fmt.Errorf("inspect opened remote reference cache: %w", err)
+		}
+		return nil, fmt.Errorf("remote reference cache %s changed while opening", path)
+	}
+	if protected {
+		err = directory.Chmod(0o700)
+		if err != nil {
+			directory.Close()
+			cache.Close()
+			return nil, fmt.Errorf("set protected remote reference cache mode: %w", err)
+		}
+	}
+	if err := directory.Close(); err != nil {
+		cache.Close()
+		return nil, fmt.Errorf("close remote reference cache: %w", err)
+	}
+	return cache, nil
+}
+
+func readReferenceCacheEntry(cache *os.Root, digest string, protected bool) ([]byte, error) {
+	return readVerifiedReferenceCacheEntry(cache, digest, protected, nil)
+}
+
+func readVerifiedReferenceCacheEntry(cache *os.Root, digest string, protected bool, expected os.FileInfo) ([]byte, error) {
+	info, err := cache.Lstat(digest)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("remote reference cache entry %s must be a non-symlink regular file", digest)
+	}
+	entry, err := cache.Open(digest)
+	if err != nil {
+		return nil, err
+	}
+	defer entry.Close()
+	if openedInfo, err := entry.Stat(); err != nil {
+		return nil, err
+	} else if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return nil, fmt.Errorf("remote reference cache entry %s must be a regular file", digest)
+	} else if expected != nil && !os.SameFile(expected, openedInfo) {
+		return nil, fmt.Errorf("remote reference cache entry %s changed during publication", digest)
+	}
+	if protected {
+		if err := entry.Chmod(0o600); err != nil {
+			return nil, fmt.Errorf("set protected remote reference cache entry mode: %w", err)
+		}
+	}
+	return io.ReadAll(entry)
+}
+
+func writeReferenceCacheEntry(cache *os.Root, digest string, body []byte, protected bool) error {
+	return writeReferenceCacheEntryWithLink(cache, digest, body, protected, cache.Link)
+}
+
+func writeReferenceCacheEntryWithLink(cache *os.Root, digest string, body []byte, protected bool, link func(string, string) error) error {
+	mode := os.FileMode(0o644)
+	if protected {
+		mode = 0o600
+	}
+	for attempt := 0; attempt < 16; attempt++ {
+		temporaryName := fmt.Sprintf(".openapi-sdkgen-ref-%d-%d", os.Getpid(), time.Now().UnixNano())
+		temporary, err := cache.OpenFile(temporaryName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("create remote reference cache entry: %w", err)
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = cache.Remove(temporaryName)
+			}
+		}()
+		if _, err := temporary.Write(body); err != nil {
+			temporary.Close()
+			return fmt.Errorf("write remote reference cache entry: %w", err)
+		}
+		if err := temporary.Chmod(mode); err != nil {
+			temporary.Close()
+			return fmt.Errorf("set remote reference cache mode: %w", err)
+		}
+		temporaryInfo, err := temporary.Stat()
+		if err != nil {
+			temporary.Close()
+			return fmt.Errorf("inspect remote reference cache temporary entry: %w", err)
+		}
+		if err := temporary.Close(); err != nil {
+			return fmt.Errorf("close remote reference cache entry: %w", err)
+		}
+		if err := publishReferenceCacheEntry(cache, temporaryName, digest, protected, temporaryInfo, link); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	}
+	return errors.New("create remote reference cache entry: temporary name collision limit exceeded")
+}
+
+func publishReferenceCacheEntry(cache *os.Root, temporaryName, digest string, protected bool, expected os.FileInfo, link func(string, string) error) error {
+	linkErr := link(temporaryName, digest)
+	switch {
+	case linkErr == nil:
+		if err := verifyReferenceCacheEntry(cache, digest, protected, expected); err != nil {
+			_ = cache.Remove(digest)
+			return err
+		}
+		if err := cache.Remove(temporaryName); err != nil {
+			return fmt.Errorf("remove published remote reference cache temporary entry: %w", err)
+		}
+		return nil
+	case errors.Is(linkErr, os.ErrExist):
+		if err := verifyReferenceCacheEntry(cache, digest, protected, nil); err != nil {
+			return err
+		}
+		if err := cache.Remove(temporaryName); err != nil {
+			return fmt.Errorf("remove redundant remote reference cache temporary entry: %w", err)
+		}
+		return nil
+	case protected:
+		if errors.Is(linkErr, errors.ErrUnsupported) || errors.Is(linkErr, os.ErrPermission) {
+			return errors.New("protected remote reference cache filesystem does not support atomic no-replace publication")
+		}
+		return fmt.Errorf("publish protected remote reference cache entry: %w", linkErr)
+	default:
+		if err := verifyReferenceCacheEntry(cache, digest, false, nil); err == nil {
+			if err := cache.Remove(temporaryName); err != nil {
+				return fmt.Errorf("remove redundant remote reference cache temporary entry: %w", err)
+			}
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := cache.Rename(temporaryName, digest); err != nil {
+			return fmt.Errorf("publish unprotected remote reference cache entry: %w", err)
+		}
+		if err := verifyReferenceCacheEntry(cache, digest, false, expected); err != nil {
+			_ = cache.Remove(digest)
+			return err
+		}
+		return nil
+	}
+}
+
+func verifyReferenceCacheEntry(cache *os.Root, digest string, protected bool, expected os.FileInfo) error {
+	existing, err := readVerifiedReferenceCacheEntry(cache, digest, protected, expected)
+	if err != nil {
+		return fmt.Errorf("read concurrently published remote reference cache entry: %w", err)
+	}
+	actual := sha256.Sum256(existing)
+	if hex.EncodeToString(actual[:]) != digest {
+		return fmt.Errorf("concurrently published remote reference cache entry %s has unexpected content", digest)
 	}
 	return nil
 }

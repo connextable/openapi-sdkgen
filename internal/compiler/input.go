@@ -24,7 +24,16 @@ type inputSource struct {
 	filePath   string
 	fileBase   string
 	remoteBase *url.URL
+	httpConfig *httpInputConfig
 	stdin      bool
+}
+
+type inputValidationError struct {
+	message string
+}
+
+func (err *inputValidationError) Error() string {
+	return err.message
 }
 
 func loadInputSource(input string, options CompileOptions) (inputSource, error) {
@@ -32,6 +41,9 @@ func loadInputSource(input string, options CompileOptions) (inputSource, error) 
 		return inputSource{}, errors.New("OpenAPI input is empty")
 	}
 	if input == "-" {
+		if err := validateNonHTTPInputOptions(options); err != nil {
+			return inputSource{}, err
+		}
 		reader := options.InputReader
 		if reader == nil {
 			reader = os.Stdin
@@ -62,12 +74,22 @@ func loadInputSource(input string, options CompileOptions) (inputSource, error) 
 		}
 		switch strings.ToLower(parsed.Scheme) {
 		case "file":
+			if err := validateNonHTTPInputOptions(options); err != nil {
+				return inputSource{}, err
+			}
 			return loadFileURLInput(parsed)
 		case "http", "https":
-			return loadHTTPInput(parsed, options.Offline)
+			config, err := configureHTTPInput(options)
+			if err != nil {
+				return inputSource{}, err
+			}
+			return loadHTTPInput(parsed, options.Offline, config)
 		default:
 			return inputSource{}, fmt.Errorf("unsupported OpenAPI input scheme %q; use a path, file URL, HTTP(S) URL, or -", parsed.Scheme)
 		}
+	}
+	if err := validateNonHTTPInputOptions(options); err != nil {
+		return inputSource{}, err
 	}
 	return loadFileInput(input)
 }
@@ -104,41 +126,48 @@ func loadFileURLInput(value *url.URL) (inputSource, error) {
 	return loadFileInput(filepath.FromSlash(value.Path))
 }
 
-func loadHTTPInput(value *url.URL, offline bool) (inputSource, error) {
+func loadHTTPInput(value *url.URL, offline bool, config *httpInputConfig) (inputSource, error) {
 	if offline {
 		return inputSource{}, errors.New("--offline cannot fetch an HTTP(S) OpenAPI input; provide a local file or stdin")
 	}
 	if value.User != nil || value.Fragment != "" {
 		return inputSource{}, errors.New("HTTP(S) OpenAPI input must not contain credentials or a fragment")
 	}
-	client := &http.Client{
-		Timeout: inputTimeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= remoteReferenceRedirect {
-				return errors.New("OpenAPI input redirect limit exceeded")
-			}
-			return nil
-		},
+	if !strings.EqualFold(value.Scheme, "https") && config.privateTLS {
+		return inputSource{}, errors.New("--tls-client-cert, --tls-client-key, and --tls-ca-file require an HTTPS OpenAPI input")
+	}
+	if strings.EqualFold(value.Scheme, "http") && config.hasHeaderMappings && config.warningWriter != nil {
+		if _, err := fmt.Fprintln(config.warningWriter, "warning: --http-header-env sends credentials over HTTP; use HTTPS to protect request headers"); err != nil {
+			return inputSource{}, fmt.Errorf("write HTTP input security warning: %w", err)
+		}
+	}
+	client, err := config.newClient(value)
+	if err != nil {
+		return inputSource{}, fmt.Errorf("configure OpenAPI input HTTP client: %w", err)
 	}
 	request, err := http.NewRequest(http.MethodGet, value.String(), nil)
 	if err != nil {
 		return inputSource{}, fmt.Errorf("create OpenAPI input request: %w", err)
 	}
-	request.Header.Set("Accept", "application/json, application/yaml, text/yaml, */*;q=0.1")
+	config.applyHeaders(request)
 	response, err := client.Do(request)
 	if err != nil {
-		return inputSource{}, fmt.Errorf("fetch OpenAPI input %s: %w", value, err)
+		return inputSource{}, fmt.Errorf("fetch OpenAPI input %s: %w", value, sanitizeHTTPClientError(err, config))
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return inputSource{}, fmt.Errorf("fetch OpenAPI input %s: unexpected HTTP status %s", value, response.Status)
+		return inputSource{}, fmt.Errorf("fetch OpenAPI input %s: unexpected HTTP status %s", value, safeHTTPStatus(response.StatusCode))
 	}
 	data, err := readInput(response.Body, "HTTP OpenAPI input")
 	if err != nil {
+		var validationError *inputValidationError
+		if config.protected && !errors.As(err, &validationError) {
+			return inputSource{}, errors.New("read protected HTTP OpenAPI input response failed")
+		}
 		return inputSource{}, err
 	}
 	final := *response.Request.URL
-	return inputSource{data: data, display: final.String(), remoteBase: documentURLBase(&final)}, nil
+	return inputSource{data: data, display: final.String(), remoteBase: documentURLBase(&final), httpConfig: config}, nil
 }
 
 func parseInputBase(value string) (inputSource, error) {
@@ -193,10 +222,10 @@ func readInput(reader io.Reader, label string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", label, err)
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("%s is empty", label)
+		return nil, &inputValidationError{message: fmt.Sprintf("%s is empty", label)}
 	}
 	if len(data) > inputMaxBytes {
-		return nil, fmt.Errorf("%s exceeds %d byte limit", label, inputMaxBytes)
+		return nil, &inputValidationError{message: fmt.Sprintf("%s exceeds %d byte limit", label, inputMaxBytes)}
 	}
 	return data, nil
 }
