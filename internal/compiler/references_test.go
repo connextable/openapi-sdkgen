@@ -389,10 +389,8 @@ func TestReferenceCachePublicationRejectsTemporaryEntryReplacement(t *testing.T)
 		}
 		defer cache.Close()
 		swapThenFallback := func(oldName, _ string) error {
-			if err := cache.Remove(oldName); err != nil {
-				return err
-			}
-			replacement, err := cache.OpenFile(oldName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+			replacementName := oldName + ".replacement"
+			replacement, err := cache.OpenFile(replacementName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 			if err != nil {
 				return err
 			}
@@ -401,6 +399,12 @@ func TestReferenceCachePublicationRejectsTemporaryEntryReplacement(t *testing.T)
 				return err
 			}
 			if err := replacement.Close(); err != nil {
+				return err
+			}
+			if err := cache.Remove(oldName); err != nil {
+				return err
+			}
+			if err := cache.Rename(replacementName, oldName); err != nil {
 				return err
 			}
 			return errors.ErrUnsupported
