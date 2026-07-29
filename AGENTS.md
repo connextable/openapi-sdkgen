@@ -7,7 +7,6 @@ This repository uses agent-safe command wrappers.
 ## Command rules
 
 - Use `just agent ...` for project operations.
-- Do not use `rtk` for project operations after bootstrap.
 - Do not run direct `go test`, `go build`, `go run`, `pnpm`, or `npm` commands when an agent wrapper exists.
 - Read-only inspection commands such as `sed`, `rg`, `ls`, and `git status` are allowed.
 - Do not commit unless the user explicitly asks.
