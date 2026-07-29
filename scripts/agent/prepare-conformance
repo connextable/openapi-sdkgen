@@ -16,3 +16,54 @@ agent_run "generate TypeScript collision fixture" "$ROOT/.tmp/bin/openapi-sdkgen
   --target typescript \
   --with server \
   --output "$collision_fixture"
+
+baseline30_fixture="$TYPESCRIPT_ROOT/fixtures/generated/baseline-oas30"
+rm -rf "$baseline30_fixture"
+agent_run "generate extension-free OpenAPI 3.0 fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/baseline-oas30.openapi.json" \
+  --target typescript \
+  --output "$baseline30_fixture"
+
+baseline31_fixture="$TYPESCRIPT_ROOT/fixtures/generated/baseline-oas31"
+rm -rf "$baseline31_fixture"
+agent_run "generate extension-free OpenAPI 3.1 server fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/baseline-oas31.openapi.json" \
+  --target typescript \
+  --with server \
+  --output "$baseline31_fixture"
+
+baseline32_fixture="$TYPESCRIPT_ROOT/fixtures/generated/baseline-oas32"
+rm -rf "$baseline32_fixture"
+agent_run "generate extension-free OpenAPI 3.2 fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/baseline-oas32.openapi.json" \
+  --target typescript \
+  --output "$baseline32_fixture"
+
+diagnostic_fixture="$TYPESCRIPT_ROOT/fixtures/generated/diagnostics"
+diagnostic_report="$LOG_DIR/conformance-diagnostics.log"
+rm -rf "$diagnostic_fixture"
+if "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/diagnostics.openapi.json" \
+  --target typescript \
+  --output "$diagnostic_fixture" \
+  > /dev/null 2>"$diagnostic_report"; then
+  agent_note "failed accumulated diagnostic fixture: generation unexpectedly succeeded"
+  exit 1
+fi
+for expected in \
+  "OpenAPI SDK generation: 4 error(s), 0 warning(s)" \
+  "SDKGEN-E505" \
+  "SDKGEN-E600" \
+  "SDKGEN-E611" \
+  "SDKGEN-E650"; do
+  if ! grep -Fq "$expected" "$diagnostic_report"; then
+    agent_note "failed accumulated diagnostic fixture: missing $expected"
+    tail -n "$TAIL_LINES" "$diagnostic_report" || true
+    exit 1
+  fi
+done
+if [[ -e "$diagnostic_fixture" ]]; then
+  agent_note "failed accumulated diagnostic fixture: output was published"
+  exit 1
+fi
+agent_note "ok accumulated CLI diagnostics"

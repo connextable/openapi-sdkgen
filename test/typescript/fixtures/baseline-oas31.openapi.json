@@ -1,0 +1,65 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenAPI 3.1 extension-free baseline",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/source": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "links": {
+              "follow": {
+                "operationRef": "#/paths/~1target/post"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/target": {
+      "post": {
+        "responses": {
+          "204": {
+            "description": "Followed"
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "post": {
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          }
+        },
+        "callbacks": {
+          "status": {
+            "{$request.body#/callbackURL}": {
+              "post": {
+                "responses": {
+                  "204": {
+                    "description": "Accepted"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

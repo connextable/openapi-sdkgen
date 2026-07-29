@@ -10,9 +10,6 @@
         "operationId": "createWidget",
         "summary": "Create a widget.",
         "x-envelope": "data",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public",
         "parameters": [
           {
             "name": "tag",
@@ -80,9 +77,6 @@
         "operationId": "getCustomerWidget",
         "summary": "Read a customer widget.",
         "x-envelope": "data",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public",
         "parameters": [
           {
             "name": "customerID",
@@ -126,9 +120,6 @@
       "post": {
         "operationId": "uploadWidget",
         "summary": "Upload widget data.",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public",
         "requestBody": {
           "required": true,
           "content": {

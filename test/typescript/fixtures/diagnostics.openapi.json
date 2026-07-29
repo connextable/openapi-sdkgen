@@ -1,0 +1,27 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Accumulated diagnostics",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/errors": {
+      "get": {
+        "operationId": "getErrors",
+        "x-envelope": "none",
+        "x-pagination": "unknown",
+        "x-sort": {
+          "format": "field-direction"
+        },
+        "responses": {
+          "204": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "event": {}
+  }
+}
