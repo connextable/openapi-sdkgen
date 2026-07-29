@@ -664,7 +664,26 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 		return operation
 	}
 	listWidgets := plain("listWidgets", "GET", "/widgets")
-	listWidgets.Pagination = "cursor"
+	listWidgets.Raw = map[string]any{
+		"x-pagination": "cursor",
+		"parameters": []any{
+			map[string]any{"name": "cursor", "in": "query", "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": float64(1)}},
+		},
+		"responses": map[string]any{"200": map[string]any{
+			"description": "OK",
+			"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+				"type":     "object",
+				"required": []any{"items", "pagination"},
+				"properties": map[string]any{
+					"items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"pagination": map[string]any{"type": "object", "properties": map[string]any{
+						"nextCursor": map[string]any{"type": []any{"string", "null"}},
+					}},
+				},
+			}}},
+		}},
+	}
 	document := &ir.Document{Operations: []ir.Operation{
 		plain("getModern", "GET", "/foo-bar"),
 		plain("getLegacy", "GET", "/foo_bar"),

@@ -910,6 +910,9 @@ func operationItemType(document *ir.Document, operation ir.Operation) (string, e
 }
 
 func operationItemTypeForScope(document *ir.Document, operation ir.Operation, scope typeRenderScope) (string, error) {
+	if operation.PaginationPlan != nil && len(operation.PaginationPlan.ItemSchema) > 0 {
+		return schemaTypeForScope(document, operation.PaginationPlan.ItemSchema, projectionOutput, scope)
+	}
 	schema, found, err := operationSuccessSchema(document, operation)
 	if err != nil {
 		return "", err

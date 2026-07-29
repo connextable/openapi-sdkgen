@@ -61,6 +61,7 @@ type Operation struct {
 	Envelope           string
 	Pagination         string
 	Extensions         OperationExtensions
+	PaginationPlan     *PaginationPlan
 	SortParameters     map[string]SortParameterPlan
 	PathParameterOrder []string
 	PathItemRaw        map[string]any
@@ -79,7 +80,16 @@ type StringExtension struct {
 
 type OperationExtensions struct {
 	Envelope   StringExtension
+	Pagination ValueExtension
 	Visibility StringExtension
+}
+
+// ValueExtension preserves declaration presence and the untyped decoded value
+// until a target validates its complete shape.
+type ValueExtension struct {
+	Present bool
+	Raw     any
+	Pointer string
 }
 
 // SortParameterPlan is a validated projection from structured SDK input to
@@ -92,4 +102,27 @@ type SortValue struct {
 	Wire      string
 	Field     string
 	Direction string
+}
+
+// PaginationPlan is the validated correlation between exact query parameters
+// and decoded response-body JSON Pointers.
+type PaginationPlan struct {
+	Mode       string
+	Request    PaginationRequestPlan
+	Response   PaginationResponsePlan
+	ItemSchema map[string]any
+}
+
+type PaginationRequestPlan struct {
+	Cursor string
+	Offset string
+	Limit  string
+}
+
+type PaginationResponsePlan struct {
+	Items      []string
+	NextCursor []string
+	Offset     []string
+	Limit      []string
+	Total      []string
 }

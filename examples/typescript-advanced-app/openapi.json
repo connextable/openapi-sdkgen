@@ -12,7 +12,7 @@
         "security": [],
         "parameters": [
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1 } }
         ],
         "responses": {
           "200": {

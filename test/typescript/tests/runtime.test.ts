@@ -19,10 +19,11 @@ import type {
 } from "../fixtures/generated/client/generated/runtime.js";
 
 const operation = (overrides: Partial<OperationDefinition> = {}): OperationDefinition => ({
+  route: "POST /items/{itemID}",
   operationID: "runtimeTest",
   method: "POST",
   path: "/items/{itemID}",
-  envelope: "none",
+  envelope: "",
   ...overrides,
 });
 
@@ -226,7 +227,7 @@ describe("generated runtime", () => {
     ).resolves.toMatchObject({
       status: 201,
       contentType: "application/json",
-      data: { id: "widget-1" },
+      data: { data: { id: "widget-1" } },
       request: { id: "server-1" },
     });
 
@@ -343,7 +344,11 @@ describe("generated runtime", () => {
           ? { items: ["one"], pagination: { nextCursor: "next" } }
           : { items: ["two"], pagination: { nextCursor: "" } };
       },
-      "cursor",
+      {
+        mode: "cursor",
+        request: { cursor: "cursor" },
+        response: { items: ["items"], nextCursor: ["pagination", "nextCursor"] },
+      },
     );
     await expect(collect(cursor({ query: {} }))).resolves.toEqual(["one", "two"]);
     expect(cursorInputs).toEqual([{ query: {} }, { query: { cursor: "next" } }]);
@@ -353,7 +358,16 @@ describe("generated runtime", () => {
         items: input.query.offset === 0 ? ["one", "two"] : ["three"],
         pagination: { offset: input.query.offset, limit: 2, total: 3 },
       }),
-      "offset",
+      {
+        mode: "offset",
+        request: { offset: "offset", limit: "limit" },
+        response: {
+          items: ["items"],
+          offset: ["pagination", "offset"],
+          limit: ["pagination", "limit"],
+          total: ["pagination", "total"],
+        },
+      },
     );
     await expect(collect(offset({ query: { offset: 0, limit: 2 } }))).resolves.toEqual([
       "one",
@@ -363,7 +377,11 @@ describe("generated runtime", () => {
 
     const both = createPaginator<string, { query: {} }, unknown>(
       async () => ({ data: { items: ["nested"], pagination: { nextCursor: "" } } }),
-      "both",
+      {
+        mode: "both",
+        request: { cursor: "cursor", offset: "offset" },
+        response: { items: ["data", "items"], nextCursor: ["data", "pagination", "nextCursor"] },
+      },
     );
     await expect(collect(both({ mode: "cursor", query: {} } as never))).resolves.toEqual([
       "nested",
@@ -372,9 +390,9 @@ describe("generated runtime", () => {
     expect(error).toBeInstanceOf(TypeError);
     expect(isAPIError(error)).toBe(false);
 
-    const invalidCursor = await collect(cursor({ query: { offset: 1 } } as never)).catch(
-      (cause: unknown) => cause,
-    );
+    const invalidCursor = await collect(
+      both({ mode: "cursor", query: { offset: 1 } } as never),
+    ).catch((cause: unknown) => cause);
     expect(invalidCursor).toBeInstanceOf(TypeError);
   });
 
@@ -389,10 +407,49 @@ describe("generated runtime", () => {
           pagination: { nextCursor: cursor === "start" ? "a" : cursor === "a" ? "b" : "a" },
         };
       },
-      "cursor",
+      {
+        mode: "cursor",
+        request: { cursor: "cursor" },
+        response: { items: ["items"], nextCursor: ["pagination", "nextCursor"] },
+      },
     );
     await expect(collect(paginate({ query: {} }))).resolves.toEqual(["start", "a", "b"]);
     expect(cursors).toEqual(["start", "a", "b"]);
+  });
+
+  it("uses exact prototype-safe pointers and request offset fallbacks", async () => {
+    const cursor = createPaginator<string, { query: { cursor?: string } }, unknown>(
+      async () =>
+        JSON.parse('{"__proto__":{"items":["safe"]},"constructor":{"nextCursor":null}}') as unknown,
+      {
+        mode: "cursor",
+        request: { cursor: "cursor" },
+        response: {
+          items: ["__proto__", "items"],
+          nextCursor: ["constructor", "nextCursor"],
+        },
+      },
+    );
+    await expect(collect(cursor({ query: {} }))).resolves.toEqual(["safe"]);
+
+    const offsets: number[] = [];
+    const offset = createPaginator<string, { query: { offset?: number; limit?: number } }, unknown>(
+      async (input) => {
+        const current = input.query.offset ?? 0;
+        offsets.push(current);
+        return { rows: current === 2 ? ["one", "two"] : [] };
+      },
+      {
+        mode: "offset",
+        request: { offset: "offset", limit: "limit" },
+        response: { items: ["rows"] },
+      },
+    );
+    await expect(collect(offset({ query: { offset: 2, limit: 2 } }))).resolves.toEqual([
+      "one",
+      "two",
+    ]);
+    expect(offsets).toEqual([2, 4]);
   });
 
   it("keeps ordinary bodies with contentType and value fields intact", async () => {
@@ -745,10 +802,22 @@ describe("generated runtime", () => {
       string,
       { query: { offset?: number; limit?: number } },
       unknown
-    >(async (input) => {
-      calls.push(input);
-      return { items: ["first"], pagination: { offset: 0, limit: 0, total: 100 } };
-    }, "offset");
+    >(
+      async (input) => {
+        calls.push(input);
+        return { items: ["first"], pagination: { offset: 0, limit: 0, total: 100 } };
+      },
+      {
+        mode: "offset",
+        request: { offset: "offset", limit: "limit" },
+        response: {
+          items: ["items"],
+          offset: ["pagination", "offset"],
+          limit: ["pagination", "limit"],
+          total: ["pagination", "total"],
+        },
+      },
+    );
     const input = { query: { offset: 0, limit: 0 } };
     await expect(collect(paginate(input))).resolves.toEqual(["first"]);
     expect(calls).toEqual([{ query: { offset: 0, limit: 0 } }]);
@@ -761,10 +830,21 @@ describe("generated runtime", () => {
       string,
       { query: { offset?: number; limit?: number } },
       unknown
-    >(async (input) => {
-      calls.push(input);
-      return { items: [], meta: { pagination: { offset: 10, limit: 5 } } };
-    }, "offset");
+    >(
+      async (input) => {
+        calls.push(input);
+        return { items: [], meta: { pagination: { offset: 10, limit: 5 } } };
+      },
+      {
+        mode: "offset",
+        request: { offset: "offset", limit: "limit" },
+        response: {
+          items: ["items"],
+          offset: ["meta", "pagination", "offset"],
+          limit: ["meta", "pagination", "limit"],
+        },
+      },
+    );
     await expect(collect(paginate({ query: { offset: 10, limit: 5 } }))).resolves.toEqual([]);
     expect(calls).toHaveLength(1);
   });

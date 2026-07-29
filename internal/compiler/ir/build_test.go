@@ -55,6 +55,7 @@ func TestBuildExtractsOperationsDeterministically(t *testing.T) {
 	getItem := model.Operations[1]
 	if getItem.Pointer != "#/paths/~1items~1{itemId}/get" ||
 		!getItem.Extensions.Envelope.Present || !getItem.Extensions.Envelope.Valid || getItem.Extensions.Envelope.Value != "data" ||
+		!getItem.Extensions.Pagination.Present || getItem.Extensions.Pagination.Pointer != "#/paths/~1items~1{itemId}/get/x-pagination" ||
 		!getItem.Extensions.Visibility.Present || !getItem.Extensions.Visibility.Valid || getItem.Extensions.Visibility.Value != "public" {
 		t.Fatalf("typed operation extensions = %#v", getItem)
 	}
@@ -360,6 +361,7 @@ func operationFixture(operationID string) map[string]any {
 		"x-envelope":       "data",
 		"x-concurrency":    "none",
 		"x-idempotency":    "unsupported",
+		"x-pagination":     map[string]any{"mode": "cursor"},
 		"x-sdk-visibility": "public",
 	}
 }

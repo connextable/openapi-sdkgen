@@ -75,7 +75,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	output.WriteString("  isAPIError,\n")
 	output.WriteString("  isErrorCode,\n")
 	output.WriteString("} from \"./runtime.js\"\n")
-	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
+	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationPlan, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
 
 	operationsByRoute := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
@@ -109,7 +109,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		}
 		paginationType := "never"
 		callType := operationName + "Call"
-		if operation.Pagination != "" {
+		if operationsByRoute[routeKey].PaginationPlan != nil {
 			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
 			if err != nil {
 				return nil, err
@@ -238,7 +238,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			return nil, err
 		}
 		_, hasStream := streamForRoute(streams, routeKey)
-		if operation.Pagination != "" || linkValue != "" || hasStream {
+		if operationsByRoute[routeKey].PaginationPlan != nil || linkValue != "" || hasStream {
 			baseBinding = operationBaseValueName(routeKey)
 		}
 		outputType := operation.renderOutput(typeRenderContract)
@@ -253,13 +253,18 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			hasInput = true
 		}
 		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(routeKey), operationTypeName(routeKey), definition, hasInput, operationTypeName(routeKey))
-		if operation.Pagination != "" {
+		paginationPlan := operationsByRoute[routeKey].PaginationPlan
+		if paginationPlan != nil {
 			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
 			paginationBinding := operationPaginationValueName(routeKey)
-			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", paginationBinding, itemType, operationTypeName(routeKey), outputType, quoteTS(operation.Pagination), operationTypeName(routeKey), baseBinding, quoteTS(operation.Pagination))
+			plan, err := paginationRuntimePlanExpression(*paginationPlan)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, unknown, %s, %s, %s, %sOptions>((input, requestOptions) => %s.raw(input, requestOptions).then((response) => response.data), %s)\n", paginationBinding, itemType, operationTypeName(routeKey), quoteTS(paginationPlan.Mode), quoteTS(paginationPlan.Request.Cursor), quoteTS(paginationPlan.Request.Offset), operationTypeName(routeKey), baseBinding, plan)
 		}
 	}
 	if err := emitLinkValues(&output, document, links); err != nil {
@@ -274,7 +279,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		}
 		routeKey := manifestRouteKey(operation)
 		properties := make([]runtimeProperty, 0, 3)
-		if operation.Pagination != "" {
+		if operationsByRoute[routeKey].PaginationPlan != nil {
 			properties = append(properties, runtimeProperty{key: "paginate", value: operationPaginationValueName(routeKey)})
 		}
 		linkValue, err := routeLinksValue(links, routeKey)
@@ -709,10 +714,6 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 	var filters []operationParameter
 	var sorts []operationParameter
 	for _, parameter := range parameters {
-		isPaginationControl := operation.Pagination != "" && (parameter.Name == "cursor" || parameter.Name == "offset" || parameter.Name == "limit")
-		if isPaginationControl {
-			continue
-		}
 		if parameter.Sort != nil {
 			sorts = append(sorts, parameter)
 			continue
@@ -720,17 +721,6 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 		filters = append(filters, parameter)
 	}
 	parts := make([]string, 0, 3)
-	if operation.Pagination != "" {
-		paginationType := map[string]string{
-			"cursor": "Contract.CursorPaginationInput",
-			"offset": "Contract.OffsetPaginationInput",
-			"both":   "Contract.BothPaginationInput",
-		}[operation.Pagination]
-		if paginationType == "" {
-			return fmt.Errorf("operation %s has unsupported pagination profile %q", operation.OperationID, operation.Pagination)
-		}
-		parts = append(parts, paginationType)
-	}
 	if len(filters) > 0 {
 		filterType := operationName + "FilterInput"
 		fmt.Fprintf(output, "/** Filter query parameters for `%s` (`%s %s`). */\n", operation.OperationID, operation.Method, operation.Path)
@@ -1427,7 +1417,15 @@ func operationInputAlias(operation ManifestOperation) string {
 
 func paginationFunctionType(operation ManifestOperation, itemType string) string {
 	operationName := operationTypeName(manifestRouteKey(operation))
-	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ">, options?: " + operationName + "Options) => AsyncIterable<" + itemType + ">"
+	cursor := operation.paginationRequest.Cursor
+	offset := operation.paginationRequest.Offset
+	if cursor == "" && (operation.Pagination == "cursor" || operation.Pagination == "both") {
+		cursor = "cursor"
+	}
+	if offset == "" && (operation.Pagination == "offset" || operation.Pagination == "both") {
+		offset = "offset"
+	}
+	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ", " + quoteTS(cursor) + ", " + quoteTS(offset) + ">, options?: " + operationName + "Options) => AsyncIterable<" + itemType + ">"
 }
 
 func operationValueName(operationID string) string {

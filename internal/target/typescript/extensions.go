@@ -31,7 +31,11 @@ func prepareKnownExtensions(document *ir.Document) (*ir.Document, []diagnostic.D
 
 	for index := range prepared.Operations {
 		operation := &prepared.Operations[index]
-		diagnostics = append(diagnostics, prepareOperationExtensions(prepared, operation, consumed)...)
+		findings, err := prepareOperationExtensions(prepared, operation, consumed)
+		if err != nil {
+			return nil, nil, err
+		}
+		diagnostics = append(diagnostics, findings...)
 		values, err := operationParameters(prepared, *operation)
 		if err != nil {
 			return nil, nil, err
@@ -179,12 +183,14 @@ func cloneDocumentForPreparation(document *ir.Document) *ir.Document {
 		operation := &prepared.Operations[index]
 		operation.SortParameters = nil
 		operation.Envelope = ""
+		operation.Pagination = ""
+		operation.PaginationPlan = nil
 		operation.Visibility = ""
 	}
 	return &prepared
 }
 
-func prepareOperationExtensions(document *ir.Document, operation *ir.Operation, consumed map[string]bool) []diagnostic.Diagnostic {
+func prepareOperationExtensions(document *ir.Document, operation *ir.Operation, consumed map[string]bool) ([]diagnostic.Diagnostic, error) {
 	var result []diagnostic.Diagnostic
 	envelope := operationStringExtension(*operation, "x-envelope", operation.Extensions.Envelope)
 	if envelope.Present {
@@ -230,10 +236,20 @@ func prepareOperationExtensions(document *ir.Document, operation *ir.Operation, 
 		}
 	}
 
-	if _, present := operation.Raw["x-pagination"]; present {
-		consumed[operationExtensionPointer(*operation, "x-pagination")] = true
+	pagination := operationValueExtension(*operation, "x-pagination", operation.Extensions.Pagination)
+	if pagination.Present {
+		consumed[pagination.Pointer] = true
+		plan, findings, err := preparePaginationExtension(document, *operation, pagination)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, findings...)
+		if plan != nil {
+			operation.Pagination = plan.Mode
+			operation.PaginationPlan = plan
+		}
 	}
-	return result
+	return result, nil
 }
 
 func operationStringExtension(operation ir.Operation, name string, compiled ir.StringExtension) ir.StringExtension {
@@ -249,6 +265,14 @@ func operationStringExtension(operation ir.Operation, name string, compiled ir.S
 		Raw:     raw,
 		Pointer: operationExtensionPointer(operation, name),
 	}
+}
+
+func operationValueExtension(operation ir.Operation, name string, compiled ir.ValueExtension) ir.ValueExtension {
+	if compiled.Present {
+		return compiled
+	}
+	raw, present := operation.Raw[name]
+	return ir.ValueExtension{Present: present, Raw: raw, Pointer: operationExtensionPointer(operation, name)}
 }
 
 func operationExtensionPointer(operation ir.Operation, name string) string {

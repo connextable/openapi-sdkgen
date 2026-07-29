@@ -252,12 +252,20 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
         "operationId": "listOrderItems",
         "parameters": [
           {"name": "orderID", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "cursor", "in": "query", "schema": {"type": "string"}}
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}
         ],
         "responses": {
           "200": {
             "description": "OK",
-            "content": {"application/json": {"schema": {"type": "array", "items": {"type": "string"}}}}
+            "content": {"application/json": {"schema": {
+              "type": "object",
+              "required": ["items", "pagination"],
+              "properties": {
+                "items": {"type": "array", "items": {"type": "string"}},
+                "pagination": {"type": "object", "properties": {"nextCursor": {"type": ["string", "null"]}}}
+              }
+            }}}
           }
         },
         "x-pagination": "cursor"
@@ -638,7 +646,7 @@ const emitterFixture = `{
         "summary": "List products",
         "parameters": [
           {"name": "cursor", "in": "query", "description": "Opaque continuation cursor.", "schema": {"type": "string"}},
-          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}},
           {"name": "search", "in": "query", "description": "Case-insensitive product search.", "schema": {"type": "string"}},
           {"name": "sort", "in": "query", "schema": {"type": "array", "items": {"type": "string", "enum": ["name:asc", "name:desc", "createdAt:asc", "createdAt:desc"]}}, "x-sort": {"format": "field-direction"}}
         ],

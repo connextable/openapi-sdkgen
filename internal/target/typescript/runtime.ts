@@ -869,6 +869,30 @@ export function bindPathOperation<
 export type PaginationProfile = "cursor" | "offset" | "both";
 
 type QueryInput<Input> = Input extends { readonly query: infer Query } ? Query : never;
+type WithoutQueryControl<Query, Name extends string> = Name extends ""
+  ? Query
+  : Omit<Query, Name> & { readonly [Key in Name]?: never };
+
+/** Validated correlation between exact query controls and response-body locations. */
+export type PaginationPlan<
+  Profile extends PaginationProfile = PaginationProfile,
+  CursorName extends string = string,
+  OffsetName extends string = string,
+> = {
+  readonly mode: Profile;
+  readonly request: {
+    readonly cursor?: CursorName;
+    readonly offset?: OffsetName;
+    readonly limit?: string;
+  };
+  readonly response: {
+    readonly items: readonly string[];
+    readonly nextCursor?: readonly string[];
+    readonly offset?: readonly string[];
+    readonly limit?: readonly string[];
+    readonly total?: readonly string[];
+  };
+};
 
 /**
  * Input accepted by a generated pagination helper.
@@ -876,15 +900,20 @@ type QueryInput<Input> = Input extends { readonly query: infer Query } ? Query :
  * Operations supporting both strategies require `mode`; cursor and offset fields
  * remain mutually exclusive in every profile.
  */
-export type PaginateInput<Input, Profile extends PaginationProfile> = Profile extends "both"
+export type PaginateInput<
+  Input,
+  Profile extends PaginationProfile,
+  CursorName extends string = "cursor",
+  OffsetName extends string = "offset",
+> = Profile extends "both"
   ?
       | (Omit<Input, "query"> & {
           readonly mode: "cursor";
-          readonly query: QueryInput<Input> & { readonly offset?: never };
+          readonly query: WithoutQueryControl<QueryInput<Input>, OffsetName>;
         })
       | (Omit<Input, "query"> & {
           readonly mode: "offset";
-          readonly query: QueryInput<Input> & { readonly cursor?: never };
+          readonly query: WithoutQueryControl<QueryInput<Input>, CursorName>;
         })
   : Input & { readonly mode?: never };
 
@@ -910,53 +939,78 @@ export function createPaginator<
   Input,
   Page,
   Profile extends PaginationProfile = PaginationProfile,
+  CursorName extends string = string,
+  OffsetName extends string = string,
   Options extends RequestOptions = RequestOptions,
 >(
   requestPage: PageRequest<Input, Page, Options>,
-  profile: Profile,
-): (input: PaginateInput<Input, Profile>, options?: Options) => AsyncIterable<Item> {
+  plan: PaginationPlan<Profile, CursorName, OffsetName>,
+): (input: PaginateInput<Input, Profile, CursorName, OffsetName>, options?: Options) => AsyncIterable<Item> {
   return (input, options) => ({
     async *[Symbol.asyncIterator]() {
       const root: Record<string, unknown> = isRecord(input) ? { ...input } : {};
       const requestedMode = root.mode;
       delete root.mode;
-      const mode = resolvePaginationMode(profile, requestedMode);
+      const mode = resolvePaginationMode(plan.mode, requestedMode);
       const query = isRecord(root.query) ? { ...root.query } : {};
-      if (mode === "cursor" && query.offset !== undefined) {
-        throw new TypeError("cursor pagination does not accept offset");
+      const cursorName = plan.request.cursor;
+      const offsetName = plan.request.offset;
+      const limitName = plan.request.limit;
+      if (mode === "cursor" && offsetName !== undefined && query[offsetName] !== undefined) {
+        throw new TypeError(`cursor pagination does not accept ${offsetName}`);
       }
-      if (mode === "offset" && query.cursor !== undefined) {
-        throw new TypeError("offset pagination does not accept cursor");
+      if (mode === "offset" && cursorName !== undefined && query[cursorName] !== undefined) {
+        throw new TypeError(`offset pagination does not accept ${cursorName}`);
       }
       root.query = query;
       const seenCursors = new Set<string>();
-      if (typeof query.cursor === "string") seenCursors.add(query.cursor);
+      if (cursorName !== undefined && typeof query[cursorName] === "string") {
+        seenCursors.add(query[cursorName]);
+      }
+      const seenOffsets = new Set<number>();
+      if (offsetName !== undefined && typeof query[offsetName] === "number") {
+        seenOffsets.add(query[offsetName]);
+      }
       for (;;) {
         const page = await requestPage({ ...root, query: { ...query } } as Input, options);
-        const items = pageItems(page);
+        const items = pageItems(page, plan.response.items);
         for (const item of items) yield item as Item;
         if (mode === "cursor") {
-          const nextCursor = pagePagination(page).nextCursor;
+          const nextCursor = paginationValue(page, plan.response.nextCursor);
           if (typeof nextCursor !== "string" || nextCursor === "" || seenCursors.has(nextCursor)) {
             return;
           }
           seenCursors.add(nextCursor);
-          query.cursor = nextCursor;
+          if (cursorName === undefined) return;
+          query[cursorName] = nextCursor;
           continue;
         }
-        const pagination = pagePagination(page);
-        const currentOffset = numberValue(pagination.offset, query.offset, 0);
-        const limit = numberValue(pagination.limit, query.limit, items.length);
-        const total = typeof pagination.total === "number" ? pagination.total : undefined;
+        if (offsetName === undefined) return;
+        const requestedOffset = numberValue(query[offsetName], undefined, 0);
+        const currentOffset = numberValue(
+          paginationValue(page, plan.response.offset),
+          query[offsetName],
+          0,
+        );
+        const limit = numberValue(
+          paginationValue(page, plan.response.limit),
+          limitName === undefined ? undefined : query[limitName],
+          items.length,
+        );
+        const totalValue = paginationValue(page, plan.response.total);
+        const total = typeof totalValue === "number" ? totalValue : undefined;
         const nextOffset = currentOffset + limit;
         if (
           limit <= 0 ||
           items.length === 0 ||
           items.length < limit ||
+          nextOffset <= requestedOffset ||
+          seenOffsets.has(nextOffset) ||
           (total !== undefined && nextOffset >= total)
         )
           return;
-        query.offset = nextOffset;
+        seenOffsets.add(nextOffset);
+        query[offsetName] = nextOffset;
       }
     },
   });
@@ -3733,24 +3787,24 @@ function resolvePaginationMode(
   return profile;
 }
 
-function pageItems(page: unknown): readonly unknown[] {
-  if (!isRecord(page)) return [];
-  if (Array.isArray(page.items)) return page.items;
-  if (isRecord(page.data) && Array.isArray(page.data.items)) return page.data.items;
-  return [];
+function pageItems(page: unknown, pointer: readonly string[]): readonly unknown[] {
+  const value = paginationValue(page, pointer);
+  return Array.isArray(value) ? value : [];
 }
 
-function pagePagination(page: unknown): Record<string, unknown> {
-  if (!isRecord(page)) return {};
-  if (isRecord(page.pagination)) return page.pagination;
-  if (isRecord(page.meta) && isRecord(page.meta.pagination)) return page.meta.pagination;
-  if (isRecord(page.data)) {
-    if (isRecord(page.data.pagination)) return page.data.pagination;
-    if (isRecord(page.data.meta) && isRecord(page.data.meta.pagination)) {
-      return page.data.meta.pagination;
+function paginationValue(page: unknown, pointer: readonly string[] | undefined): unknown {
+  if (pointer === undefined) return undefined;
+  let current = page;
+  for (const token of pointer) {
+    if ((typeof current !== "object" && typeof current !== "function") || current === null) {
+      return undefined;
     }
+    if (!Object.prototype.hasOwnProperty.call(current, token)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[token];
   }
-  return {};
+  return current;
 }
 
 function numberValue(primary: unknown, secondary: unknown, fallback: number): number {

@@ -94,7 +94,7 @@ describe("generated TypeScript source", () => {
     ).resolves.toMatchObject({
       status: 201,
       contentType: "application/json",
-      data: { id: "widget-1", name: "raw" },
+      data: { data: { id: "widget-1", name: "raw" } },
       request: { id: "raw-request" },
     });
   });

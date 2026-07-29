@@ -274,12 +274,18 @@ func buildOperation(path, method, pointer string, pathItemRaw, raw map[string]an
 		Pagination:  stringValue(raw, "x-pagination"),
 		Extensions: OperationExtensions{
 			Envelope:   readStringExtension(raw, "x-envelope", "#"+pointer+"/x-envelope"),
+			Pagination: readValueExtension(raw, "x-pagination", "#"+pointer+"/x-pagination"),
 			Visibility: readStringExtension(raw, "x-sdk-visibility", "#"+pointer+"/x-sdk-visibility"),
 		},
 		PathParameterOrder: templateParameters(path),
 		PathItemRaw:        pathItemRaw,
 		Raw:                raw,
 	}
+}
+
+func readValueExtension(raw map[string]any, name, pointer string) ValueExtension {
+	value, present := raw[name]
+	return ValueExtension{Present: present, Raw: value, Pointer: pointer}
 }
 
 func readStringExtension(raw map[string]any, name, pointer string) StringExtension {

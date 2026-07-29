@@ -126,7 +126,6 @@
       "post": {
         "operationId": "uploadWidget",
         "summary": "Upload widget data.",
-        "x-envelope": "none",
         "x-concurrency": "none",
         "x-idempotency": "unsupported",
         "x-sdk-visibility": "public",
