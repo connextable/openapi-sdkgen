@@ -2,7 +2,6 @@ package typescript
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
@@ -13,7 +12,7 @@ import (
 // request's transport semantics. Executable features continue to use generated
 // client code or a feature-path diagnostic.
 func emitMetadata(document *ir.Document, typescript bool) ([]byte, error) {
-	raw, err := json.Marshal(document.Raw)
+	raw, err := runtimeJSONExpression(document.Raw)
 	if err != nil {
 		return nil, fmt.Errorf("encode OpenAPI metadata: %w", err)
 	}

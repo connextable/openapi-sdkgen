@@ -79,11 +79,11 @@ const { createWebhookRouter } = await import(pathToFileURL(process.argv[1]).href
 const seen = [];
 let selectorParams;
 const router = createWebhookRouter({
-  binary: async () => ({ status: 200, contentType: "application/pdf", body: new Uint8Array([1, 2, 3]) }),
-  plain: async ({ request }) => { if (new URL(request.url).searchParams.has("fail")) throw new Error("private no-body handler detail"); return { status: 200, contentType: "application/vnd.example.plain", body: "plain" }; },
-  xml: async () => ({ status: 200, contentType: "application/xml", body: { id: "receipt-1", note: "hello & goodbye" } }),
-  selectors: async ({ params }) => { selectorParams = params.path; return { status: 204 }; },
-	orderCreated: async ({ body, operationID, request, params }) => {
+  binary: { GET: async () => ({ status: 200, contentType: "application/pdf", body: new Uint8Array([1, 2, 3]) }) },
+  plain: { GET: async ({ request }) => { if (new URL(request.url).searchParams.has("fail")) throw new Error("private no-body handler detail"); return { status: 200, contentType: "application/vnd.example.plain", body: "plain" }; } },
+  xml: { GET: async () => ({ status: 200, contentType: "application/xml", body: { id: "receipt-1", note: "hello & goodbye" } }) },
+  selectors: { GET: async ({ params }) => { selectorParams = params.path; return { status: 204 }; } },
+	orderCreated: { POST: async ({ body, operationID, request, params }) => {
 	if (body.id === "explode") throw new Error("private handler detail");
 	if (body.id === "missing-header") return { status: 202, body: { accepted: body.id } };
 	if (body.id === "invalid-header") return { status: 202, headers: { "x-rate": "nope" }, body: { accepted: body.id } };
@@ -91,7 +91,7 @@ const router = createWebhookRouter({
 	if (body.id === "raw-custom") return { status: 202, headers: { "x-rate": "2", "x-custom": "custom:raw-outbound" }, body: { accepted: body.id } };
 	seen.push({ body, operationID, method: request.method, params });
     return { status: 202, headerValues: { "X-Rate": 2, "X-List": [1, 2], "X-Object": { event_id: "outbound" }, "X-Meta": { event_id: "outbound" }, "X-Custom": { event_id: "custom-outbound" } }, body: { accepted: body.id } };
-  },
+  } },
 }, { routes: { binary: "/hooks/binary", plain: "/hooks/plain", xml: "/hooks/xml", selectors: "/hooks/selectors/{label}/{matrix}", orderCreated: "/hooks/orders" }, codecs: { "application/vnd.example.plain": { encode(value) { return "custom:" + value; } }, "application/vnd.example.parameter": { decodeParameter(value) { return { event_id: value.replace("custom:", "") }; }, encodeParameter(value) { return "custom:" + value.event_id; } } }, authenticate: async ({ method, path, security, securityCandidates }) => {
 	if (securityCandidates.signature?.value === "boom") throw new Error("private authenticator detail");
 	if (method !== "POST" || path !== "/hooks/orders" || JSON.stringify(security) !== JSON.stringify([{ signature: [] }]) || (securityCandidates.signature?.value !== undefined && securityCandidates.signature.value !== "sig-1")) throw new Error("bad auth context");
@@ -109,9 +109,9 @@ if (xml.status !== 200 || xml.headers.get("content-type") !== "application/xml" 
 if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, filter: { kind_name: "fresh", count: 3 }, payload: { event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
 const selectorResponse = await router.fetch(new Request("https://host.test/hooks/selectors/.role,admin,enabled,true/;matrix=role,owner,enabled,false", { method: "GET" }));
 if (selectorResponse.status !== 204 || JSON.stringify(selectorParams) !== JSON.stringify({ label: { role: "admin", enabled: true }, matrix: { role: "owner", enabled: false } })) throw new Error("label/matrix path objects were not decoded");
-const denied = createWebhookRouter({ orderCreated: async () => ({ status: 202 }) }, { routes: { orderCreated: "/hooks/orders" }, authenticate: () => new Response("no", { status: 401 }) });
+const denied = createWebhookRouter({ orderCreated: { POST: async () => ({ status: 202 }) } }, { routes: { orderCreated: "/hooks/orders" }, authenticate: () => new Response("no", { status: 401 }) });
 if ((await denied.fetch(new Request("https://host.test/hooks/orders?page=2", { method: "POST", headers: { "content-type": "application/json", "x-trace": "trace-1", "cookie": "session=one" }, body: "{}" }))).status !== 401) throw new Error("authentication response was ignored");
-const defaultDenied = createWebhookRouter({ orderCreated: async () => ({ status: 202 }) }, { routes: { orderCreated: "/hooks/orders" } });
+const defaultDenied = createWebhookRouter({ orderCreated: { POST: async () => ({ status: 202 }) } }, { routes: { orderCreated: "/hooks/orders" } });
 if ((await defaultDenied.fetch(new Request("https://host.test/hooks/orders?page=2", { method: "POST", headers: { "content-type": "application/json", "x-trace": "trace-1", "cookie": "session=one" }, body: JSON.stringify({ id: "order-1" }) }))).status !== 401) throw new Error("protected webhook did not fail closed without an authenticator");
 if ((await router.fetch(new Request("https://host.test/hooks/orders?page=2", { method: "POST", headers: { "content-type": "text/plain", "x-trace": "trace-1", "cookie": "session=one" }, body: "bad" }))).status !== 415) throw new Error("bad media type was accepted");
 if ((await router.fetch(new Request("https://host.test/hooks/orders?page=2", { method: "POST", headers: { "content-type": "application/json", "x-trace": "trace-1", "cookie": "session=one" }, body: "{}" }))).status !== 400) throw new Error("schema-invalid body was accepted");
@@ -126,7 +126,7 @@ if ((await router.fetch(new Request("https://host.test/hooks/orders?page=2", { m
 const failedAuthentication = await router.fetch(new Request("https://host.test/hooks/orders?page=2", { method: "POST", headers: { "content-type": "application/json", "x-signature": "boom", "x-trace": "trace-1", "cookie": "session=one" }, body: JSON.stringify({ id: "order-1" }) }));
 if (failedAuthentication.status !== 500 || await failedAuthentication.text() !== "Internal Server Error") throw new Error("authentication error leaked or did not become a safe 500");
 for (const routes of [{}, { orderCreated: "hooks/orders" }, { orderCreated: "/hooks/orders?debug=1" }]) {
-  try { createWebhookRouter({ orderCreated: async () => ({ status: 202 }) }, { routes }); throw new Error("invalid route was accepted"); }
+  try { createWebhookRouter({ orderCreated: { POST: async () => ({ status: 202 }) } }, { routes }); throw new Error("invalid route was accepted"); }
   catch (error) { if (String(error).includes("invalid route was accepted")) throw error; }
 }
 try { createWebhookRouter({}, { routes: {}, codecs: { "application/vnd.example": {}, "Application/VND.Example": {} } }); throw new Error("duplicate codec was accepted"); }
@@ -171,7 +171,7 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
-	for _, expected := range []string{"createCallbackHandlers", "OrderStatusCallbackContext", "{$request.body#/callbackURL}", "No route is generated"} {
+	for _, expected := range []string{"createCallbackHandlers", `export interface Callbacks`, `readonly "createOrder"`, `readonly "orderStatus"`, "{$request.body#/callbackURL}", "No route is generated"} {
 		if !strings.Contains(callbacks, expected) {
 			t.Fatalf("callback source missing %q:\n%s", expected, callbacks)
 		}
@@ -203,21 +203,22 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
 import { pathToFileURL } from "node:url";
 const codecs = await import(pathToFileURL(process.argv[1]).href);
 const seen = [];
-const callbacks = codecs.createCallbackHandlers({ orderStatus: async ({ body, operationID, method, request }) => {
+const callbacks = codecs.createCallbackHandlers({ callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: async ({ body, operationID, method, request }) => {
   seen.push({ body, operationID, method, path: new URL(request.url).pathname });
   return { status: 204 };
-} }, { codecs: { "application/vnd.example.callback": { async decodeInbound(request) { return JSON.parse(await request.text()); } } }, authenticate: ({ security }) => {
+} } } } } }, { codecs: { "application/vnd.example.callback": { async decodeInbound(request) { return JSON.parse(await request.text()); } } }, authenticate: ({ security }) => {
   if (JSON.stringify(security) !== JSON.stringify([{ signature: [] }])) throw new Error("callback security metadata mismatch");
 } });
-const response = await callbacks.orderStatus.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }));
+const endpoint = callbacks.callbacks.createOrder.orderStatus["{$request.body#/callbackURL}"].POST;
+const response = await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }));
 if (response.status !== 204) throw new Error("callback response was not encoded");
 if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderStatusCallback", method: "POST", path: "/callback" }])) throw new Error("callback context mismatch");
-if ((await callbacks.orderStatus.fetch(new Request("https://host.test/callback", { method: "GET" }))).status !== 405) throw new Error("wrong callback method was accepted");
-if ((await callbacks.orderStatus.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "text/plain" }, body: "bad" }))).status !== 415) throw new Error("bad callback media type was accepted");
-if ((await callbacks.orderStatus.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: "{}" }))).status !== 400) throw new Error("schema-invalid callback was accepted");
-if ((await codecs.createCallbackHandlers({}).orderStatus.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: "{}" }))).status !== 404) throw new Error("missing callback handler was accepted");
-const denied = codecs.createCallbackHandlers({ orderStatus: async () => ({ status: 204 }) }, { authenticate: () => new Response("Unauthorized", { status: 401 }) });
-if ((await denied.orderStatus.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }))).status !== 401) throw new Error("callback authentication response was ignored");
+if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "GET" }))).status !== 405) throw new Error("wrong callback method was accepted");
+if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "text/plain" }, body: "bad" }))).status !== 415) throw new Error("bad callback media type was accepted");
+if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: "{}" }))).status !== 400) throw new Error("schema-invalid callback was accepted");
+if ((await codecs.createCallbackHandlers({}).callbacks.createOrder.orderStatus["{$request.body#/callbackURL}"].POST.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: "{}" }))).status !== 404) throw new Error("missing callback handler was accepted");
+const denied = codecs.createCallbackHandlers({ callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: async () => ({ status: 204 }) } } } } }, { authenticate: () => new Response("Unauthorized", { status: 401 }) });
+if ((await denied.callbacks.createOrder.orderStatus["{$request.body#/callbackURL}"].POST.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }))).status !== 401) throw new Error("callback authentication response was ignored");
 `
 	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "callbacks.js"))
 	if output, err := command.CombinedOutput(); err != nil {
@@ -303,12 +304,12 @@ import { pathToFileURL } from "node:url";
 const { createWebhookRouter } = await import(pathToFileURL(process.argv[1]).href);
 const seen = [];
 const router = createWebhookRouter({
-  formReceived: async ({ body }) => { if (body.count !== 2 || body.enabled !== true || body.tags.join(",") !== "one,two" || body.meta.source !== "form") throw new Error("form values were not typed"); seen.push(body); return { status: 204 }; },
-  textReceived: async ({ body }) => { seen.push(body); return { status: 204 }; },
-  xmlReceived: async ({ body }) => { seen.push(body); return { status: 204 }; },
-  multipartReceived: async ({ body }) => { if (body.meta.source !== "multipart" || body.custom.source !== "custom") throw new Error("multipart fields were not decoded"); seen.push(body); return { status: 204 }; },
-  binaryReceived: async ({ body }) => { seen.push({ bytes: body.byteLength }); return { status: 204 }; },
-  multiReceived: async ({ body }) => { seen.push(body.contentType === "application/json" ? body.value.event_id : body.value); return { status: 204 }; },
+  formReceived: { POST: async ({ body }) => { if (body.count !== 2 || body.enabled !== true || body.tags.join(",") !== "one,two" || body.meta.source !== "form") throw new Error("form values were not typed"); seen.push(body); return { status: 204 }; } },
+  textReceived: { POST: async ({ body }) => { seen.push(body); return { status: 204 }; } },
+  xmlReceived: { POST: async ({ body }) => { seen.push(body); return { status: 204 }; } },
+  multipartReceived: { POST: async ({ body }) => { if (body.meta.source !== "multipart" || body.custom.source !== "custom") throw new Error("multipart fields were not decoded"); seen.push(body); return { status: 204 }; } },
+  binaryReceived: { POST: async ({ body }) => { seen.push({ bytes: body.byteLength }); return { status: 204 }; } },
+  multiReceived: { POST: async ({ body }) => { seen.push(body.contentType === "application/json" ? body.value.event_id : body.value); return { status: 204 }; } },
 }, { routes: { formReceived: "/form", textReceived: "/text", xmlReceived: "/xml", multipartReceived: "/multipart", binaryReceived: "/binary", multiReceived: "/multi" }, codecs: { "application/vnd.example.part": { decodeParameter: (value) => JSON.parse(value) } } });
 if ((await router.fetch(new Request("https://host.test/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "name=widget&count=2&enabled=true&tags=one&tags=two&meta=%7B%22source%22%3A%22form%22%7D" }))).status !== 204) throw new Error("form body rejected");
 if ((await router.fetch(new Request("https://host.test/text", { method: "POST", headers: { "content-type": "text/plain" }, body: "hello" }))).status !== 204) throw new Error("text body rejected");
@@ -374,7 +375,7 @@ const codecs = {
   "application/vnd.example.event": { async decodeInbound(request) { return JSON.parse(await request.text()); } },
   "application/vnd.example.events": { async *decodeInboundStream(reader) { const decoder = new TextDecoder(); let pending = ""; while (true) { const chunk = await reader.read(1024); if (chunk === null) break; pending += decoder.decode(chunk, { stream: true }); let newline; while ((newline = pending.indexOf("\n")) >= 0) { const line = pending.slice(0, newline); pending = pending.slice(newline + 1); if (line !== "") yield JSON.parse(line); } } if (pending !== "") yield JSON.parse(pending); } },
 };
-const router = createWebhookRouter({ events: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; }, frames: async ({ body }) => { for await (const item of body) seen.push(item.frame_id); return { status: 204 }; }, custom: async ({ body }) => { seen.push(body.event_id); return { status: 204 }; }, customStream: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; }, denied: async () => ({ status: 204 }) }, { routes: { events: "/events", frames: "/frames", custom: "/custom", customStream: "/custom-stream", denied: "/denied" }, codecs, maxStreamItemBytes: 1024 });
+const router = createWebhookRouter({ events: { POST: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; } }, frames: { POST: async ({ body }) => { for await (const item of body) seen.push(item.frame_id); return { status: 204 }; } }, custom: { POST: async ({ body }) => { seen.push(body.event_id); return { status: 204 }; } }, customStream: { POST: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; } }, denied: { POST: async () => ({ status: 204 }) } }, { routes: { events: "/events", frames: "/frames", custom: "/custom", customStream: "/custom-stream", denied: "/denied" }, codecs, maxStreamItemBytes: 1024 });
 const encoder = new TextEncoder();
 const valid = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('{"event_id":"one"}\n{"ev')); controller.enqueue(encoder.encode('ent_id":"two"}\n')); controller.close(); } });
 const validResponse = await router.fetch(new Request("https://host.test/events", { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: valid, duplex: "half" }));
@@ -382,7 +383,7 @@ if (validResponse.status !== 204 || seen.join(",") !== "one,two") throw new Erro
 const invalid = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('{"wrong":true}\n')); controller.close(); } });
 const invalidResponse = await router.fetch(new Request("https://host.test/events", { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: invalid, duplex: "half" }));
 if (invalidResponse.status !== 400) throw new Error("invalid inbound stream item was accepted");
-const bounded = createWebhookRouter({ events: async ({ body }) => { for await (const _ of body) { } return { status: 204 }; } }, { routes: { events: "/events" }, maxStreamItemBytes: 4 });
+const bounded = createWebhookRouter({ events: { POST: async ({ body }) => { for await (const _ of body) { } return { status: 204 }; } } }, { routes: { events: "/events" }, maxStreamItemBytes: 4 });
 if ((await bounded.fetch(new Request("https://host.test/events", { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: '{"event_id":"too-long"}' }))).status !== 400) throw new Error("oversized inbound stream item was accepted");
 const multipartBody = "--frames\r\ncontent-type: application/json\r\n\r\n{\"frame_id\":\"one\"}\r\n--frames\r\ncontent-type: application/json\r\n\r\n{\"frame_id\":\"two\"}\r\n--frames--\r\n";
 const multipartResponse = await router.fetch(new Request("https://host.test/frames", { method: "POST", headers: { "content-type": "multipart/mixed; boundary=frames" }, body: multipartBody }));
@@ -425,10 +426,134 @@ func TestWebhookWithMultipleMethodsUsesOneUnionHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
-	for _, expected := range []string{"EventGetWebhookContext", "EventPostWebhookContext", "readonly event?: (context: EventGetWebhookContext | EventPostWebhookContext)"} {
+	for _, expected := range []string{`readonly "event": {`, `readonly "GET": { readonly context:`, `readonly "POST": { readonly context:`, `readonly "event"?: {`} {
 		if !strings.Contains(webhooks, expected) {
 			t.Fatalf("multi-method webhook source missing %q:\n%s", expected, webhooks)
 		}
+	}
+}
+
+func TestServerPublicCatalogsPreserveExactAndPrototypeSensitiveKeys(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1", "info":{"title":"Exact server identities","version":"1"},
+  "paths":{"/source":{"post":{
+    "operationId":"source-op",
+    "responses":{"204":{"description":"OK"}},
+    "callbacks":{
+      "status-hook":{"{$request.body#/callbackURL}":{"post":{"operationId":"callback-one","responses":{"204":{"description":"OK"}}}}},
+      "status_hook":{"{$request.body#/callbackURL}":{"post":{"operationId":"callback-two","responses":{"204":{"description":"OK"}}}}},
+      "__proto__":{"{$request.body#/callbackURL}":{"post":{"operationId":"callback-three","responses":{"204":{"description":"OK"}}}}},
+      "constructor":{"{$request.body#/callbackURL}":{"post":{"operationId":"callback-four","responses":{"204":{"description":"OK"}}}}}
+    }
+  }}},
+  "webhooks":{
+    "event-hook":{"post":{"operationId":"webhook-one","responses":{"204":{"description":"OK"}}}},
+    "event_hook":{"post":{"operationId":"webhook-two","responses":{"204":{"description":"OK"}}}},
+    "__proto__":{"post":{"operationId":"webhook-three","responses":{"204":{"description":"OK"}}}},
+    "constructor":{"post":{"operationId":"webhook-four","responses":{"204":{"description":"OK"}}}}
+  },
+  "components":{
+    "callbacks":{
+      "component-hook":{"{$request.body#/componentURL}":{"post":{"operationId":"component-one","responses":{"204":{"description":"OK"}}}}},
+      "component_hook":{"{$request.body#/componentURL}":{"post":{"operationId":"component-two","responses":{"204":{"description":"OK"}}}}},
+      "__proto__":{"{$request.body#/componentURL}":{"post":{"operationId":"component-three","responses":{"204":{"description":"OK"}}}}},
+      "constructor":{"{$request.body#/componentURL}":{"post":{"operationId":"component-four","responses":{"204":{"description":"OK"}}}}}
+    },
+    "securitySchemes":{
+      "api-key":{"type":"apiKey","in":"header","name":"x-one"},
+      "api_key":{"type":"apiKey","in":"header","name":"x-two"},
+      "__proto__":{"type":"apiKey","in":"header","name":"x-three"},
+      "constructor":{"type":"apiKey","in":"header","name":"x-four"}
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
+	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
+	for _, key := range []string{"event-hook", "event_hook", "__proto__", "constructor"} {
+		if !strings.Contains(webhooks, `readonly `+quoteTS(key)+`: {`) {
+			t.Fatalf("exact webhook %q missing:\n%s", key, webhooks)
+		}
+	}
+	for _, key := range []string{"status-hook", "status_hook", "__proto__", "constructor", "component-hook", "component_hook"} {
+		if !strings.Contains(callbacks, `readonly `+quoteTS(key)+`: {`) {
+			t.Fatalf("exact callback identity %q missing:\n%s", key, callbacks)
+		}
+	}
+	for _, key := range []string{"api-key", "api_key", "__proto__", "constructor"} {
+		if !strings.Contains(webhooks, `[`+quoteTS(key)+`, Object.fromEntries(`) {
+			t.Fatalf("exact security scheme %q missing from safe runtime map:\n%s", key, webhooks)
+		}
+	}
+
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source")
+	writeTargetArtifacts(t, source, artifacts)
+	if err := os.WriteFile(filepath.Join(source, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Skipf("TypeScript compiler unavailable for exact server identity test: %v", err)
+	}
+	if output, err := exec.Command("node", tsc, "--project", filepath.Join(source, "tsconfig.json")).CombinedOutput(); err != nil {
+		t.Fatalf("compile exact server identity target: %v\n%s", err, output)
+	}
+	outputDirectory := filepath.Join(directory, "output")
+	if err := os.WriteFile(filepath.Join(outputDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import { pathToFileURL } from "node:url";
+const webhookModule = await import(pathToFileURL(process.argv[1]).href);
+const callbackModule = await import(pathToFileURL(process.argv[2]).href);
+const names = ["event-hook", "event_hook", "__proto__", "constructor"];
+const handlers = Object.fromEntries(names.map((name) => [name, { POST: async () => ({ status: 204 }) }]));
+const routes = Object.fromEntries(names.map((name) => [name, "/" + encodeURIComponent(name)]));
+const router = webhookModule.createWebhookRouter(handlers, { routes });
+for (const name of names) {
+  const response = await router.fetch(new Request("https://host.test/" + encodeURIComponent(name), { method: "POST" }));
+  if (response.status !== 204) throw new Error("webhook identity did not dispatch: " + name);
+}
+const expression = "{$request.body#/callbackURL}";
+const callbackNames = ["status-hook", "status_hook", "__proto__", "constructor"];
+const callbackHandlers = Object.fromEntries(callbackNames.map((name) => [name, Object.fromEntries([[expression, { POST: async () => ({ status: 204 }) }]])]));
+const componentExpression = "{$request.body#/componentURL}";
+const componentNames = ["component-hook", "component_hook", "__proto__", "constructor"];
+const componentHandlers = Object.fromEntries(componentNames.map((name) => [name, Object.fromEntries([[componentExpression, { POST: async () => ({ status: 204 }) }]])]));
+const endpoints = callbackModule.createCallbackHandlers({
+  callbacks: Object.fromEntries([["source-op", callbackHandlers]]),
+  componentCallbacks: componentHandlers,
+});
+for (const name of callbackNames) {
+  if (!Object.prototype.hasOwnProperty.call(endpoints.callbacks["source-op"], name)) throw new Error("callback is not an own property: " + name);
+  if ((await endpoints.callbacks["source-op"][name][expression].POST.fetch(new Request("https://host.test/callback", { method: "POST" }))).status !== 204) throw new Error("callback identity did not dispatch: " + name);
+}
+for (const name of componentNames) {
+  if (!Object.prototype.hasOwnProperty.call(endpoints.componentCallbacks, name)) throw new Error("component callback is not an own property: " + name);
+  if ((await endpoints.componentCallbacks[name][componentExpression].POST.fetch(new Request("https://host.test/component", { method: "POST" }))).status !== 204) throw new Error("component callback identity did not dispatch: " + name);
+}
+`
+	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js"), filepath.Join(outputDirectory, "server", "callbacks.js"))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("execute exact server identity runtime test: %v\n%s", err, output)
 	}
 }
 
@@ -455,8 +580,16 @@ func TestServerAddOnDeduplicatesReferencedComponentCallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
-	if strings.Count(callbacks, "export interface OrderStatusCallbackContext") != 1 {
-		t.Fatalf("component callback was emitted more than once:\n%s", callbacks)
+	for _, expected := range []string{
+		`export interface Callbacks`,
+		`readonly "createOrder": {`,
+		`readonly "orderStatus": {`,
+		`export interface ComponentCallbacks`,
+		`readonly "OrderStatus": {`,
+	} {
+		if !strings.Contains(callbacks, expected) {
+			t.Fatalf("callback catalog missing %q:\n%s", expected, callbacks)
+		}
 	}
 }
 

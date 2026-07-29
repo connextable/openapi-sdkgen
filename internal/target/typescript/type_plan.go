@@ -126,6 +126,12 @@ func runtimeJSONExpression(value any) (string, error) {
 			properties = append(properties, runtimeProperty{key: key, value: rendered})
 		}
 		return runtimeObjectExpression(properties), nil
+	case map[string]map[string]any:
+		values := make(map[string]any, len(typed))
+		for key, item := range typed {
+			values[key] = item
+		}
+		return runtimeJSONExpression(values)
 	case []any:
 		items := make([]string, 0, len(typed))
 		for index, item := range typed {

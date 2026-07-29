@@ -330,6 +330,56 @@ if (item.id !== "item-2" || seen.join(",") !== "/orders/latest,/links/eu%20west/
 	}
 }
 
+func TestGeneratedPublicIdentityMapsPreserveExactAndPrototypeSensitiveKeys(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0", "info":{"title":"Exact identities","version":"1"},
+  "paths":{
+    "/source-one":{"get":{"operationId":"source-op","responses":{"200":{"description":"OK","links":{
+      "next-step":{"operationId":"getTarget"},
+      "next_step":{"operationId":"getTarget"},
+      "__proto__":{"operationId":"getTarget"},
+      "constructor":{"operationId":"getTarget"}
+    }}}}},
+    "/source-two":{"get":{"operationId":"source_op","responses":{"200":{"description":"OK","links":{"next-step":{"operationId":"getTarget"}}}}}},
+    "/target":{"get":{"operationId":"getTarget","responses":{"204":{"description":"OK"}}}},
+    "/stream-one":{"get":{"operationId":"tail-log","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
+    "/stream-two":{"get":{"operationId":"tail_log","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
+    "/stream-prototype":{"get":{"operationId":"__proto__","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let targets = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input) => {
+  const path = new URL(String(input)).pathname;
+  if (path === "/source-one" || path === "/source-two") return new Response(null, { status: 200 });
+  if (path === "/target") { targets++; return new Response(null, { status: 204 }); }
+  if (path.startsWith("/stream-")) return new Response('"item"\n', { status: 200, headers: { "content-type": "application/x-ndjson" } });
+  throw new Error("unexpected path " + path);
+} });
+if (JSON.stringify(Object.keys(api.$links).sort()) !== JSON.stringify(["source-op", "source_op"])) throw new Error("link source identities changed");
+if (JSON.stringify(Object.keys(api.$links["source-op"]).sort()) !== JSON.stringify(["__proto__", "constructor", "next-step", "next_step"])) throw new Error("link identities changed");
+if (!Object.prototype.hasOwnProperty.call(api.$links["source-op"], "__proto__")) throw new Error("prototype-sensitive link is not an own property");
+const source = await api.$operations["source-op"].raw();
+for (const name of ["next-step", "next_step", "__proto__", "constructor"]) await api.$links["source-op"][name](source);
+if (targets !== 4) throw new Error("exact-key links did not dispatch");
+if (JSON.stringify(Object.keys(api.$streams).sort()) !== JSON.stringify(["__proto__", "tail-log", "tail_log"])) throw new Error("stream identities changed");
+for (const name of ["tail-log", "tail_log", "__proto__"]) {
+  const values = [];
+  for await (const value of api.$streams[name]()) values.push(value);
+  if (values.join(",") !== "item") throw new Error("stream identity did not dispatch: " + name);
+}
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute exact public identity runtime test: %v\n%s", err, output)
+	}
+}
+
 func TestGeneratedResponseLinksResolveRequestRuntimeExpressions(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.0", "info":{"title":"Request links","version":"1"},
@@ -1270,6 +1320,48 @@ await createClient({ baseURL: "https://api.example.test", credentials, headers: 
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript security runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimePreservesExactAndPrototypeSensitiveSecuritySchemeNames(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0", "info":{"title":"Exact security","version":"1"},
+  "components":{"securitySchemes":{
+    "api-key":{"type":"apiKey","in":"header","name":"x-api-key-one"},
+    "api_key":{"type":"apiKey","in":"header","name":"x-api-key-two"},
+    "__proto__":{"type":"apiKey","in":"header","name":"x-api-key-three"},
+    "constructor":{"type":"apiKey","in":"header","name":"x-api-key-four"}
+  }},
+  "paths":{"/protected":{"get":{"operationId":"readSecure","security":[{"api-key":[],"api_key":[],"__proto__":[],"constructor":[]}],"responses":{"204":{"description":"OK"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const expectedNames = ["__proto__", "api-key", "api_key", "constructor"];
+const api = createClient({
+  baseURL: "https://api.example.test",
+  credentials: ({ alternatives }) => {
+    const alternative = Object.values(alternatives)[0];
+    if (JSON.stringify(alternative.schemes.map(({ name }) => name).sort()) !== JSON.stringify(expectedNames)) throw new Error("security scheme identities changed");
+    return {
+      alternative,
+      values: Object.fromEntries(expectedNames.map((name, index) => [name, { kind: "api-key", value: String(index + 1) }])),
+    };
+  },
+  fetch: async (_input, init) => {
+    const headers = new Headers(init.headers);
+    if (["x-api-key-one", "x-api-key-two", "x-api-key-three", "x-api-key-four"].some((name) => !headers.has(name))) throw new Error("exact security credentials were not applied");
+    return new Response(null, { status: 204 });
+  },
+});
+await api.$operations.readSecure();
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute exact security identity runtime test: %v\n%s", err, output)
 	}
 }
 

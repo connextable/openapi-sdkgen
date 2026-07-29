@@ -1,7 +1,6 @@
 package typescript
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -96,11 +95,11 @@ func securitySchemeDefinition(name string, scheme map[string]any, scopesValue an
 		fields = append(fields, "bearerFormat: "+quoteTS(bearerFormat))
 	}
 	if flows, exists := scheme["flows"]; exists {
-		encoded, err := json.Marshal(flows)
+		encoded, err := runtimeJSONExpression(flows)
 		if err != nil {
 			return "", fmt.Errorf("security scheme %q flows: %w", name, err)
 		}
-		fields = append(fields, "flows: "+string(encoded))
+		fields = append(fields, "flows: "+encoded)
 	}
 	if url, _ := scheme["openIdConnectUrl"].(string); url != "" {
 		fields = append(fields, "openIdConnectUrl: "+quoteTS(url))

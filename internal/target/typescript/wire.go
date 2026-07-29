@@ -129,18 +129,18 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		fields = append(fields, "types: ["+strings.Join(values, ", ")+"]")
 	}
 	if value, exists := schema["const"]; exists {
-		encoded, err := json.Marshal(value)
+		encoded, err := runtimeJSONExpression(value)
 		if err != nil {
 			return "", fmt.Errorf("encode const: %w", err)
 		}
-		fields = append(fields, "constValue: "+string(encoded))
+		fields = append(fields, "constValue: "+encoded)
 	}
 	if values, ok := schema["enum"].([]any); ok && len(values) > 0 {
-		encoded, err := json.Marshal(values)
+		encoded, err := runtimeJSONExpression(values)
 		if err != nil {
 			return "", fmt.Errorf("encode enum: %w", err)
 		}
-		fields = append(fields, "enumValues: "+string(encoded))
+		fields = append(fields, "enumValues: "+encoded)
 	}
 	exclusiveMaximum, maximumIsExclusive := schema["exclusiveMaximum"].(bool)
 	exclusiveMinimum, minimumIsExclusive := schema["exclusiveMinimum"].(bool)
@@ -208,11 +208,11 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		fields = append(fields, "contentSchema: "+descriptor)
 	}
 	if xml, ok := schema["xml"].(map[string]any); ok && len(xml) > 0 {
-		encoded, err := json.Marshal(xml)
+		encoded, err := runtimeJSONExpression(xml)
 		if err != nil {
 			return "", fmt.Errorf("encode XML Object: %w", err)
 		}
-		fields = append(fields, "xml: "+string(encoded))
+		fields = append(fields, "xml: "+encoded)
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if len(properties) > 0 {

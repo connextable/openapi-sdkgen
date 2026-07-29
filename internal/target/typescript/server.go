@@ -2,14 +2,11 @@ package typescript
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 type webhookDefinition struct {
@@ -29,19 +26,22 @@ type webhookDefinition struct {
 }
 
 type callbackDefinition struct {
-	name         string
-	typeName     string
-	expression   string
-	operationID  string
-	method       string
-	bodyType     string
-	hasBody      bool
-	bodyRequired bool
-	bodyPlans    string
-	parameters   string
-	responseType string
-	responsePlan string
-	security     any
+	name              string
+	sourceOperationID string
+	componentName     string
+	callbackName      string
+	typeName          string
+	expression        string
+	operationID       string
+	method            string
+	bodyType          string
+	hasBody           bool
+	bodyRequired      bool
+	bodyPlans         string
+	parameters        string
+	responseType      string
+	responsePlan      string
+	security          any
 }
 
 func emitServerArtifacts(document *ir.Document) ([]Artifact, error) {
@@ -70,10 +70,9 @@ func emitServerArtifacts(document *ir.Document) ([]Artifact, error) {
 
 func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	result := make([]callbackDefinition, 0)
-	seenNames := make(map[string]callbackDefinition)
 	for _, operation := range document.Operations {
 		callbacks, _ := operation.Raw["callbacks"].(map[string]any)
-		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"))
+		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operation.OperationID, "")
 		if err != nil {
 			return nil, err
 		}
@@ -81,27 +80,19 @@ func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	}
 	components, _ := document.Raw["components"].(map[string]any)
 	componentCallbacks, _ := components["callbacks"].(map[string]any)
-	definitions, err := collectCallbackMap(document, componentCallbacks, openAPIPointer("components", "callbacks"))
-	if err != nil {
-		return nil, err
-	}
-	result = append(result, definitions...)
-	unique := make([]callbackDefinition, 0, len(result))
-	for _, callback := range result {
-		if previous, exists := seenNames[callback.typeName]; exists {
-			if previous.expression == callback.expression && previous.method == callback.method && previous.operationID == callback.operationID && previous.bodyType == callback.bodyType && previous.bodyPlans == callback.bodyPlans && previous.responseType == callback.responseType && reflect.DeepEqual(previous.security, callback.security) {
-				continue
-			}
-			return nil, fmt.Errorf("%s and %s both generate callback symbol %s", previous.name, callback.name, callback.typeName)
+	for _, componentName := range sortedAnyKeys(componentCallbacks) {
+		value := map[string]any{componentName: componentCallbacks[componentName]}
+		definitions, err := collectCallbackMap(document, value, openAPIPointer("components", "callbacks"), "", componentName)
+		if err != nil {
+			return nil, err
 		}
-		seenNames[callback.typeName] = callback
-		unique = append(unique, callback)
+		result = append(result, definitions...)
 	}
-	sort.Slice(unique, func(i, j int) bool { return unique[i].typeName < unique[j].typeName })
-	return unique, nil
+	sort.Slice(result, func(i, j int) bool { return callbackIdentity(result[i]) < callbackIdentity(result[j]) })
+	return result, nil
 }
 
-func collectCallbackMap(document *ir.Document, values map[string]any, path string) ([]callbackDefinition, error) {
+func collectCallbackMap(document *ir.Document, values map[string]any, path, sourceOperationID, componentName string) ([]callbackDefinition, error) {
 	names := sortedAnyKeys(values)
 	result := make([]callbackDefinition, 0, len(names))
 	for _, name := range names {
@@ -110,10 +101,6 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path strin
 			return nil, fmt.Errorf("%s must be a Callback Object", appendOpenAPIPointer(path, name))
 		}
 		resolved, err := resolveComponentObject(document, callback, "callbacks")
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", appendOpenAPIPointer(path, name), err)
-		}
-		typeName, err := naming.Public(name)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", appendOpenAPIPointer(path, name), err)
 		}
@@ -148,11 +135,151 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path strin
 				if security == nil {
 					security = document.Raw["security"]
 				}
-				result = append(result, callbackDefinition{name: appendOpenAPIPointer(path, name), typeName: typeName, expression: expression, operationID: operationID, method: strings.ToUpper(method), bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, responseType: responseType, responsePlan: responsePlan, security: security})
+				identity := sourceOperationID + "\x00" + componentName + "\x00" + name + "\x00" + expression + "\x00" + strings.ToUpper(method)
+				result = append(result, callbackDefinition{
+					name: appendOpenAPIPointer(path, name), sourceOperationID: sourceOperationID, componentName: componentName, callbackName: name,
+					typeName: stablePrivateIdentifier("callback-type", identity), expression: expression, operationID: operationID, method: strings.ToUpper(method),
+					bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters,
+					responseType: responseType, responsePlan: responsePlan, security: security,
+				})
 			}
 		}
 	}
 	return result, nil
+}
+
+func callbackIdentity(callback callbackDefinition) string {
+	return callback.sourceOperationID + "\x00" + callback.componentName + "\x00" + callback.callbackName + "\x00" + callback.expression + "\x00" + callback.method
+}
+
+type callbackCatalogNode struct {
+	children map[string]*callbackCatalogNode
+	callback *callbackDefinition
+}
+
+func buildCallbackCatalog(callbacks []callbackDefinition, components bool) *callbackCatalogNode {
+	root := &callbackCatalogNode{children: make(map[string]*callbackCatalogNode)}
+	for index := range callbacks {
+		callback := &callbacks[index]
+		if (callback.componentName != "") != components {
+			continue
+		}
+		keys := []string{callback.sourceOperationID, callback.callbackName, callback.expression, callback.method}
+		if components {
+			keys = []string{callback.componentName, callback.expression, callback.method}
+		}
+		node := root
+		for _, key := range keys {
+			if node.children[key] == nil {
+				node.children[key] = &callbackCatalogNode{children: make(map[string]*callbackCatalogNode)}
+			}
+			node = node.children[key]
+		}
+		node.callback = callback
+	}
+	return root
+}
+
+func callbackCatalogKeys(node *callbackCatalogNode) []string {
+	keys := make([]string, 0, len(node.children))
+	for key := range node.children {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func emitCallbackTypeCatalog(output *bytes.Buffer, name string, root *callbackCatalogNode) {
+	fmt.Fprintf(output, "export interface %s ", name)
+	emitCallbackCatalogObject(output, root, nil, name, callbackCatalogTypes)
+	output.WriteString("\n\n")
+}
+
+type callbackCatalogMode int
+
+const (
+	callbackCatalogTypes callbackCatalogMode = iota
+	callbackCatalogHandlers
+	callbackCatalogEndpoints
+	callbackCatalogPathParams
+)
+
+func emitCallbackCatalogObject(output *bytes.Buffer, node *callbackCatalogNode, path []string, catalog string, mode callbackCatalogMode) {
+	output.WriteString("{\n")
+	indent := strings.Repeat("  ", len(path)+1)
+	for _, key := range callbackCatalogKeys(node) {
+		child := node.children[key]
+		optional := ""
+		if mode == callbackCatalogHandlers || mode == callbackCatalogPathParams {
+			optional = "?"
+		}
+		fmt.Fprintf(output, "%sreadonly %s%s: ", indent, quoteTS(key), optional)
+		if child.callback != nil {
+			slot := catalog
+			for _, item := range append(path, key) {
+				slot += "[" + quoteTS(item) + "]"
+			}
+			switch mode {
+			case callbackCatalogTypes:
+				fmt.Fprintf(output, "{ readonly context: %sContext; readonly response: %sResponse }", child.callback.typeName, child.callback.typeName)
+			case callbackCatalogHandlers:
+				fmt.Fprintf(output, "(context: %s[\"context\"]) => %s[\"response\"] | Promise<%s[\"response\"]>", slot, slot, slot)
+			case callbackCatalogEndpoints:
+				output.WriteString("CallbackEndpoint")
+			case callbackCatalogPathParams:
+				output.WriteString("Readonly<Record<string, string>>")
+			}
+		} else {
+			emitCallbackCatalogObject(output, child, append(path, key), catalog, mode)
+		}
+		output.WriteString("\n")
+	}
+	output.WriteString(strings.Repeat("  ", len(path)) + "}")
+}
+
+func callbackCatalogPath(callback callbackDefinition) (string, []string) {
+	if callback.componentName != "" {
+		return "ComponentCallbacks", []string{callback.componentName, callback.expression, callback.method}
+	}
+	return "Callbacks", []string{callback.sourceOperationID, callback.callbackName, callback.expression, callback.method}
+}
+
+func callbackAccess(root string, callback callbackDefinition) string {
+	_, path := callbackCatalogPath(callback)
+	for _, key := range path {
+		root += "?." + "[" + quoteTS(key) + "]"
+	}
+	return root
+}
+
+func callbackDefinitionSymbol(callback callbackDefinition) string {
+	return stablePrivateIdentifier("callback-definition", callbackIdentity(callback))
+}
+
+func callbackEndpointSymbol(callback callbackDefinition) string {
+	return stablePrivateIdentifier("callback-endpoint", callbackIdentity(callback))
+}
+
+func callbackRootField(callback callbackDefinition) string {
+	if callback.componentName != "" {
+		return "componentCallbacks"
+	}
+	return "callbacks"
+}
+
+func callbackRuntimeCatalog(root *callbackCatalogNode) string {
+	properties := make([]runtimeProperty, 0, len(root.children))
+	for _, key := range callbackCatalogKeys(root) {
+		child := root.children[key]
+		value := ""
+		if child.callback != nil {
+			value = callbackEndpointSymbol(*child.callback)
+		} else {
+			value = callbackRuntimeCatalog(child)
+		}
+		properties = append(properties, runtimeProperty{key: key, value: value})
+	}
+	return runtimeObjectExpression(properties)
 }
 
 func inboundResponseType(document *ir.Document, operation map[string]any, path string) (string, error) {
@@ -297,62 +424,63 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	if err := emitInboundSecuritySchemes(&output, document); err != nil {
 		return nil, err
 	}
+	operationCatalog := buildCallbackCatalog(callbacks, false)
+	componentCatalog := buildCallbackCatalog(callbacks, true)
 	for _, callback := range callbacks {
 		fmt.Fprintf(&output, "/** Host-owned Callback endpoint for URL expression %s. No route is generated. */\n", quoteTS(callback.expression))
-		fmt.Fprintf(&output, "export interface %sCallbackContext extends InboundRequestContext {\n", callback.typeName)
+		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n", callback.typeName)
 		if callback.hasBody {
 			fmt.Fprintf(&output, "  readonly body: %s\n", callback.bodyType)
 		} else {
 			output.WriteString("  readonly body: undefined\n")
 		}
 		output.WriteString("}\n")
-		fmt.Fprintf(&output, "export type %sCallbackResponse = %s\n", callback.typeName, callback.responseType)
+		fmt.Fprintf(&output, "type %sResponse = %s\n", callback.typeName, callback.responseType)
 	}
+	emitCallbackTypeCatalog(&output, "Callbacks", operationCatalog)
+	emitCallbackTypeCatalog(&output, "ComponentCallbacks", componentCatalog)
 	for _, callback := range callbacks {
-		security, err := json.Marshal(callback.security)
+		security, err := runtimeJSONExpression(callback.security)
 		if err != nil {
 			return nil, fmt.Errorf("%s security metadata: %w", callback.name, err)
 		}
-		property, err := naming.Property(callback.typeName)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprintf(&output, "const %sCallbackDefinition = { operationID: %s, method: %s, parameters: %s satisfies readonly InboundParameterDefinition[], responses: %s, security: %s } as const\n", property, quoteTS(callback.operationID), quoteTS(callback.method), callback.parameters, callback.responsePlan, security)
+		fmt.Fprintf(&output, "const %s = { operationID: %s, method: %s, parameters: %s satisfies readonly InboundParameterDefinition[], responses: %s, security: %s } as const\n", callbackDefinitionSymbol(callback), quoteTS(callback.operationID), quoteTS(callback.method), callback.parameters, callback.responsePlan, security)
 	}
-	output.WriteString("\n/** Application handlers keyed by generated Callback names. */\nexport interface CallbackHandlers {\n")
+	output.WriteString("\n/** Application handlers keyed by exact Callback identity. */\nexport interface CallbackHandlers {\n  readonly callbacks?: ")
+	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogHandlers)
+	output.WriteString("\n  readonly componentCallbacks?: ")
+	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogHandlers)
+	output.WriteString("\n}\n\n/** Optional host authentication, media codecs, and host-bound path parameters for generated Callback endpoints. */\nexport interface CallbackHandlerOptions {\n  readonly authenticate?: Authenticate | undefined\n  readonly codecs?: Readonly<Record<string, MediaCodec<unknown>>> | undefined\n  readonly maxStreamItemBytes?: number | undefined\n  readonly pathParams?: {\n    readonly callbacks?: ")
+	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogPathParams)
+	output.WriteString("\n    readonly componentCallbacks?: ")
+	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogPathParams)
+	output.WriteString("\n  } | undefined\n}\n\n/** Fetch-compatible endpoint for one host-mounted Callback route. */\nexport interface CallbackEndpoint {\n  fetch(request: Request): Promise<Response>\n}\n\n/** Callback endpoints preserving every exact source identity dimension. */\nexport interface CallbackEndpoints {\n  readonly callbacks: ")
+	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogEndpoints)
+	output.WriteString("\n  readonly componentCallbacks: ")
+	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogEndpoints)
+	output.WriteString("\n}\n\n/**\n * Creates Fetch-native endpoints for dynamic OpenAPI Callback URLs.\n * The host chooses each concrete route and mounts the matching endpoint.\n */\nexport function createCallbackHandlers(handlers: CallbackHandlers, options: CallbackHandlerOptions = {}): CallbackEndpoints {\n  const inboundCodecs = normalizeInboundMediaCodecs(options.codecs)\n")
 	for _, callback := range callbacks {
-		property, err := naming.Property(callback.typeName)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprintf(&output, "  readonly %s?: (context: %sCallbackContext) => %sCallbackResponse | Promise<%sCallbackResponse>\n", property, callback.typeName, callback.typeName, callback.typeName)
-	}
-	output.WriteString("}\n\n/** Optional host authentication, media codecs, and host-bound path parameters for generated Callback endpoints. */\nexport interface CallbackHandlerOptions {\n  readonly authenticate?: Authenticate | undefined\n  readonly codecs?: Readonly<Record<string, MediaCodec<unknown>>> | undefined\n  readonly maxStreamItemBytes?: number | undefined\n  readonly pathParams?: Readonly<Record<string, Readonly<Record<string, string>>>> | undefined\n}\n\n/** Fetch-compatible endpoint for one host-mounted Callback route. */\nexport interface CallbackEndpoint {\n  fetch(request: Request): Promise<Response>\n}\n\n/** Named Callback endpoints ready for host route mounting. */\nexport interface CallbackEndpoints {\n")
-	for _, callback := range callbacks {
-		property, _ := naming.Property(callback.typeName)
-		fmt.Fprintf(&output, "  readonly %s: CallbackEndpoint\n", property)
-	}
-	output.WriteString("}\n\n/**\n * Creates Fetch-native endpoints for dynamic OpenAPI Callback URLs.\n * The host chooses each concrete route and mounts the matching endpoint.\n */\nexport function createCallbackHandlers(handlers: CallbackHandlers, options: CallbackHandlerOptions = {}): CallbackEndpoints {\n  const inboundCodecs = normalizeInboundMediaCodecs(options.codecs)\n  return {\n")
-	for _, callback := range callbacks {
-		property, _ := naming.Property(callback.typeName)
-		fmt.Fprintf(&output, "    %s: {\n      async fetch(request: Request): Promise<Response> {\n", property)
-		fmt.Fprintf(&output, "        if (request.method !== %s) return new Response(\"Method Not Allowed\", { status: 405, headers: { allow: %s } })\n", quoteTS(callback.method), quoteTS(callback.method))
-		fmt.Fprintf(&output, "        const handler = handlers.%s\n        if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", property)
-		fmt.Fprintf(&output, "        let params: InboundParameterValues\n        try { params = await decodeInboundParameters(request, %sCallbackDefinition.parameters, inputSchemas, inputWireSchemas, inboundCodecs, options.pathParams?.%s) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %sCallbackDefinition.operationID, method: %sCallbackDefinition.method, path: new URL(request.url).pathname, params, security: %sCallbackDefinition.security, securityCandidates: collectInboundSecurityCandidates(request, %sCallbackDefinition.security, securitySchemes) }\n", property, property, property, property, property, property)
-		output.WriteString("        if (requiresInboundAuthentication(context.security)) {\n          if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n          try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n          catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n        }\n")
+		definition := callbackDefinitionSymbol(callback)
+		handler := callbackAccess("handlers."+callbackRootField(callback), callback)
+		pathParams := callbackAccess("options.pathParams?."+callbackRootField(callback), callback)
+		fmt.Fprintf(&output, "  const %s: CallbackEndpoint = {\n    async fetch(request: Request): Promise<Response> {\n", callbackEndpointSymbol(callback))
+		fmt.Fprintf(&output, "      if (request.method !== %s) return new Response(\"Method Not Allowed\", { status: 405, headers: { allow: %s } })\n", quoteTS(callback.method), quoteTS(callback.method))
+		fmt.Fprintf(&output, "      const handler = %s\n      if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", handler)
+		fmt.Fprintf(&output, "      let params: InboundParameterValues\n      try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %s) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n      const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: new URL(request.url).pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", definition, pathParams, definition, definition, definition, definition)
+		output.WriteString("      if (requiresInboundAuthentication(context.security)) {\n        if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n        try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n        catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n      }\n")
 		if callback.hasBody {
-			output.WriteString("        try {\n")
-			fmt.Fprintf(&output, "          const body = await decodeInboundBody(request, { required: %t, plans: %s, schemas: inputSchemas, wireSchemas: inputWireSchemas, codecs: inboundCodecs, maxStreamItemBytes: options.maxStreamItemBytes }) as %s\n", callback.bodyRequired, callback.bodyPlans, callback.bodyType)
-			fmt.Fprintf(&output, "          return await responseFromHandler(await handler({ ...context, body }), { schemas: outputSchemas, responses: %sCallbackDefinition.responses, codecs: inboundCodecs })\n", property)
-			output.WriteString("        } catch (error) {\n          if (error instanceof InboundRequestError) return error.response\n          return new Response(\"Internal Server Error\", { status: 500 })\n        }\n")
+			output.WriteString("      try {\n")
+			fmt.Fprintf(&output, "        const body = await decodeInboundBody(request, { required: %t, plans: %s, schemas: inputSchemas, wireSchemas: inputWireSchemas, codecs: inboundCodecs, maxStreamItemBytes: options.maxStreamItemBytes }) as %s\n", callback.bodyRequired, callback.bodyPlans, callback.bodyType)
+			fmt.Fprintf(&output, "        return await responseFromHandler(await handler({ ...context, body }), { schemas: outputSchemas, responses: %s.responses, codecs: inboundCodecs })\n", definition)
+			output.WriteString("      } catch (error) {\n        if (error instanceof InboundRequestError) return error.response\n        return new Response(\"Internal Server Error\", { status: 500 })\n      }\n")
 		} else {
-			output.WriteString("        try {\n")
-			fmt.Fprintf(&output, "          return await responseFromHandler(await handler({ ...context, body: undefined }), { schemas: outputSchemas, responses: %sCallbackDefinition.responses, codecs: inboundCodecs })\n", property)
-			output.WriteString("        } catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n")
+			output.WriteString("      try {\n")
+			fmt.Fprintf(&output, "        return await responseFromHandler(await handler({ ...context, body: undefined }), { schemas: outputSchemas, responses: %s.responses, codecs: inboundCodecs })\n", definition)
+			output.WriteString("      } catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n")
 		}
-		output.WriteString("      },\n    },\n")
+		output.WriteString("    },\n  }\n")
 	}
-	output.WriteString("  }\n}\n")
+	fmt.Fprintf(&output, "  return { callbacks: %s, componentCallbacks: %s }\n}\n", callbackRuntimeCatalog(operationCatalog), callbackRuntimeCatalog(componentCatalog))
 	return output.Bytes(), nil
 }
 
@@ -364,14 +492,6 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 		item, ok := values[name].(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%s must be a Path Item Object", openAPIPointer("webhooks", name))
-		}
-		property, err := naming.Property(name)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", openAPIPointer("webhooks", name), err)
-		}
-		typeName, err := naming.Public(name)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", openAPIPointer("webhooks", name), err)
 		}
 		for _, method := range serverHTTPMethods {
 			operation, ok := item[method].(map[string]any)
@@ -399,38 +519,19 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 			if security == nil {
 				security = document.Raw["security"]
 			}
+			methodName := strings.ToUpper(method)
 			result = append(result, webhookDefinition{
-				name: name, property: property, typeName: typeName, operationID: operationID,
-				method: strings.ToUpper(method), bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, responseType: responseType, responsePlan: responsePlan, security: security,
+				name: name, property: name, typeName: stablePrivateIdentifier("webhook-type", name+"\x00"+methodName), operationID: operationID,
+				method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, responseType: responseType, responsePlan: responsePlan, security: security,
 			})
 		}
 	}
-	counts := make(map[string]int, len(result))
-	for _, webhook := range result {
-		counts[webhook.name]++
-	}
-	for index := range result {
-		if counts[result[index].name] == 1 {
-			continue
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].name == result[j].name {
+			return result[i].method < result[j].method
 		}
-		methodName, err := naming.Public(strings.ToLower(result[index].method))
-		if err != nil {
-			return nil, err
-		}
-		result[index].typeName += methodName
-	}
-	properties := make(map[string]string, len(result))
-	types := make(map[string]string, len(result))
-	for _, webhook := range result {
-		if previous, exists := properties[webhook.property]; exists && previous != webhook.name {
-			return nil, fmt.Errorf("%s and %s both generate Webhook handler name %s", openAPIPointer("webhooks", previous), openAPIPointer("webhooks", webhook.name), webhook.property)
-		}
-		if previous, exists := types[webhook.typeName]; exists && previous != webhook.name {
-			return nil, fmt.Errorf("%s and %s both generate Webhook type %s", openAPIPointer("webhooks", previous), openAPIPointer("webhooks", webhook.name), webhook.typeName)
-		}
-		properties[webhook.property] = webhook.name
-		types[webhook.typeName] = webhook.name
-	}
+		return result[i].name < result[j].name
+	})
 	return result, nil
 }
 
@@ -514,7 +615,7 @@ func inboundBodyPlan(document *ir.Document, mediaType string, media map[string]a
 			return "", "", fmt.Errorf("%s/requestBody/content/%s/schema: %w", path, mediaType, err)
 		}
 	}
-	schemaSource, err := json.Marshal(inboundSchemaValue(schemaValue))
+	schemaSource, err := runtimeJSONExpression(inboundSchemaValue(schemaValue))
 	if err != nil {
 		return "", "", fmt.Errorf("%s/requestBody/content/%s/schema: encode validator schema: %w", path, mediaType, err)
 	}
@@ -529,7 +630,7 @@ func inboundBodyPlan(document *ir.Document, mediaType string, media map[string]a
 	if stream {
 		value = "AsyncIterable<" + value + ">"
 	}
-	plan := "{ contentType: " + quoteTS(mediaType) + ", binary: " + fmt.Sprint(isBinaryMedia(mediaType, schema)) + ", stream: " + fmt.Sprint(stream) + ", itemContentType: " + quoteTS(itemContentType) + ", schema: " + string(schemaSource) + ", wireSchema: " + wireSchema + " }"
+	plan := "{ contentType: " + quoteTS(mediaType) + ", binary: " + fmt.Sprint(isBinaryMedia(mediaType, schema)) + ", stream: " + fmt.Sprint(stream) + ", itemContentType: " + quoteTS(itemContentType) + ", schema: " + schemaSource + ", wireSchema: " + wireSchema + " }"
 	encodings, err := requestBodyWireEncodings(document, media)
 	if err != nil {
 		return "", "", fmt.Errorf("%s/requestBody/content/%s/encoding: %w", path, mediaType, err)
@@ -564,7 +665,7 @@ func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[
 		if parameter.Location == "path" && !allowPath {
 			return "", fmt.Errorf("%s/parameters/%s: server add-on requires host route path binding for inbound path parameters", path, parameter.Name)
 		}
-		schema, err := json.Marshal(parameter.Schema)
+		schema, err := runtimeJSONExpression(parameter.Schema)
 		if err != nil {
 			return "", fmt.Errorf("%s/parameters/%s: encode schema: %w", path, parameter.Name, err)
 		}
@@ -572,7 +673,7 @@ func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[
 		if err != nil {
 			return "", fmt.Errorf("%s/parameters/%s: encode wire schema: %w", path, parameter.Name, err)
 		}
-		entry := "{ location: " + quoteTS(parameter.Location) + ", name: " + quoteTS(parameter.Name) + ", property: " + quoteTS(parameter.Property) + ", style: " + quoteTS(parameter.Style) + ", explode: " + fmt.Sprint(parameter.Explode) + ", allowReserved: " + fmt.Sprint(parameter.AllowReserved) + ", required: " + fmt.Sprint(parameter.Required) + ", schema: " + string(schema) + ", wireSchema: " + wireSchema
+		entry := "{ location: " + quoteTS(parameter.Location) + ", name: " + quoteTS(parameter.Name) + ", property: " + quoteTS(parameter.Property) + ", style: " + quoteTS(parameter.Style) + ", explode: " + fmt.Sprint(parameter.Explode) + ", allowReserved: " + fmt.Sprint(parameter.AllowReserved) + ", required: " + fmt.Sprint(parameter.Required) + ", schema: " + schema + ", wireSchema: " + wireSchema
 		if parameter.ContentType != "" {
 			entry += ", contentType: " + quoteTS(parameter.ContentType)
 		}
@@ -607,7 +708,7 @@ func (definition webhookDefinition) bodyPlansOrEmpty() string {
 }
 
 func emitInboundSchemas(output *bytes.Buffer, document *ir.Document) error {
-	schemas, err := json.Marshal(document.ComponentSchemas)
+	schemas, err := runtimeJSONExpression(document.ComponentSchemas)
 	if err != nil {
 		return fmt.Errorf("encode inbound component schemas: %w", err)
 	}
@@ -618,7 +719,7 @@ func emitInboundSchemas(output *bytes.Buffer, document *ir.Document) error {
 func emitInboundSecuritySchemes(output *bytes.Buffer, document *ir.Document) error {
 	components, _ := document.Raw["components"].(map[string]any)
 	schemes, _ := components["securitySchemes"].(map[string]any)
-	encoded, err := json.Marshal(schemes)
+	encoded, err := runtimeJSONExpression(schemes)
 	if err != nil {
 		return fmt.Errorf("encode inbound security schemes: %w", err)
 	}
@@ -647,28 +748,34 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 		return nil, err
 	}
 	for _, webhook := range webhooks {
-		fmt.Fprintf(&output, "export interface %sWebhookContext extends InboundRequestContext {\n", webhook.typeName)
+		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n", webhook.typeName)
 		if webhook.hasBody {
 			fmt.Fprintf(&output, "  readonly body: %s\n", webhook.bodyType)
 		} else {
 			output.WriteString("  readonly body: undefined\n")
 		}
 		output.WriteString("}\n")
-		fmt.Fprintf(&output, "export type %sWebhookResponse = %s\n\n", webhook.typeName, webhook.responseType)
+		fmt.Fprintf(&output, "type %sResponse = %s\n\n", webhook.typeName, webhook.responseType)
 	}
+	output.WriteString("/** Type catalog keyed by exact root Webhook Object name and HTTP method. */\n")
+	output.WriteString("export interface Webhooks {\n")
+	for _, name := range webhookHandlerProperties(webhooks) {
+		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(name))
+		for _, webhook := range webhooksForProperty(webhooks, name) {
+			fmt.Fprintf(&output, "    readonly %s: { readonly context: %sContext; readonly response: %sResponse }\n", quoteTS(webhook.method), webhook.typeName, webhook.typeName)
+		}
+		output.WriteString("  }\n")
+	}
+	output.WriteString("}\n\n")
 	output.WriteString("/** Handlers keyed by each OpenAPI root Webhook Object name. */\n")
 	output.WriteString("export interface WebhookHandlers {\n")
-	for _, property := range webhookHandlerProperties(webhooks) {
-		definitions := webhooksForProperty(webhooks, property)
-		contexts := make([]string, 0, len(definitions))
-		responses := make([]string, 0, len(definitions))
-		for _, webhook := range definitions {
-			contexts = append(contexts, webhook.typeName+"WebhookContext")
-			responses = append(responses, webhook.typeName+"WebhookResponse")
+	for _, name := range webhookHandlerProperties(webhooks) {
+		fmt.Fprintf(&output, "  readonly %s?: {\n", quoteTS(name))
+		for _, webhook := range webhooksForProperty(webhooks, name) {
+			slot := "Webhooks[" + quoteTS(name) + "][" + quoteTS(webhook.method) + "]"
+			fmt.Fprintf(&output, "    readonly %s?: (context: %s[\"context\"]) => %s[\"response\"] | Promise<%s[\"response\"]>\n", quoteTS(webhook.method), slot, slot, slot)
 		}
-		contextType := strings.Join(contexts, " | ")
-		responseType := strings.Join(responses, " | ")
-		fmt.Fprintf(&output, "  readonly %s?: (context: %s) => %s | Promise<%s>\n", property, contextType, responseType, responseType)
+		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n\n")
 	output.WriteString("/** Concrete host paths keyed by generated Webhook handler name. */\n")
@@ -678,7 +785,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 	output.WriteString("/** Fetch-compatible generated inbound Webhook router. */\n")
 	output.WriteString("export interface WebhookRouter {\n  fetch(request: Request): Promise<Response>\n}\n\n")
 	for _, webhook := range webhooks {
-		security, err := json.Marshal(webhook.security)
+		security, err := runtimeJSONExpression(webhook.security)
 		if err != nil {
 			return nil, fmt.Errorf("%s security metadata: %w", openAPIPointer("webhooks", webhook.name), err)
 		}
@@ -691,8 +798,8 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 	output.WriteString("export function createWebhookRouter(handlers: WebhookHandlers, options: WebhookRouterOptions): WebhookRouter {\n")
 	output.WriteString("  const routes = options.routes\n  const inboundCodecs = normalizeInboundMediaCodecs(options.codecs)\n  const registrations = new Set<string>()\n")
 	for _, webhook := range webhooks {
-		fmt.Fprintf(&output, "  if (handlers.%s !== undefined) {\n", webhook.property)
-		fmt.Fprintf(&output, "    const path = routes.%s\n", webhook.property)
+		fmt.Fprintf(&output, "  if (handlers[%s]?.[%s] !== undefined) {\n", quoteTS(webhook.name), quoteTS(webhook.method))
+		fmt.Fprintf(&output, "    const path = routes[%s]\n", quoteTS(webhook.name))
 		fmt.Fprintf(&output, "    if (typeof path !== \"string\" || !path.startsWith(\"/\") || path.includes(\"?\") || path.includes(\"#\")) throw new TypeError(%s)\n", quoteTS("Webhook route for "+webhook.name+" must be an absolute path without query or fragment"))
 		fmt.Fprintf(&output, "    const key = %s + \" \" + path\n", quoteTS(webhook.method))
 		fmt.Fprintf(&output, "    if (registrations.has(key)) throw new TypeError(%s + key)\n", quoteTS("Duplicate generated Webhook route: "))
@@ -700,8 +807,8 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 	}
 	output.WriteString("  return {\n    async fetch(request: Request): Promise<Response> {\n      const pathname = new URL(request.url).pathname\n")
 	for _, webhook := range webhooks {
-		fmt.Fprintf(&output, "      const %sPathParameters = matchInboundRoute(routes.%s, pathname)\n      if (request.method === %s && %sPathParameters !== undefined) {\n", webhookDefinitionSymbol(webhook), webhook.property, quoteTS(webhook.method), webhookDefinitionSymbol(webhook))
-		fmt.Fprintf(&output, "        const handler = handlers.%s\n", webhook.property)
+		fmt.Fprintf(&output, "      const %sPathParameters = matchInboundRoute(routes[%s], pathname)\n      if (request.method === %s && %sPathParameters !== undefined) {\n", webhookDefinitionSymbol(webhook), quoteTS(webhook.name), quoteTS(webhook.method), webhookDefinitionSymbol(webhook))
+		fmt.Fprintf(&output, "        const handler = handlers[%s]?.[%s]\n", quoteTS(webhook.name), quoteTS(webhook.method))
 		output.WriteString("        if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n")
 		symbol := webhookDefinitionSymbol(webhook)
 		fmt.Fprintf(&output, "        let params: InboundParameterValues\n        try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %sPathParameters) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", symbol, symbol, symbol, symbol, symbol, symbol)
@@ -723,11 +830,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 }
 
 func webhookDefinitionSymbol(webhook webhookDefinition) string {
-	property, err := naming.Property(webhook.typeName)
-	if err != nil {
-		return webhook.property
-	}
-	return property + "Webhook"
+	return stablePrivateIdentifier("webhook-definition", webhook.name+"\x00"+webhook.method)
 }
 
 func webhookHandlerProperties(webhooks []webhookDefinition) []string {
@@ -865,17 +968,17 @@ async function decodeInboundParameterContent(raw: unknown, definition: InboundPa
 
 async function decodeInboundParameterForm(source: string, schema: InboundSchema, schemas: InboundSchemas): Promise<unknown> {
   const parsed = new URLSearchParams(source)
-  const value: Record<string, unknown> = {}
+  const value = Object.create(null) as Record<string, unknown>
   for (const [name, entry] of parsed) {
     const previous = value[name]
-    value[name] = previous === undefined ? entry : Array.isArray(previous) ? [...previous, entry] : [previous, entry]
+    defineOwnDataProperty(value, name, previous === undefined ? entry : Array.isArray(previous) ? [...previous, entry] : [previous, entry])
   }
   return decodeInboundFormValue(value, schema, schemas)
 }
 
 /** Reconstructs an object encoded with OpenAPI simple, label, matrix, or form parameter styles. */
 function decodeInboundSerializedObject(source: string | undefined, definition: InboundParameterDefinition, properties: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-  if (source === undefined) return {}
+  if (source === undefined) return Object.create(null) as Readonly<Record<string, unknown>>
   let pairs: readonly (readonly [string, string])[]
   if (definition.style === "matrix") {
     if (definition.explode) pairs = source.split(";").filter(Boolean).flatMap((entry) => splitInboundParameterPair(entry))
@@ -886,10 +989,10 @@ function decodeInboundSerializedObject(source: string | undefined, definition: I
   } else {
     pairs = definition.explode ? source.split(",").flatMap((entry) => splitInboundParameterPair(entry)) : splitInboundParameterTokens(source)
   }
-  const result: Record<string, unknown> = {}
+  const result = Object.create(null) as Record<string, unknown>
   for (const [name, value] of pairs) {
     const property = properties[name]
-    result[name] = isInboundSchema(property) ? decodeInboundParameterValue(value, property) : value
+    defineOwnDataProperty(result, name, isInboundSchema(property) ? decodeInboundParameterValue(value, property) : value)
   }
   return result
 }
@@ -909,21 +1012,21 @@ function splitInboundParameterTokens(value: string): readonly (readonly [string,
 function decodeInboundQueryObject(url: URL, definition: InboundParameterDefinition, schemas: InboundSchemas): Readonly<Record<string, unknown>> {
   const schema = resolveInboundSchema(definition.schema, schemas)
   const properties = isRecord(schema["properties"]) ? schema["properties"] : {}
-  const result: Record<string, unknown> = {}
+  const result = Object.create(null) as Record<string, unknown>
   if (definition.style === "deepObject") {
     const prefix = definition.name + "["
     for (const [name, value] of url.searchParams) {
       if (!name.startsWith(prefix) || !name.endsWith("]")) continue
       const property = name.slice(prefix.length, -1)
       const propertySchema = properties[property]
-      result[property] = isInboundSchema(propertySchema) ? decodeInboundParameterValue(value, propertySchema) : value
+      defineOwnDataProperty(result, property, isInboundSchema(propertySchema) ? decodeInboundParameterValue(value, propertySchema) : value)
     }
     return result
   }
   for (const [property, propertySchema] of Object.entries(properties)) {
     const values = url.searchParams.getAll(property)
     if (values.length === 0) continue
-    result[property] = isInboundSchema(propertySchema) ? decodeInboundParameterValue(values, propertySchema) : values[0]
+    defineOwnDataProperty(result, property, isInboundSchema(propertySchema) ? decodeInboundParameterValue(values, propertySchema) : values[0])
   }
   return result
 }
@@ -932,11 +1035,11 @@ function decodeInboundQueryObject(url: URL, definition: InboundParameterDefiniti
 function decodeInboundCookieObject(cookies: Readonly<Record<string, string | readonly string[]>>, definition: InboundParameterDefinition, schemas: InboundSchemas): Readonly<Record<string, unknown>> {
   const schema = resolveInboundSchema(definition.schema, schemas)
   const properties = isRecord(schema["properties"]) ? schema["properties"] : {}
-  const result: Record<string, unknown> = {}
+  const result = Object.create(null) as Record<string, unknown>
   for (const [property, propertySchema] of Object.entries(properties)) {
     const value = cookies[property]
     if (value === undefined) continue
-    result[property] = isInboundSchema(propertySchema) ? decodeInboundParameterValue(value, propertySchema) : value
+    defineOwnDataProperty(result, property, isInboundSchema(propertySchema) ? decodeInboundParameterValue(value, propertySchema) : value)
   }
   return result
 }
@@ -947,13 +1050,13 @@ export function matchInboundRoute(template: string | undefined, pathname: string
   const expected = template.split("/").slice(1)
   const actual = pathname.split("/").slice(1)
   if (expected.length !== actual.length) return undefined
-  const result: Record<string, string> = {}
+  const result = Object.create(null) as Record<string, string>
   for (let index = 0; index < expected.length; index++) {
     const segment = expected[index]!
     const value = actual[index]!
     const match = /^\{([^{}\/]+)\}$/.exec(segment)
     if (match === null) { if (segment !== value) return undefined; continue }
-    try { result[match[1]!] = decodeURIComponent(value) }
+    try { defineOwnDataProperty(result, match[1]!, decodeURIComponent(value)) }
     catch { return undefined }
   }
   return result
@@ -994,11 +1097,11 @@ async function decodeInboundFormValue(value: unknown, schema: InboundSchema | un
   }
   if (isRecord(value)) {
     const properties = isRecord(resolved["properties"]) ? resolved["properties"] : {}
-    const result: Record<string, unknown> = {}
+    const result = Object.create(null) as Record<string, unknown>
     for (const [name, entry] of Object.entries(value)) {
       const property = properties[name]
       const definition = encoding?.find((candidate) => candidate.name === name)
-      result[name] = isInboundSchema(property) ? await decodeInboundFormValue(entry, property, schemas, definition?.encoding, definition?.contentType, codecs) : entry
+      defineOwnDataProperty(result, name, isInboundSchema(property) ? await decodeInboundFormValue(entry, property, schemas, definition?.encoding, definition?.contentType, codecs) : entry)
     }
     return result
   }
@@ -1030,7 +1133,7 @@ export function requiresInboundAuthentication(security: unknown): boolean {
 
 /** Collects declared header/query/cookie credential candidates without authenticating them. */
 export function collectInboundSecurityCandidates(request: Request, security: unknown, schemes: InboundSecuritySchemes): Readonly<Record<string, InboundSecurityCandidate>> {
-  const result: Record<string, InboundSecurityCandidate> = {}
+  const result = Object.create(null) as Record<string, InboundSecurityCandidate>
   if (!Array.isArray(security)) return result
   const url = new URL(request.url)
   const cookies = parseInboundCookies(request.headers.get("cookie"))
@@ -1045,11 +1148,11 @@ export function collectInboundSecurityCandidates(request: Request, security: unk
         const parameterName = typeof scheme.name === "string" ? scheme.name : undefined
         if (location === undefined || parameterName === undefined) continue
         const value = location === "header" ? request.headers.get(parameterName) ?? undefined : location === "query" ? url.searchParams.get(parameterName) ?? undefined : inboundCookieFirst(cookies.decoded[parameterName])
-        result[name] = { scheme: name, type: "apiKey", location, name: parameterName, ...(value === undefined ? {} : { value }) }
+        defineOwnDataProperty(result, name, { scheme: name, type: "apiKey", location, name: parameterName, ...(value === undefined ? {} : { value }) })
         continue
       }
       const authorization = request.headers.get("authorization") ?? undefined
-      result[name] = { scheme: name, type: scheme.type, ...(authorization === undefined ? {} : { value: authorization }) }
+      defineOwnDataProperty(result, name, { scheme: name, type: scheme.type, ...(authorization === undefined ? {} : { value: authorization }) })
     }
   }
   return result
@@ -1058,8 +1161,8 @@ export function collectInboundSecurityCandidates(request: Request, security: unk
 interface InboundCookies { readonly raw: Readonly<Record<string, string | readonly string[]>>; readonly decoded: Readonly<Record<string, string | readonly string[]>> }
 
 function parseInboundCookies(header: string | null): InboundCookies {
-  const raw: Record<string, string | string[]> = {}
-  const decoded: Record<string, string | string[]> = {}
+  const raw = Object.create(null) as Record<string, string | string[]>
+  const decoded = Object.create(null) as Record<string, string | string[]>
   if (header === null) return { raw, decoded }
   for (const item of header.split(";")) {
     const index = item.indexOf("=")
@@ -1076,7 +1179,7 @@ function parseInboundCookies(header: string | null): InboundCookies {
 
 function appendInboundCookie(target: Record<string, string | string[]>, name: string, value: string): void {
   const previous = target[name]
-  target[name] = previous === undefined ? value : Array.isArray(previous) ? [...previous, value] : [previous, value]
+  defineOwnDataProperty(target, name, previous === undefined ? value : Array.isArray(previous) ? [...previous, value] : [previous, value])
 }
 
 function inboundCookieFirst(value: string | readonly string[] | undefined): string | undefined {
@@ -1204,10 +1307,10 @@ async function decodeSelectedInboundBody(request: Request, rawContentType: strin
       if (options.required) throw new InboundRequestError(new Response("Request body is required", { status: 400 }))
       return undefined
     }
-    const result: Record<string, unknown> = {}
+    const result = Object.create(null) as Record<string, unknown>
     for (const [name, item] of form) {
       const previous = result[name]
-      result[name] = previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item]
+      defineOwnDataProperty(result, name, previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item])
     }
     value = await decodeInboundFormValue(result, options.schema, options.schemas, options.encoding, undefined, options.codecs)
   } else {
@@ -1220,10 +1323,10 @@ async function decodeSelectedInboundBody(request: Request, rawContentType: strin
     try { value = JSON.parse(text) } catch { throw new InboundRequestError(new Response("Invalid JSON", { status: 400 })) }
     } else if (contentType === "application/x-www-form-urlencoded") {
     const form = new URLSearchParams(text)
-    const result: Record<string, unknown> = {}
+    const result = Object.create(null) as Record<string, unknown>
     for (const [name, item] of form) {
       const previous = result[name]
-      result[name] = previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item]
+      defineOwnDataProperty(result, name, previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item])
     }
       value = await decodeInboundFormValue(result, options.schema, options.schemas, options.encoding, undefined, options.codecs)
     } else if (contentType.includes("xml")) {
@@ -1520,8 +1623,8 @@ function parseInboundXML(source: string): InboundXMLNode {
 }
 
 function parseInboundXMLAttributes(source: string): Readonly<Record<string, string>> {
-  const result: Record<string, string> = {}; const expression = /([^\s=]+)\s*=\s*("[^"]*"|'[^']*')/g; let match: RegExpExecArray | null
-  while ((match = expression.exec(source)) !== null) result[match[1]!] = unescapeInboundXML(match[2]!.slice(1, -1))
+  const result = Object.create(null) as Record<string, string>; const expression = /([^\s=]+)\s*=\s*("[^"]*"|'[^']*')/g; let match: RegExpExecArray | null
+  while ((match = expression.exec(source)) !== null) defineOwnDataProperty(result, match[1]!, unescapeInboundXML(match[2]!.slice(1, -1)))
   if (source.replace(expression, "").trim() !== "") throw new TypeError("XML attribute syntax is invalid")
   return result
 }
@@ -1534,23 +1637,23 @@ function decodeInboundXMLNode(node: InboundXMLNode, schema: InboundSchema, schem
   }
   const properties = isRecord(resolved["properties"]) ? resolved["properties"] : {}
   if (schemaAcceptsType(resolved["type"], "object") || Object.keys(properties).length !== 0) {
-    const result: Record<string, unknown> = {}
+    const result = Object.create(null) as Record<string, unknown>
     for (const [name, childSchema] of Object.entries(properties)) {
       if (!isInboundSchema(childSchema)) continue
       const xml = isRecord(childSchema["xml"]) ? childSchema["xml"] : {}
       const xmlName = typeof xml["name"] === "string" ? xml["name"] : name
       if (xml["attribute"] === true || xml["nodeType"] === "attribute") {
-        if (node.attributes[xmlName] !== undefined) result[name] = decodeInboundXMLScalar(node.attributes[xmlName]!, childSchema)
+        if (node.attributes[xmlName] !== undefined) defineOwnDataProperty(result, name, decodeInboundXMLScalar(node.attributes[xmlName]!, childSchema))
         continue
       }
       if (schemaAcceptsType(resolveInboundSchema(childSchema, schemas)["type"], "array")) {
         const item = isInboundSchema(childSchema["items"]) ? childSchema["items"] : {}
         const container = xml["wrapped"] === true ? node.children.find((child) => child.name === xmlName) : node
-        if (container !== undefined) result[name] = container.children.filter((child) => child.name === xmlName || child.name === (isRecord(item["xml"]) && typeof item["xml"]["name"] === "string" ? item["xml"]["name"] : name)).map((child) => decodeInboundXMLNode(child, item, schemas))
+        if (container !== undefined) defineOwnDataProperty(result, name, container.children.filter((child) => child.name === xmlName || child.name === (isRecord(item["xml"]) && typeof item["xml"]["name"] === "string" ? item["xml"]["name"] : name)).map((child) => decodeInboundXMLNode(child, item, schemas)))
         continue
       }
       const child = node.children.find((entry) => entry.name === xmlName)
-      if (child !== undefined) result[name] = decodeInboundXMLNode(child, childSchema, schemas)
+      if (child !== undefined) defineOwnDataProperty(result, name, decodeInboundXMLNode(child, childSchema, schemas))
     }
     return result
   }
@@ -1584,7 +1687,7 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
   if (value === null && (schema["nullable"] === true || schemaAcceptsType(schema["type"], "null"))) return undefined
   if (value instanceof Blob && schemaAcceptsType(schema["type"], "string") && (schema["format"] === "binary" || schema["contentEncoding"] === "binary")) return undefined
   if (!schemaAcceptsValue(value, schema["type"])) return path + " has an invalid type"
-  if ("const" in schema && JSON.stringify(value) !== JSON.stringify(schema["const"])) return path + " must equal its declared constant"
+  if (Object.hasOwn(schema, "const") && JSON.stringify(value) !== JSON.stringify(schema["const"])) return path + " must equal its declared constant"
   if (Array.isArray(schema["enum"]) && !schema["enum"].some((item) => JSON.stringify(item) === JSON.stringify(value))) return path + " is not an allowed value"
   if (typeof value === "string") {
     if (typeof schema["minLength"] === "number" && value.length < schema["minLength"]) return path + " is shorter than minLength"
@@ -1615,11 +1718,11 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
 	if (typeof schema["minProperties"] === "number" && Object.keys(value).length < schema["minProperties"]) return path + " has too few properties"
     if (typeof schema["maxProperties"] === "number" && Object.keys(value).length > schema["maxProperties"]) return path + " has too many properties"
     const required = Array.isArray(schema["required"]) ? schema["required"] : []
-    for (const key of required) if (typeof key === "string" && !(key in value)) return path + "." + key + " is required"
+    for (const key of required) if (typeof key === "string" && !Object.hasOwn(value, key)) return path + "." + key + " is required"
     const properties = isRecord(schema["properties"]) ? schema["properties"] : {}
-    for (const [key, propertySchema] of Object.entries(properties)) if (key in value && isInboundSchema(propertySchema)) { const error = validateInboundValue(value[key], propertySchema, schemas, path + "." + key); if (error !== undefined) return error }
-    if (isInboundSchema(schema["additionalProperties"])) for (const [key, item] of Object.entries(value)) if (!(key in properties)) { const error = validateInboundValue(item, schema["additionalProperties"], schemas, path + "." + key); if (error !== undefined) return error }
-    if (schema["additionalProperties"] === false) for (const key of Object.keys(value)) if (!(key in properties)) return path + "." + key + " is not allowed"
+    for (const [key, propertySchema] of Object.entries(properties)) if (Object.hasOwn(value, key) && isInboundSchema(propertySchema)) { const error = validateInboundValue(value[key], propertySchema, schemas, path + "." + key); if (error !== undefined) return error }
+    if (isInboundSchema(schema["additionalProperties"])) for (const [key, item] of Object.entries(value)) if (!Object.hasOwn(properties, key)) { const error = validateInboundValue(item, schema["additionalProperties"], schemas, path + "." + key); if (error !== undefined) return error }
+    if (schema["additionalProperties"] === false) for (const key of Object.keys(value)) if (!Object.hasOwn(properties, key)) return path + "." + key + " is not allowed"
   }
   if (Array.isArray(schema["allOf"])) for (const part of schema["allOf"]) if (isInboundSchema(part)) { const error = validateInboundValue(value, part, schemas, path); if (error !== undefined) return error }
   return undefined
@@ -1681,10 +1784,10 @@ async function decodeInboundResponseHeaderValue(value: string, definition: WireH
     try { return JSON.parse(value) } catch { throw new TypeError("invalid JSON response header " + definition.name) }
   }
   if (contentType === "application/x-www-form-urlencoded") {
-    const form: Record<string, string | string[]> = {}
+    const form = Object.create(null) as Record<string, string | string[]>
     for (const [name, item] of new URLSearchParams(value)) {
       const previous = form[name]
-      form[name] = previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item]
+      defineOwnDataProperty(form, name, previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item])
     }
     return form
   }
@@ -1705,7 +1808,7 @@ function decodeInboundSimpleHeader(value: string, schema: WireSchema, schemas: W
     return value.split(",").map((entry) => decodeInboundSimpleHeaderScalar(entry, item, schemas))
   }
   if (resolved.types?.includes("object") || resolved.properties !== undefined) {
-    const result: Record<string, unknown> = {}
+    const result = Object.create(null) as Record<string, unknown>
     const tokens = value.split(",")
     if (definition.explode) {
       for (const token of tokens) {
@@ -1713,12 +1816,12 @@ function decodeInboundSimpleHeader(value: string, schema: WireSchema, schemas: W
         if (separator < 0) continue
         const name = token.slice(0, separator)
         const property = resolved.properties?.[name]
-        result[name] = decodeInboundSimpleHeaderScalar(token.slice(separator + 1), property?.schema ?? {}, schemas)
+        defineOwnDataProperty(result, name, decodeInboundSimpleHeaderScalar(token.slice(separator + 1), property?.schema ?? {}, schemas))
       }
     } else for (let index = 0; index + 1 < tokens.length; index += 2) {
       const name = tokens[index]!
       const property = resolved.properties?.[name]
-      result[name] = decodeInboundSimpleHeaderScalar(tokens[index + 1]!, property?.schema ?? {}, schemas)
+      defineOwnDataProperty(result, name, decodeInboundSimpleHeaderScalar(tokens[index + 1]!, property?.schema ?? {}, schemas))
     }
     return result
   }

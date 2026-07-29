@@ -119,7 +119,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(publicIndex, `export * from "./generated/index.js"`) {
 		t.Fatalf("source entrypoint missing relative re-export:\n%s", publicIndex)
 	}
-	for _, expected := range []string{"export const openapi = { document:", `"openapi":"3.2.0"`, `versionLine: "3.2"`} {
+	for _, expected := range []string{"export const openapi = { document:", `["openapi", "3.2.0"]`, `versionLine: "3.2"`} {
 		if !strings.Contains(metadataSource, expected) {
 			t.Fatalf("metadata missing %q:\n%s", expected, metadataSource)
 		}
@@ -319,14 +319,16 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 	}
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
 	for _, expected := range []string{
-		"export interface OrderCreatedWebhookContext extends InboundRequestContext",
+		"export interface Webhooks",
+		`readonly "orderCreated": {`,
+		`readonly "POST": { readonly context:`,
 		`readonly body: Contract.ComponentInput<"Order">`,
 		"export interface WebhookHandlers",
-		"orderCreated?: (context: OrderCreatedWebhookContext)",
+		`readonly "orderCreated"?: {`,
 		"export type WebhookRoutes = Readonly<Partial<Record<keyof WebhookHandlers, string>>>",
 		"export function createWebhookRouter",
-		"request.method === \"POST\" && orderCreatedWebhookPathParameters !== undefined",
-		"operationID: orderCreatedWebhook.operationID",
+		`request.method === "POST" && __sdkgen_`,
+		"operationID: __sdkgen_",
 		"const denied = await options.authenticate(context)",
 	} {
 		if !strings.Contains(webhooks, expected) {

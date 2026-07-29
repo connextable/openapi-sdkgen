@@ -2,7 +2,6 @@ package typescript
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 var serverVariablePattern = regexp.MustCompile(`\{[^{}]+\}`)
@@ -202,11 +200,11 @@ func linkValueLiteral(value any, sourceParameters []operationParameter) (string,
 			return "", err
 		}
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := runtimeJSONExpression(value)
 	if err != nil {
 		return "", fmt.Errorf("encode Link runtime value: %w", err)
 	}
-	return string(encoded), nil
+	return encoded, nil
 }
 
 func linkRequestParameterExpression(expression string, sourceParameters []operationParameter) (any, error) {
@@ -233,10 +231,6 @@ func linkRequestParameterExpression(expression string, sourceParameters []operat
 		return map[string]any{"x-sdkgen-link-request-parameter": map[string]any{"section": section, "property": parameter.Property, "pointer": pointer}}, nil
 	}
 	return nil, fmt.Errorf("request runtime expression %q references unknown source %s parameter %q", expression, location, name)
-}
-
-func linkName(name string) (string, error) {
-	return naming.Property(name)
 }
 
 func linkJSONPointerToken(token string) (string, error) {
@@ -269,21 +263,13 @@ func emitLinkInterface(output *bytes.Buffer, document *ir.Document, links []gene
 	output.WriteString("  /** OpenAPI response links grouped by source operation. */\n")
 	output.WriteString("  readonly $links: {\n")
 	for _, source := range linkSourceOperations(links) {
-		sourceProperty, err := naming.Property(source.OperationID)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(output, "    readonly %s: {\n", sourceProperty)
+		fmt.Fprintf(output, "    readonly %s: {\n", quoteTS(source.OperationID))
 		for _, group := range linkGroupsForSource(links, source.OperationID) {
-			name, err := linkName(group.Name)
-			if err != nil {
-				return err
-			}
 			contract, err := linkGroupContract(document, group)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(output, "      readonly %s: %s\n", name, contract)
+			fmt.Fprintf(output, "      readonly %s: %s\n", quoteTS(group.Name), contract)
 		}
 		output.WriteString("    }\n")
 	}
@@ -516,27 +502,19 @@ func emitLinkReturnValue(output *bytes.Buffer, links []generatedLink) error {
 	if len(links) == 0 {
 		return nil
 	}
-	output.WriteString("    $links: {\n")
+	sources := make([]runtimeProperty, 0)
 	for _, source := range linkSourceOperations(links) {
-		property, err := naming.Property(source.OperationID)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(output, "      %s: {\n", property)
+		groups := make([]runtimeProperty, 0)
 		for _, group := range linkGroupsForSource(links, source.OperationID) {
-			name, err := linkName(group.Name)
-			if err != nil {
-				return err
-			}
 			variable, err := generatedLinkGroupVariableName(group)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(output, "        %s: %s,\n", name, variable)
+			groups = append(groups, runtimeProperty{key: group.Name, value: variable})
 		}
-		output.WriteString("      },\n")
+		sources = append(sources, runtimeProperty{key: source.OperationID, value: runtimeObjectExpression(groups)})
 	}
-	output.WriteString("    },\n")
+	fmt.Fprintf(output, "    $links: %s,\n", runtimeObjectExpression(sources))
 	return nil
 }
 
@@ -564,29 +542,13 @@ func linksForSource(links []generatedLink, operationID string) []generatedLink {
 }
 
 func generatedLinkVariableName(link generatedLink) (string, error) {
-	source, err := naming.Property(link.SourceOperation.OperationID)
+	_, err := linkStatusProperty(link.Status)
 	if err != nil {
 		return "", err
 	}
-	name, err := linkName(link.Name)
-	if err != nil {
-		return "", err
-	}
-	status, err := linkStatusProperty(link.Status)
-	if err != nil {
-		return "", err
-	}
-	return "link" + strings.ToUpper(source[:1]) + source[1:] + strings.ToUpper(name[:1]) + name[1:] + strings.ToUpper(status[:1]) + status[1:], nil
+	return stablePrivateIdentifier("link-value", link.SourceOperation.OperationID+"\x00"+link.Name+"\x00"+link.Status), nil
 }
 
 func generatedLinkGroupVariableName(group generatedLinkGroup) (string, error) {
-	source, err := naming.Property(group.SourceOperation.OperationID)
-	if err != nil {
-		return "", err
-	}
-	name, err := linkName(group.Name)
-	if err != nil {
-		return "", err
-	}
-	return "link" + strings.ToUpper(source[:1]) + source[1:] + strings.ToUpper(name[:1]) + name[1:], nil
+	return stablePrivateIdentifier("link-group-value", group.SourceOperation.OperationID+"\x00"+group.Name), nil
 }

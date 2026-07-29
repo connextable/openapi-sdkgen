@@ -624,12 +624,16 @@ export type LinkInputOverride<Input> = {
 /** Resolves an OpenAPI Link Object into the generated target operation input. */
 export function resolveLinkInput<Input>(response: RawResponse<unknown> | APIError, definition: LinkDefinition, sourceInput?: unknown): Input {
   const source = normalizeLinkResponse(response);
-  const result: Record<string, unknown> = {};
+  const result = Object.create(null) as Record<string, unknown>;
   for (const assignment of definition.parameters ?? []) {
-    const section = (result[assignment.location] ??= {}) as Record<string, unknown>;
-    section[assignment.property] = evaluateLinkValue(source, assignment.value, sourceInput);
+    let section = result[assignment.location] as Record<string, unknown> | undefined;
+    if (section === undefined) {
+      section = Object.create(null) as Record<string, unknown>;
+      defineOwnDataProperty(result, assignment.location, section);
+    }
+    defineOwnDataProperty(section, assignment.property, evaluateLinkValue(source, assignment.value, sourceInput));
   }
-  if (definition.requestBody !== undefined) result.body = evaluateLinkValue(source, definition.requestBody, sourceInput);
+  if (definition.requestBody !== undefined) defineOwnDataProperty(result, "body", evaluateLinkValue(source, definition.requestBody, sourceInput));
   return result as Input;
 }
 
@@ -642,10 +646,18 @@ function normalizeLinkResponse(response: RawResponse<unknown> | APIError): RawRe
 /** Merges Link-derived defaults with explicit target input without mutating either value. */
 export function mergeLinkInput<Input>(defaults: Input, override: LinkInputOverride<Input> | undefined): Input {
   if (!isRecord(defaults) || !isRecord(override)) return (override ?? defaults) as Input;
-  const result: Record<string, unknown> = { ...defaults };
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const [section, value] of Object.entries(defaults)) defineOwnDataProperty(result, section, value);
   for (const [section, value] of Object.entries(override)) {
     const existing = result[section];
-    result[section] = isRecord(existing) && isRecord(value) ? { ...existing, ...value } : value;
+    if (isRecord(existing) && isRecord(value)) {
+      const merged = Object.create(null) as Record<string, unknown>;
+      for (const [key, item] of Object.entries(existing)) defineOwnDataProperty(merged, key, item);
+      for (const [key, item] of Object.entries(value)) defineOwnDataProperty(merged, key, item);
+      defineOwnDataProperty(result, section, merged);
+    } else {
+      defineOwnDataProperty(result, section, value);
+    }
   }
   return result as Input;
 }
@@ -693,7 +705,7 @@ function jsonPointerValue(value: unknown, pointer: string): unknown {
       current = current[Number(key)];
       continue;
     }
-    if (!isRecord(current) || !(key in current)) return undefined;
+    if (!isRecord(current) || !Object.hasOwn(current, key)) return undefined;
     current = current[key];
   }
   return current;
@@ -1029,7 +1041,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
         throw serverError(response, request, body);
       }
       const data =
-        operation.envelope === "data" && isRecord(body) && "data" in body
+        operation.envelope === "data" && isRecord(body) && Object.hasOwn(body, "data")
           ? (body.data as Output)
           : (body as Output);
       if (!raw) return data;
@@ -1444,8 +1456,8 @@ function applyOperationSecurity(
       undefined,
     );
   }
-  const alternatives: Record<string, SecurityAlternative> = {};
-  for (const alternative of declared) alternatives[alternative.id] = alternative;
+  const alternatives = Object.create(null) as Record<string, SecurityAlternative>;
+  for (const alternative of declared) defineOwnDataProperty(alternatives, alternative.id, alternative);
   const context: CredentialContext = {
     operation: { operationID: operation.operationID, method: operation.method, path: operation.path },
     alternatives,
@@ -1568,17 +1580,17 @@ async function decodeResponseHeaderValue(name: string, value: string, schema: Wi
   const resolved = resolveHeaderSchema(schema, schemas);
   if (resolved.types?.includes("array")) return value.split(",").map((entry) => decodeResponseHeaderScalar(name, entry, resolved.items ?? {}, schemas));
   if (resolved.types?.includes("object") || resolved.properties !== undefined) {
-    const result: Record<string, unknown> = {};
+    const result = Object.create(null) as Record<string, unknown>;
     const tokens = value.split(",");
     if (explode) for (const token of tokens) {
       const separator = token.indexOf("=");
       if (separator < 0) continue;
       const propertyName = token.slice(0, separator);
       const property = resolved.properties?.[propertyName];
-      result[propertyName] = decodeResponseHeaderScalar(name, token.slice(separator + 1), property?.schema ?? {}, schemas);
+      defineOwnDataProperty(result, propertyName, decodeResponseHeaderScalar(name, token.slice(separator + 1), property?.schema ?? {}, schemas));
     } else for (let index = 0; index + 1 < tokens.length; index += 2) {
       const property = resolved.properties?.[tokens[index]!];
-      result[tokens[index]!] = decodeResponseHeaderScalar(name, tokens[index + 1]!, property?.schema ?? {}, schemas);
+      defineOwnDataProperty(result, tokens[index]!, decodeResponseHeaderScalar(name, tokens[index + 1]!, property?.schema ?? {}, schemas));
     }
     return result;
   }
@@ -1619,10 +1631,10 @@ function decodeHeaderContent(name: string, value: string, contentType: string): 
     }
   }
   if (contentType.toLowerCase() === "application/x-www-form-urlencoded") {
-    const result: Record<string, string | string[]> = {};
+    const result = Object.create(null) as Record<string, string | string[]>;
     for (const [key, item] of new URLSearchParams(value)) {
       const previous = result[key];
-      result[key] = previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item];
+      defineOwnDataProperty(result, key, previous === undefined ? item : Array.isArray(previous) ? [...previous, item] : [previous, item]);
     }
     return result;
   }
@@ -1712,7 +1724,7 @@ function encodeRequestSynchronous(
     if (!client.transport?.capabilities?.cookieJar) throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, "Sending declared cookie parameters requires a cookie-jar transport", undefined);
     headers.set("Cookie", cookies.join("; "));
   }
-  if (!("body" in values) || values.body === undefined) {
+  if (!Object.hasOwn(values, "body") || values.body === undefined) {
     if (operation.requestBodyRequired) throw new TypeError("Missing required request body");
     return { url: url.href, headers };
   }
@@ -1722,7 +1734,7 @@ function encodeRequestSynchronous(
   const requestBodies = operation.requestBodies;
   const needsSelection = requestBodies !== undefined && (requestBodies.length > 1 || requestBodies.some((body) => body.contentType.includes("*")));
   if (needsSelection) {
-    if (!isRecord(values.body) || typeof values.body.contentType !== "string" || !("value" in values.body)) throw new TypeError("request body media range requires { contentType, value }");
+    if (!isRecord(values.body) || typeof values.body.contentType !== "string" || !Object.hasOwn(values.body, "value")) throw new TypeError("request body media range requires { contentType, value }");
     const selected = selectRequestBodyDefinition(requestBodies!, values.body.contentType);
     if (selected === undefined) throw new TypeError(`request body content type ${values.body.contentType} is not declared by this operation`);
     contentType = values.body.contentType;
@@ -1828,7 +1840,7 @@ async function encodeRequestAsync(
     headers.set("Cookie", cookies.join("; "));
   }
 
-  if (!("body" in values) || values.body === undefined) {
+  if (!Object.hasOwn(values, "body") || values.body === undefined) {
 	if (operation.requestBodyRequired) throw new TypeError("Missing required request body");
     return { url: url.href, headers };
   }
@@ -1838,7 +1850,7 @@ async function encodeRequestAsync(
   const requestBodies = operation.requestBodies;
   const needsSelection = requestBodies !== undefined && (requestBodies.length > 1 || requestBodies.some((body) => body.contentType.includes("*")));
   if (needsSelection) {
-    if (!isRecord(values.body) || typeof values.body.contentType !== "string" || !("value" in values.body)) throw new TypeError("request body media range requires { contentType, value }");
+    if (!isRecord(values.body) || typeof values.body.contentType !== "string" || !Object.hasOwn(values.body, "value")) throw new TypeError("request body media range requires { contentType, value }");
     const selected = selectRequestBodyDefinition(requestBodies!, values.body.contentType);
     if (selected === undefined) throw new TypeError(`request body content type ${values.body.contentType} is not declared by this operation`);
     contentType = values.body.contentType;
@@ -2204,14 +2216,14 @@ async function decodeMultipartHeaderValue(name: string, value: string, schema: W
   }
   if (schema.types?.includes("array")) return value.split(",").map((item) => decodeMultipartHeaderScalar(name, item, schema.items ?? {}));
   if (schema.types?.includes("object") || schema.properties !== undefined) {
-    const result: Record<string, unknown> = {};
+    const result = Object.create(null) as Record<string, unknown>;
     const tokens = value.split(",");
     if (explode) for (const token of tokens) {
       const separator = token.indexOf("=");
       if (separator < 0) continue;
       const property = token.slice(0, separator);
-      result[property] = decodeMultipartHeaderScalar(name, token.slice(separator + 1), schema.properties?.[property]?.schema ?? {});
-    } else for (let index = 0; index + 1 < tokens.length; index += 2) result[tokens[index]!] = decodeMultipartHeaderScalar(name, tokens[index + 1]!, schema.properties?.[tokens[index]!]?.schema ?? {});
+      defineOwnDataProperty(result, property, decodeMultipartHeaderScalar(name, token.slice(separator + 1), schema.properties?.[property]?.schema ?? {}));
+    } else for (let index = 0; index + 1 < tokens.length; index += 2) defineOwnDataProperty(result, tokens[index]!, decodeMultipartHeaderScalar(name, tokens[index + 1]!, schema.properties?.[tokens[index]!]?.schema ?? {}));
     return result;
   }
   return decodeMultipartHeaderScalar(name, value, schema);
@@ -2429,10 +2441,10 @@ function parseXMLDocument(source: string): XMLNode {
 }
 
 function parseXMLAttributes(source: string): Readonly<Record<string, string>> {
-  const result: Record<string, string> = {};
+  const result = Object.create(null) as Record<string, string>;
   const expression = /([^\s=]+)\s*=\s*("[^"]*"|'[^']*')/g;
   let match: RegExpExecArray | null;
-  while ((match = expression.exec(source)) !== null) result[match[1]!] = unescapeXML(match[2]!.slice(1, -1));
+  while ((match = expression.exec(source)) !== null) defineOwnDataProperty(result, match[1]!, unescapeXML(match[2]!.slice(1, -1)));
   if (source.replace(expression, "").trim() !== "") throw new TypeError("XML attribute syntax is invalid");
   return result;
 }
@@ -2451,13 +2463,13 @@ function decodeXMLNode(node: XMLNode, schema: WireSchema, components: WireSchema
     return node.children.map((child) => decodeXMLNode(child, itemSchema, components, scope));
   }
   if (schema.types?.includes("object") || schema.properties !== undefined) {
-    const result: Record<string, unknown> = {};
+    const result = Object.create(null) as Record<string, unknown>;
     for (const [wireName, property] of Object.entries(schema.properties ?? {})) {
       const xml = property.schema.xml;
       const name = xmlName(xml, wireName);
       if (xml?.attribute || xml?.nodeType === "attribute") {
         const value = node.attributes[name];
-        if (value !== undefined) result[wireName] = decodeXMLScalar(value, property.schema);
+        if (value !== undefined) defineOwnDataProperty(result, wireName, decodeXMLScalar(value, property.schema));
         continue;
       }
       if (property.schema.types?.includes("array")) {
@@ -2465,12 +2477,12 @@ function decodeXMLNode(node: XMLNode, schema: WireSchema, components: WireSchema
         const container = xml?.wrapped ? node.children.find((child) => child.name === name) : node;
         if (container !== undefined) {
           const itemName = xmlName(itemSchema.xml, itemSchema.xml?.name ?? wireName);
-          result[wireName] = container.children.filter((child) => child.name === itemName).map((child) => decodeXMLNode(child, itemSchema, components, scope));
+          defineOwnDataProperty(result, wireName, container.children.filter((child) => child.name === itemName).map((child) => decodeXMLNode(child, itemSchema, components, scope)));
         }
         continue;
       }
       const child = node.children.find((entry) => entry.name === name);
-      if (child !== undefined) result[wireName] = decodeXMLNode(child, property.schema, components, scope);
+      if (child !== undefined) defineOwnDataProperty(result, wireName, decodeXMLNode(child, property.schema, components, scope));
     }
     return result;
   }
@@ -2612,7 +2624,7 @@ function transformWireValue(
       const targetName = direction === "encode" ? wireName : propertyDefinition.property;
       known.add(sourceName);
       known.add(targetName);
-      if (!(sourceName in source)) continue;
+      if (!Object.hasOwn(source, sourceName)) continue;
       if (sourceName !== targetName) delete result[sourceName];
       defineOwnDataProperty(result, targetName, transformWireValue(
         source[sourceName],
@@ -2765,28 +2777,28 @@ export function validateWireValue(
   for (const [wireName, definition] of Object.entries(properties)) {
     const sourceName = direction === "encode" ? definition.property : wireName;
     allowed.add(sourceName);
-    if (sourceName in value) validateWireValue(value[sourceName], definition.schema, components, direction, scope);
+    if (Object.hasOwn(value, sourceName)) validateWireValue(value[sourceName], definition.schema, components, direction, scope);
   }
   for (const required of schema.required ?? []) {
     const definition = properties[required];
     const sourceName = direction === "encode" && definition !== undefined ? definition.property : required;
-    if (!(sourceName in value) || value[sourceName] === undefined) {
+    if (!Object.hasOwn(value, sourceName) || value[sourceName] === undefined) {
       throw new TypeError(`missing required property ${required}`);
     }
   }
 	for (const [property, required] of Object.entries(schema.dependentRequired ?? {})) {
 		const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
-		if (!(sourceProperty in value) || value[sourceProperty] === undefined) continue;
+		if (!Object.hasOwn(value, sourceProperty) || value[sourceProperty] === undefined) continue;
 		for (const dependency of required) {
 			const sourceDependency = direction === "encode" && properties[dependency] !== undefined ? properties[dependency].property : dependency;
-			if (!(sourceDependency in value) || value[sourceDependency] === undefined) {
+			if (!Object.hasOwn(value, sourceDependency) || value[sourceDependency] === undefined) {
 				throw new TypeError(`property ${property} requires property ${dependency}`);
 			}
 		}
 	}
 	for (const [property, dependency] of Object.entries(schema.dependentSchemas ?? {})) {
 		const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
-		if (sourceProperty in value && value[sourceProperty] !== undefined) validateWireValue(value, dependency, components, direction, scope);
+		if (Object.hasOwn(value, sourceProperty) && value[sourceProperty] !== undefined) validateWireValue(value, dependency, components, direction, scope);
 	}
 	for (const [pattern, propertySchema] of Object.entries(schema.patternProperties ?? {})) {
 		const expression = new RegExp(pattern, "u");
@@ -2999,7 +3011,7 @@ function evaluatedPropertyNames(
 	}
 	for (const [wireName, definition] of Object.entries(schema.properties ?? {})) {
 		const name = direction === "encode" ? definition.property : wireName;
-		if (name in value) result.add(name);
+		if (Object.hasOwn(value, name)) result.add(name);
 	}
 	for (const pattern of Object.keys(schema.patternProperties ?? {})) {
 		const expression = new RegExp(pattern, "u");
