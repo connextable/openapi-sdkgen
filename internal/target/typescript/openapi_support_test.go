@@ -384,8 +384,10 @@ func TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations(t *testing
 	}
 	client := artifactByPath(t, artifacts, "generated/client.ts")
 	for _, expected := range []string{
-		`operationID: "queryRecords", method: "QUERY"`,
-		`operationID: "purgeRecords", method: "PURGE"`,
+		`route: "QUERY /records", method: "QUERY"`,
+		`route: "PURGE /records", method: "PURGE"`,
+		`operationID: "queryRecords"`,
+		`operationID: "purgeRecords"`,
 	} {
 		if !strings.Contains(string(client), expected) {
 			t.Fatalf("client source missing %q:\n%s", expected, client)
@@ -412,7 +414,7 @@ func TestSourceArtifactsGenerateEveryStandardHTTPMethod(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, method := range methods {
-		expected := fmt.Sprintf(`operationID: %q, method: %q`, method+"Operation", strings.ToUpper(method))
+		expected := fmt.Sprintf(`route: %q, method: %q`, strings.ToUpper(method)+" /"+method, strings.ToUpper(method))
 		if !strings.Contains(client, expected) {
 			t.Fatalf("client source missing %q:\n%s", expected, client)
 		}

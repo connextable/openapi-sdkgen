@@ -70,7 +70,7 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			}
 			description, _ := raw["description"].(string)
 			merged[key] = operationParameter{
-				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operation.OperationID+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
+				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operationRouteKey(operation)+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
 				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
 			}
 		}

@@ -55,6 +55,7 @@ paths: {}
 			if document.OpenAPIVersion != "3.2.0" {
 				t.Fatalf("version = %q", document.OpenAPIVersion)
 			}
+			document.Provenance = nil
 			if expected == nil {
 				expected = document
 				return
@@ -377,8 +378,8 @@ func TestCompileAcceptsGenericOpenAPIWithoutProjectProfile(t *testing.T) {
 	if _, err := Compile(input); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompileProject(input); err == nil {
-		t.Fatal("project profile accepted generic document")
+	if _, err := CompileProject(input); err != nil {
+		t.Fatalf("compatibility compiler applied a project profile: %v", err)
 	}
 }
 
@@ -443,8 +444,8 @@ func TestCompileProjectFileResolvesExternalReferences(t *testing.T) {
 	if len(document.Operations) != 1 {
 		t.Fatalf("operations = %#v", document.Operations)
 	}
-	if _, err := CompileProjectFile(mainPath); err == nil {
-		t.Fatal("project compiler accepted external reference")
+	if projectDocument, err := CompileProjectFile(mainPath); err != nil || len(projectDocument.Operations) != 1 {
+		t.Fatalf("compatibility compiler did not use general reference behavior: %#v, %v", projectDocument, err)
 	}
 }
 

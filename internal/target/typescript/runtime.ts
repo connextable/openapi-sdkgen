@@ -279,7 +279,7 @@ export interface SecurityCredentialSelection {
 
 /** Context supplied to a host credential provider after final server selection. */
 export interface CredentialContext {
-  readonly operation: Pick<OperationDefinition, "operationID" | "method" | "path">;
+  readonly operation: Pick<OperationDefinition, "route" | "operationID" | "method" | "path">;
   readonly alternatives: Readonly<Record<string, SecurityAlternative>>;
   readonly origin: string;
 }
@@ -324,8 +324,10 @@ export type BinaryBody = Blob | ArrayBuffer | ArrayBufferView;
 
 /** Endpoint-neutral operation metadata emitted by `sdkgen` for the transport runtime. */
 export interface OperationDefinition {
-  /** OpenAPI operation ID. */
-  readonly operationID: string;
+  /** Canonical method-and-path route identity. */
+  readonly route: string;
+  /** Exact OpenAPI operation ID when explicitly declared. */
+  readonly operationID?: string;
   /** Uppercase HTTP method. */
   readonly method: string;
   /** OpenAPI path template, including any `{parameter}` placeholders. */
@@ -352,6 +354,10 @@ export interface OperationDefinition {
   readonly responses?: readonly WireResponseDefinition[];
   /** Effective OpenAPI security requirement alternatives for this operation. */
   readonly security?: readonly SecurityAlternative[];
+}
+
+function operationDiagnosticName(operation: OperationDefinition): string {
+  return operation.operationID ?? operation.route;
 }
 
 /** Stable OpenAPI Server selection supplied to {@link ClientOptions.server}. */
@@ -1004,7 +1010,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
       }
       throw transportError(
         TransportErrorCode.REQUEST_ENCODE_FAILED,
-        `Failed to encode ${operation.operationID} request`,
+        `Failed to encode ${operationDiagnosticName(operation)} request`,
         cause,
       );
     }
@@ -1134,7 +1140,7 @@ async function* streamOperation<Item>(
     const secured = applyOperationSecurity(options, operation, encoded);
     encoded = isPromise(secured) ? await secured : secured;
   } catch (cause) {
-    throw transportError(TransportErrorCode.REQUEST_ENCODE_FAILED, `Failed to encode ${operation.operationID} stream request`, cause);
+    throw transportError(TransportErrorCode.REQUEST_ENCODE_FAILED, `Failed to encode ${operationDiagnosticName(operation)} stream request`, cause);
   }
   const timeoutMS = requestOptions.timeoutMS ?? options.timeoutMS;
   const abort = createAbortContext(requestOptions.signal, timeoutMS);
@@ -1158,7 +1164,7 @@ async function* streamOperation<Item>(
     }
     const definition = selectResponseDefinition(operation, response, true);
     if (definition?.itemSchema === undefined || response.body === null) {
-      throw new TypeError(`response for ${operation.operationID} is not a declared stream`);
+      throw new TypeError(`response for ${operationDiagnosticName(operation)} is not a declared stream`);
     }
     const contentType = response.headers.get("content-type") ?? definition.contentType;
 		const maxFrameBytes = resolveMaxStreamItemBytes(requestOptions.maxStreamItemBytes ?? options.maxStreamItemBytes);
@@ -1183,7 +1189,7 @@ async function* streamOperation<Item>(
     if (abort.timedOut()) throw transportError(TransportErrorCode.REQUEST_TIMEOUT, `Request timed out after ${timeoutMS}ms`, cause);
     if (abort.aborted()) throw transportError(TransportErrorCode.REQUEST_ABORTED, "Request was aborted", cause);
 		if (!receivedResponse) throw transportError(TransportErrorCode.NETWORK_ERROR, "Network request failed", cause);
-    throw transportError(TransportErrorCode.RESPONSE_DECODE_FAILED, `Failed to decode ${operation.operationID} stream`, cause);
+    throw transportError(TransportErrorCode.RESPONSE_DECODE_FAILED, `Failed to decode ${operationDiagnosticName(operation)} stream`, cause);
   } finally {
     abort.cleanup();
   }
@@ -1473,14 +1479,14 @@ function applyOperationSecurity(
 	if (typeof options.credentials !== "function") {
     throw transportError(
       TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
-      `Operation ${operation.operationID} requires OpenAPI security credentials`,
+      `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
       undefined,
     );
   }
   const alternatives = Object.create(null) as Record<string, SecurityAlternative>;
   for (const alternative of declared) defineOwnDataProperty(alternatives, alternative.id, alternative);
   const context: CredentialContext = {
-    operation: { operationID: operation.operationID, method: operation.method, path: operation.path },
+    operation: { route: operation.route, operationID: operation.operationID, method: operation.method, path: operation.path },
     alternatives,
     origin: new URL(encoded.url).origin,
   };
@@ -3462,7 +3468,7 @@ function resolveOperationBaseURL(
   if (baseURL !== undefined) return baseURL;
   const servers = operation.servers ?? [{ id: "#", url: "/" }];
   const server = selection?.id === undefined ? servers[0] : servers.find((item) => item.id === selection.id);
-  if (server === undefined) throw new TypeError(`Unknown server ${selection?.id} for operation ${operation.operationID}`);
+  if (server === undefined) throw new TypeError(`Unknown server ${selection?.id} for operation ${operationDiagnosticName(operation)}`);
   const variables = selection?.variables ?? {};
   const expanded = server.url.replace(/\{([^}]+)\}/g, (_, name: string) => {
     const definition = server.variables?.find((item) => item.name === name);

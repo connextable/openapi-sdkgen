@@ -177,7 +177,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Status- and media-aware raw response for `createProduct`",
 		"`201 application/json` — Created",
 		"Creates a generated API client.",
-		"Type catalog keyed by OpenAPI operation ID.",
+		"Canonical operation catalog keyed by HTTP method and exact OpenAPI path.",
 		"Lazily iterates every item from",
 		"@deprecated This operation is deprecated.",
 	} {
@@ -188,7 +188,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "POST /products") {
 		t.Fatalf("operation JSDoc missing:\n%s", clientSource)
 	}
-	sortOnlyName := operationTypeName("listSorted")
+	sortOnlyName := operationTypeName("GET /sorted")
 	if !strings.Contains(clientSource, "type "+sortOnlyName+"QueryInput =") {
 		t.Fatalf("sort-only operation query input is missing:\n%s", clientSource)
 	}
@@ -198,10 +198,10 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch"> & {`) || !strings.Contains(clientSource, "Required idempotency key") || !strings.Contains(clientSource, "readonly idempotencyKey: string") {
 		t.Fatalf("required idempotency option missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, `readonly "createProduct": Operations["createProduct"]["call"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
+	if !strings.Contains(clientSource, `readonly "createProduct": Routes["POST /products"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "(__sdkgen_getProductPathProductID_") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
+	if !strings.Contains(clientSource, "(__sdkgen_getProductsProductIDPathProductID_") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
 		t.Fatalf("instance resource builder missing:\n%s", clientSource)
 	}
 	for _, expected := range []string{
@@ -277,7 +277,7 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	for _, expected := range []string{
 		"  createPaginator,",
 		"  type PaginateInput,",
-		`readonly "listOrderItems": {`,
+		`readonly "GET /orders/{orderID}/items": {`,
 		" = createPaginator<",
 	} {
 		if !strings.Contains(client, expected) {
@@ -411,10 +411,10 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	for _, expected := range []string{
 		"readonly auth: {",
 		"readonly login: {",
-		`readonly post: Operations["login"]["call"]`,
+		`readonly post: Routes["POST /auth/login"]["call"]`,
 		"readonly sessions: {",
-		"(__sdkgen_revokeSessionPathSessionID_",
-		`readonly delete: Operations["revokeSession"]["resourceCall"]`,
+		"(__sdkgen_deleteAuthSessionsSessionIDPathSessionID_",
+		`readonly delete: Routes["DELETE /auth/sessions/{sessionId}"]["resourceCall"]`,
 		"login: {\n      post: __sdkgen_",
 		"sessions: assignCallableProperties(",
 	} {
@@ -446,7 +446,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 
 func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
-  "openapi": "3.1.0",
+  "openapi": "3.2.0",
   "info": {"title": "Root path", "version": "1.0.0"},
   "paths": {
     "/": {
@@ -472,7 +472,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		`readonly get: Operations["getServiceIndex"]["call"]`,
+		`readonly get: Routes["GET /"]["call"]`,
 		"get: __sdkgen_",
 	} {
 		if !strings.Contains(client, expected) {
@@ -499,6 +499,87 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	}
 	if manifest.Operations[1].CallExpression != "api.health.get()" {
 		t.Fatalf("non-root call = %q, want %q", manifest.Operations[1].CallExpression, "api.health.get()")
+	}
+}
+
+func TestSourceArtifactsGenerateRouteCatalogWithoutOperationID(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Route identities", "version": "1"},
+  "paths": {
+    "/": {"get": {"responses": {"204": {"description": "OK"}}}},
+    "/health": {"get": {"operationId": "getHealth", "responses": {"204": {"description": "OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		`readonly "GET /": {`,
+		`readonly "GET /health": {`,
+		`readonly "GET /": Routes["GET /"]["call"]`,
+		`readonly "getHealth": Routes["GET /health"]`,
+		`$routes: Object.fromEntries([["GET /",`,
+		`$operations: Object.fromEntries([["getHealth",`,
+	} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("route catalog missing %q:\n%s", expected, client)
+		}
+	}
+	if strings.Contains(client, `readonly "":`) || strings.Contains(client, `["", __sdkgen_`) {
+		t.Fatalf("empty operation identity leaked:\n%s", client)
+	}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Operations[0].CallExpression; got != "api.get()" {
+		t.Fatalf("root call = %q", got)
+	}
+}
+
+func TestRouteCatalogCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.2.0",
+  "info": {"title": "Route capabilities", "version": "1"},
+  "paths": {
+    "/events": {"get": {"responses": {"200": {"description": "OK", "content": {
+      "application/x-ndjson": {"itemSchema": {"type": "string"}}
+    }}}}},
+    "/source": {"get": {"responses": {"200": {"description": "OK", "links": {
+      "follow": {"operationRef": "#/paths/~1target/post"}
+    }}}}},
+    "/target": {"post": {"responses": {"204": {"description": "OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		`readonly "GET /events": {`,
+		`readonly stream: (options?: Routes["GET /events"]["options"]) => AsyncIterable<string>`,
+		`readonly "GET /source": {`,
+		`readonly links: { readonly "follow":`,
+		`readonly "GET /source": Routes["GET /source"]["call"]`,
+		`["stream", __sdkgen_`,
+		`["links", Object.fromEntries`,
+	} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("route capability missing %q:\n%s", expected, client)
+		}
+	}
+	if strings.Contains(client, `readonly "":`) || strings.Contains(client, `$links: Object.fromEntries([["",`) || strings.Contains(client, `$streams: Object.fromEntries([["",`) {
+		t.Fatalf("ID-less capability leaked an empty operation alias:\n%s", client)
 	}
 }
 

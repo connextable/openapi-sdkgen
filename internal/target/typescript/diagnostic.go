@@ -1,6 +1,31 @@
 package typescript
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+)
+
+func operationRouteKey(operation ir.Operation) string {
+	if operation.RouteKey != "" {
+		return operation.RouteKey
+	}
+	return operation.Method + " " + operation.Path
+}
+
+func operationLabel(operation ir.Operation) string {
+	if operation.OperationID != "" {
+		return operation.OperationID
+	}
+	return operationRouteKey(operation)
+}
+
+func manifestRouteKey(operation ManifestOperation) string {
+	if operation.RouteKey != "" {
+		return operation.RouteKey
+	}
+	return operation.Method + " " + operation.Path
+}
 
 func openAPIPointer(parts ...string) string {
 	pointer := "#"

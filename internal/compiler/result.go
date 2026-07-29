@@ -24,6 +24,13 @@ type Result struct {
 // diagnostics for expected author errors.
 func CompileResult(data []byte) (Result, error) {
 	collector := &diagnostic.Collector{}
+	findings, err := reservedExtensionDiagnostics(data, "in-memory OpenAPI document")
+	if err == nil {
+		collector.Extend(findings)
+	}
+	if collector.HasErrors() {
+		return reservedSourceScanResult(collector), nil
+	}
 	document, err := compile(data, false)
 	return resultFromCompile(document, err, "in-memory OpenAPI document", collector), nil
 }
@@ -49,8 +56,32 @@ func CompileInputResultWithOptions(input string, options CompileOptions) (Result
 	if err := yaml.Unmarshal(source.data, &decoded); err != nil {
 		return resultFromCompile(nil, fmt.Errorf("decode OpenAPI input: %w", err), source.display, collector), nil
 	}
+	findings, err := reservedExtensionDiagnostics(source.data, source.display)
+	if err != nil {
+		return resultFromCompile(nil, err, source.display, collector), nil
+	}
+	collector.Extend(findings)
+	if err := scanLocalReferenceDocuments(source, collector); err != nil {
+		return Result{}, fmt.Errorf("internal source registry failure: %w", err)
+	}
+	if collector.HasErrors() {
+		return reservedSourceScanResult(collector), nil
+	}
 	document, err := compileInput(source, false, options)
 	return resultFromCompile(document, err, source.display, collector), nil
+}
+
+func reservedSourceScanResult(collector *diagnostic.Collector) Result {
+	reason := "reserved extension keywords were found before reference bundling"
+	return Result{
+		Diagnostics: displayDiagnosticSources(collector.Diagnostics()),
+		SkippedPhases: []diagnostic.SkippedPhase{
+			{Phase: diagnostic.PhaseReferences, Reason: reason},
+			{Phase: diagnostic.PhaseNormalize, Reason: reason},
+			{Phase: diagnostic.PhaseOpenAPI, Reason: reason},
+			{Phase: diagnostic.PhaseIR, Reason: reason},
+		},
+	}
 }
 
 func resultFromCompile(document *ir.Document, err error, source string, collector *diagnostic.Collector) Result {
@@ -68,8 +99,32 @@ func resultFromCompile(document *ir.Document, err error, source string, collecto
 		result.Document = nil
 		result.SkippedPhases = skippedAfter(phase)
 	}
-	result.Diagnostics = collector.Diagnostics()
+	result.Diagnostics = displayDiagnosticSources(collector.Diagnostics())
 	return result
+}
+
+func displayDiagnosticSources(values []diagnostic.Diagnostic) []diagnostic.Diagnostic {
+	sources := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.Location.Source != "" {
+			sources = append(sources, value.Location.Source)
+		}
+		for _, related := range value.Related {
+			if related.Source != "" {
+				sources = append(sources, related.Source)
+			}
+		}
+	}
+	registry := diagnostic.NewSourceRegistry(sources)
+	displayed := append([]diagnostic.Diagnostic(nil), values...)
+	for index := range displayed {
+		displayed[index].Location.Source = registry.Display(displayed[index].Location.Source)
+		displayed[index].Related = append([]diagnostic.Location(nil), displayed[index].Related...)
+		for relatedIndex := range displayed[index].Related {
+			displayed[index].Related[relatedIndex].Source = registry.Display(displayed[index].Related[relatedIndex].Source)
+		}
+	}
+	return diagnostic.Sort(displayed)
 }
 
 func classifyCompileError(err error) (diagnostic.Phase, string, string) {

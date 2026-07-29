@@ -171,7 +171,7 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
-	for _, expected := range []string{"createCallbackHandlers", `export interface Callbacks`, `readonly "createOrder"`, `readonly "orderStatus"`, "{$request.body#/callbackURL}", "No route is generated", `as unknown as CallbackEndpoints["callbacks"]`, `as unknown as CallbackEndpoints["componentCallbacks"]`} {
+	for _, expected := range []string{"createCallbackHandlers", `export interface RouteCallbacks`, `readonly "POST /orders"`, `export interface Callbacks`, `readonly "createOrder"`, `readonly "orderStatus"`, "{$request.body#/callbackURL}", "No route is generated", `as unknown as CallbackEndpoints["routeCallbacks"]`, `as unknown as CallbackEndpoints["callbacks"]`, `as unknown as CallbackEndpoints["componentCallbacks"]`} {
 		if !strings.Contains(callbacks, expected) {
 			t.Fatalf("callback source missing %q:\n%s", expected, callbacks)
 		}
@@ -210,6 +210,38 @@ const callbacks = codecs.createCallbackHandlers({ callbacks: { createOrder: { or
   if (JSON.stringify(security) !== JSON.stringify([{ signature: [] }])) throw new Error("callback security metadata mismatch");
 } });
 const endpoint = callbacks.callbacks.createOrder.orderStatus["{$request.body#/callbackURL}"].POST;
+const routeEndpoint = callbacks.routeCallbacks["POST /orders"].orderStatus["{$request.body#/callbackURL}"].POST;
+if (routeEndpoint !== endpoint) throw new Error("route and explicit-ID callback endpoints are not referential aliases");
+const routeHandler = async () => ({ status: 204 });
+const operationHandler = async () => ({ status: 204 });
+const duplicateHandlers = codecs.createCallbackHandlers({
+  routeCallbacks: { "POST /orders": { orderStatus: { "{$request.body#/callbackURL}": { POST: routeHandler } } } },
+  callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: operationHandler } } } }
+});
+try {
+  await duplicateHandlers.routeCallbacks["POST /orders"].orderStatus["{$request.body#/callbackURL}"].POST.fetch(new Request("https://host.test/callback", { method: "POST" }));
+  throw new Error("duplicate callback handlers were accepted");
+} catch (error) {
+  if (String(error).includes("duplicate callback handlers were accepted")) throw error;
+  if (!String(error).includes("both routeCallbacks and callbacks")) throw error;
+}
+const sharedHandler = async () => ({ status: 204 });
+const duplicatePathParams = codecs.createCallbackHandlers({
+  routeCallbacks: { "POST /orders": { orderStatus: { "{$request.body#/callbackURL}": { POST: sharedHandler } } } },
+  callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: sharedHandler } } } }
+}, {
+  pathParams: {
+    routeCallbacks: { "POST /orders": { orderStatus: { "{$request.body#/callbackURL}": { POST: {} } } } },
+    callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: {} } } } }
+  }
+});
+try {
+  await duplicatePathParams.routeCallbacks["POST /orders"].orderStatus["{$request.body#/callbackURL}"].POST.fetch(new Request("https://host.test/callback", { method: "POST" }));
+  throw new Error("duplicate callback path parameters were accepted");
+} catch (error) {
+  if (String(error).includes("duplicate callback path parameters were accepted")) throw error;
+  if (!String(error).includes("both routeCallbacks and callbacks")) throw error;
+}
 const response = await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }));
 if (response.status !== 204) throw new Error("callback response was not encoded");
 if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderStatusCallback", method: "POST", path: "/callback" }])) throw new Error("callback context mismatch");
@@ -223,6 +255,48 @@ if ((await denied.callbacks.createOrder.orderStatus["{$request.body#/callbackURL
 	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "callbacks.js"))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("execute generated callback codecs: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedCallbacksSupportIDLessSourceThroughRouteCatalog(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "ID-less callback source", "version": "1"},
+  "paths": {"/jobs": {"post": {
+    "responses": {"202": {"description": "Accepted"}},
+    "callbacks": {"status": {"{$request.body#/url}": {"post": {
+      "responses": {"204": {"description": "Accepted"}}
+    }}}}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
+	for _, expected := range []string{
+		`export interface RouteCallbacks`,
+		`readonly "POST /jobs"`,
+		`routeCallbacks: Object.fromEntries([["POST /jobs"`,
+		`callbacks: Object.fromEntries([])`,
+	} {
+		if !strings.Contains(callbacks, expected) {
+			t.Fatalf("ID-less callback route surface missing %q:\n%s", expected, callbacks)
+		}
+	}
+	if strings.Contains(callbacks, `readonly "":`) {
+		t.Fatalf("empty callback source alias leaked:\n%s", callbacks)
 	}
 }
 
@@ -666,7 +740,7 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
     "denyBool":{"post":{"operationId":"denyBool","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Deny"}}}},"responses":{"204":{"description":"OK"}}}},
     "refSibling":{"post":{"operationId":"refSibling","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/BaseNumber","minimum":10}}}},"responses":{"204":{"description":"OK"}}}},
     "advanced":{"post":{"operationId":"advanced","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["xcount","closed","tuple"],"propertyNames":{"pattern":"^[a-z]+$"},"patternProperties":{"^x":{"type":"integer"}},"properties":{"closed":{"allOf":[{"type":"object","properties":{"id":{"type":"string"}}}],"unevaluatedProperties":false},"tuple":{"type":"array","prefixItems":[{"type":"string"}],"unevaluatedItems":false}},"additionalProperties":false}}}},"responses":{"204":{"description":"OK"}}}},
-    "annotation":{"post":{"operationId":"annotation","requestBody":{"required":true,"content":{"application/json":{"schema":{"x-sdkgen-boolean-schema":false}}}},"responses":{"204":{"description":"OK"}}}},
+    "annotation":{"post":{"operationId":"annotation","requestBody":{"required":true,"content":{"application/json":{"schema":{"x-acme-boolean-schema":false}}}},"responses":{"204":{"description":"OK"}}}},
     "encodedRef":{"post":{"operationId":"encodedRef","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#%2Fcomponents%2Fschemas%2FFoo%2DBar"}}}},"responses":{"204":{"description":"OK"}}}},
     "parameters":{"get":{"operationId":"parameters","parameters":[{"name":"count","in":"query","required":true,"schema":{"$ref":"#/components/schemas/Integer"}},{"name":"enabled","in":"header","required":true,"schema":{"$ref":"#/components/schemas/Boolean"}},{"name":"values","in":"query","required":true,"schema":{"type":"array","items":{"$ref":"#/components/schemas/Integer","minimum":1}}},{"name":"ambiguousValues","in":"query","required":true,"schema":{"type":"array","items":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]}}},{"name":"tuple","in":"query","required":true,"explode":false,"schema":{"type":"array","prefixItems":[{"type":"integer"},{"type":"boolean"}],"items":false}},{"name":"variant","in":"query","required":true,"schema":{"oneOf":[{"type":"integer"},{"type":"boolean"}]}},{"name":"constrained","in":"query","required":true,"schema":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]}},{"name":"typeless","in":"query","required":true,"schema":{"enum":[1,2]}},{"name":"typelessBool","in":"query","required":true,"schema":{"const":true}},{"name":"dynamicValue","in":"query","required":true,"schema":{"$dynamicRef":"#value"}},{"name":"scalarArray","in":"query","required":true,"schema":{"oneOf":[{"type":"string"},{"type":"array","minItems":2,"items":{"type":"string"}}]}},{"name":"selected","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","oneOf":[{"required":["kind","value"],"properties":{"kind":{"const":"n"},"value":{"type":"integer"}}},{"required":["kind","value"],"properties":{"kind":{"const":"s"},"value":{"type":"string"}}}]}},{"name":"dynamic","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},{"name":"flags","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","patternProperties":{"^x":{"type":"boolean"}},"additionalProperties":false}},{"name":"composed","in":"query","required":true,"schema":{"allOf":[{"type":"integer"},{"minimum":1}]}},{"name":"xmlChoice","in":"query","required":true,"content":{"application/xml":{"schema":{"oneOf":[{"type":"integer"},{"type":"boolean"}],"xml":{"name":"choice"}}}}}],"responses":{"204":{"description":"OK"}}}},
     "formRef":{"post":{"operationId":"formRef","requestBody":{"required":true,"content":{"application/x-www-form-urlencoded":{"schema":{"$ref":"#/components/schemas/BaseForm","required":["enabled","choice","ambiguous","arrayChoice","typelessArray"],"properties":{"count":{"allOf":[{"minimum":1}]},"choice":{"oneOf":[{"const":"true"},{"const":"false"}]},"enabled":{"type":"boolean"},"ambiguous":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]},"arrayChoice":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"integer"}}]},"typelessArray":{"items":{"type":"integer"}}},"oneOf":[{"required":["mode","branchValue"],"properties":{"mode":{"const":"n"},"branchValue":{"type":"integer"}}},{"required":["mode","branchValue"],"properties":{"mode":{"const":"s"},"branchValue":{"type":"string"}}}]}}}},"responses":{"204":{"description":"OK"}}}},

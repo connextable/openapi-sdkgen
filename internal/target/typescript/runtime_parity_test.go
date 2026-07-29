@@ -388,17 +388,17 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		`invocation: RequiredLinkInvocation<never, Operations["followTarget"]["options"]`,
-		`Operations["followTarget"]["options"] & Operations["optionalTarget"]["options"]`,
-		`readonly "tailEvents": (options: Operations["tailEvents"]["options"])`,
+		`invocation: RequiredLinkInvocation<never, Routes["POST /target"]["options"]`,
+		`Routes["POST /optional"]["options"] & Routes["POST /target"]["options"]`,
+		`readonly "tailEvents": (options: Routes["GET /events"]["options"])`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("required option contract missing %q:\n%s", expected, client)
 		}
 	}
-	probe := `import { createClient, type Operations } from "./index.js"
+	probe := `import { createClient, type Routes } from "./index.js"
 declare const api: ReturnType<typeof createClient>
-declare const response: Operations["getSource"]["rawResponse"]
+declare const response: Routes["GET /source"]["rawResponse"]
 // @ts-expect-error aggregate dispatch must satisfy every possible required option contract
 api.$links.getSource.follow(response, { options: {} })
 api.$links.getSource.follow(response, { options: { idempotencyKey: "idem", ifMatch: "v1" } })
@@ -572,8 +572,6 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 	document := &ir.Document{Operations: []ir.Operation{
 		plain("getModern", "GET", "/foo-bar"),
 		plain("getLegacy", "GET", "/foo_bar"),
-		plain("getDuplicateOne", "GET", "/dupe"),
-		plain("getDuplicateTwo", "GET", "/dupe"),
 		plain("listPeople", "GET", "/people"),
 		parameterized("getListedPerson", "/people/list/{id}", "id", map[string]any{"type": "string"}),
 		plain("getRoot", "GET", "/"),
@@ -595,11 +593,15 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 		t.Fatal(err)
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	routesByID := make(map[string]string, len(document.Operations))
+	for _, operation := range document.Operations {
+		routesByID[operation.OperationID] = operation.Method + " " + operation.Path
+	}
 	for _, operationID := range []string{
-		"getModern", "getLegacy", "getDuplicateOne", "getDuplicateTwo", "listPeople", "getTenant", "getAlias",
+		"getModern", "getLegacy", "listPeople", "getTenant", "getAlias",
 		"getProfile", "getSettings", "getPaginate", "getRaw",
 	} {
-		start := strings.Index(client, `readonly `+quoteTS(operationID)+`: {`)
+		start := strings.Index(client, `readonly `+quoteTS(routesByID[operationID])+`: {`)
 		if start < 0 {
 			t.Fatalf("operation %q missing from catalog:\n%s", operationID, client)
 		}
@@ -631,8 +633,6 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (in
 } });
 await api.$operations.getModern();
 await api.$operations.getLegacy();
-await api.$operations.getDuplicateOne();
-await api.$operations.getDuplicateTwo();
 await api.$operations.listPeople();
 await api.people.list("person").get();
 await api.get();
@@ -643,7 +643,7 @@ await api.$operations.getProfile({ path: { id: "team" } });
 await api.$operations.getSettings({ path: { teamID: 7 } });
 await api.$operations.getPaginate();
 await api.$operations.getRaw();
-const expected = ["/foo-bar","/foo_bar","/dupe","/dupe","/people","/people/list/person","/","/get","/acme","/repeat/same/aliases/same","/teams/team/profile","/teams/7/settings","/widgets/paginate","/widgets/list/raw"];
+const expected = ["/foo-bar","/foo_bar","/people","/people/list/person","/","/get","/acme","/repeat/same/aliases/same","/teams/team/profile","/teams/7/settings","/widgets/paginate","/widgets/list/raw"];
 if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error("resource fallback dispatch mismatch: " + JSON.stringify(paths));
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {

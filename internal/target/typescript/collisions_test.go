@@ -18,34 +18,54 @@ func TestSourceArtifactsPreservesNormalizationEquivalentOperationIDs(t *testing.
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	for _, operationID := range []string{"get-pet", "get_pet"} {
-		if !strings.Contains(source, "readonly "+quoteTS(operationID)+": {") ||
+	for operationID, routeKey := range map[string]string{"get-pet": "GET /pets/modern", "get_pet": "GET /pets/legacy"} {
+		if !strings.Contains(source, "readonly "+quoteTS(operationID)+": Routes["+quoteTS(routeKey)+"]") ||
 			!strings.Contains(source, `["`+operationID+`", __sdkgen_`) {
 			t.Fatalf("exact operation %q missing:\n%s", operationID, source)
 		}
 	}
 }
 
-func TestSourceArtifactsRejectsMissingAndDuplicateExactOperationIDs(t *testing.T) {
-	for name, operations := range map[string][]ir.Operation{
-		"missing": {
-			{Method: "GET", Path: "/missing"},
-		},
-		"duplicate": {
-			{OperationID: "same", Method: "GET", Path: "/one"},
-			{OperationID: "same", Method: "POST", Path: "/two"},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := SourceArtifacts(&ir.Document{Operations: operations})
-			if err == nil || !strings.Contains(err.Error(), "operationId") {
-				t.Fatalf("error = %v", err)
-			}
-		})
+func TestSourceArtifactsAllowsMissingOperationIDAndRejectsDuplicateExactIDs(t *testing.T) {
+	artifacts, err := SourceArtifacts(&ir.Document{Operations: []ir.Operation{{Method: "GET", Path: "/missing"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	if !strings.Contains(source, `readonly "GET /missing": Routes["GET /missing"]["call"]`) || strings.Contains(source, `readonly "":`) {
+		t.Fatalf("route-only operation surface missing:\n%s", source)
+	}
+	if strings.Contains(source, "Operation ID: ``") {
+		t.Fatalf("missing operation ID rendered as an empty identity:\n%s", source)
+	}
+	_, err = SourceArtifacts(&ir.Document{Operations: []ir.Operation{
+		{OperationID: "same", Method: "GET", Path: "/one"},
+		{OperationID: "same", Method: "POST", Path: "/two"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "operationId") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestSourceArtifactsAllowsMissingOperationIDOnlyForHiddenOperations(t *testing.T) {
+func TestIDLessOperationParameterBindingsUseRouteIdentity(t *testing.T) {
+	first, err := operationParameters(&ir.Document{}, ir.Operation{Method: "GET", Path: "/first", Raw: map[string]any{
+		"parameters": []any{map[string]any{"name": "query", "in": "query", "schema": map[string]any{"type": "string"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := operationParameters(&ir.Document{}, ir.Operation{Method: "GET", Path: "/second", Raw: map[string]any{
+		"parameters": []any{map[string]any{"name": "query", "in": "query", "schema": map[string]any{"type": "string"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].Binding == second[0].Binding {
+		t.Fatalf("ID-less operation bindings collided: %q", first[0].Binding)
+	}
+}
+
+func TestSourceArtifactsAllowsMissingOperationIDForEveryVisibility(t *testing.T) {
 	if _, err := SourceArtifacts(&ir.Document{Operations: []ir.Operation{
 		{Method: "GET", Path: "/hidden", Visibility: "hidden"},
 		{OperationID: "visible", Method: "GET", Path: "/visible", Visibility: "public"},
@@ -266,7 +286,7 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	if !strings.Contains(source, `readonly list: Operations["listUsers"]["call"] & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
+	if !strings.Contains(source, `readonly list: Routes["GET /users"]["call"] & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
 		t.Fatalf("callable namespace was not emitted:\n%s", source)
 	}
 }
@@ -358,7 +378,7 @@ func TestRepeatedPathParameterFallsBackToExactOperationCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	start := strings.Index(client, `readonly "getAlias": {`)
+	start := strings.Index(client, `readonly "GET /users/{id}/aliases/{id}": {`)
 	if start < 0 || !strings.Contains(client[start:], "readonly resourceCall: never") {
 		t.Fatalf("repeated path parameter retained a resource call:\n%s", client)
 	}
@@ -389,7 +409,7 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	start := strings.Index(source, `readonly "listUsers": {`)
+	start := strings.Index(source, `readonly "GET /users": {`)
 	if start < 0 {
 		t.Fatalf("listUsers catalog entry missing:\n%s", source)
 	}
@@ -426,21 +446,8 @@ func TestBuildResourceTreeOmitsTwoOperationsRequiringOneTerminal(t *testing.T) {
 		{OperationID: "listUsers", Method: "GET", Path: "/users"},
 		{OperationID: "searchUsers", Method: "GET", Path: "/users"},
 	}}
-	manifest, err := buildManifest(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id, call := range manifestCalls(manifest) {
-		if call != `api.$operations["`+id+`"]()` {
-			t.Fatalf("%s call = %q", id, call)
-		}
-	}
-	tree, err := buildResourceTree(document, manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := tree.children["users"]; exists {
-		t.Fatal("colliding operation terminal retained an empty resource")
+	if _, err := SourceArtifacts(document); err == nil || !strings.Contains(err.Error(), "route identity") {
+		t.Fatalf("duplicate route error = %v", err)
 	}
 }
 

@@ -83,6 +83,7 @@ type Manifest struct {
 }
 
 type ManifestOperation struct {
+	RouteKey           string   `json:"routeKey"`
 	OperationID        string   `json:"operationID"`
 	Summary            string   `json:"summary,omitempty"`
 	Description        string   `json:"description,omitempty"`
@@ -300,25 +301,26 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 	for _, operation := range document.Operations {
 		outputExpression, err := operationOutputTypeExpression(document, operation)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s output: %w", operation.OperationID, err)
+			return Manifest{}, fmt.Errorf("operation %s output: %w", operationLabel(operation), err)
 		}
 		inputTypes, err := operationInputTypes(document, operation)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s input: %w", operation.OperationID, err)
+			return Manifest{}, fmt.Errorf("operation %s input: %w", operationLabel(operation), err)
 		}
 		errorExpression, err := operationErrorTypeExpression(document, operation, errorsBySchema)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s error: %w", operation.OperationID, err)
+			return Manifest{}, fmt.Errorf("operation %s error: %w", operationLabel(operation), err)
 		}
 		callExpression, segments, err := operationCall(document, operation, inputTypes)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s call expression: %w", operation.OperationID, err)
+			return Manifest{}, fmt.Errorf("operation %s call expression: %w", operationLabel(operation), err)
 		}
 		visibility := operation.Visibility
 		if visibility == "" {
 			visibility = "public"
 		}
 		manifest.Operations = append(manifest.Operations, ManifestOperation{
+			RouteKey:           operationRouteKey(operation),
 			OperationID:        operation.OperationID,
 			Summary:            operation.Summary,
 			Description:        operation.Description,
@@ -349,8 +351,8 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 	resourceOperationIDs(tree, reachable)
 	for index := range manifest.Operations {
 		item := &manifest.Operations[index]
-		if item.Visibility == "public" && !reachable[item.OperationID] {
-			operation := findOperation(document, item.OperationID)
+		if item.Visibility == "public" && !reachable[item.RouteKey] {
+			operation := findOperation(document, item.RouteKey)
 			item.CallExpression = exactOperationCall(document, operation, item.InputTypes)
 			item.ResourceSegments = nil
 		}
@@ -415,7 +417,10 @@ func operationCall(document *ir.Document, operation ir.Operation, inputTypes []s
 
 func exactOperationCall(document *ir.Document, operation ir.Operation, inputTypes []string) string {
 	pathBindings, _ := operationPathBindings(document, operation)
-	return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder, pathBindings)
+	if operation.OperationID != "" {
+		return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder, pathBindings)
+	}
+	return "api.$routes[" + quoteTS(operationRouteKey(operation)) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder, pathBindings)
 }
 
 func resourcePathParts(path string) []string {

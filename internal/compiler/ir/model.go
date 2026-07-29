@@ -13,6 +13,19 @@ type Document struct {
 	// for JSON Schema reference resolution.
 	Schemas map[string]Schema
 	Raw     map[string]any
+	// Provenance maps normalized document pointers to their originating source
+	// location. Related locations retain reference/composition sites.
+	Provenance map[string]Provenance
+}
+
+type SourceLocation struct {
+	Source  string
+	Pointer string
+}
+
+type Provenance struct {
+	Primary SourceLocation
+	Related []SourceLocation
 }
 
 // Schema is a normalized schema resource. Value remains lossless so target
@@ -32,6 +45,7 @@ type Server struct {
 }
 
 type Operation struct {
+	RouteKey           string
 	OperationID        string
 	Method             string
 	Path               string

@@ -27,16 +27,18 @@ func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, 
 	visible := map[string]bool{}
 	for _, operation := range manifest.Operations {
 		if operation.Visibility != "hidden" {
-			visible[operation.OperationID] = true
+			visible[manifestRouteKey(operation)] = true
 		}
 	}
 	byID := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
-		byID[operation.OperationID] = operation
+		if operation.OperationID != "" {
+			byID[operation.OperationID] = operation
+		}
 	}
 	var result []generatedLink
 	for _, source := range document.Operations {
-		if !visible[source.OperationID] {
+		if !visible[operationRouteKey(source)] {
 			continue
 		}
 		responses, _ := source.Raw["responses"].(map[string]any)
@@ -55,31 +57,31 @@ func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, 
 				}
 				target, err := linkTargetOperation(document, byID, link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", source.OperationID, name, err)
+					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
 				}
-				if !visible[target.OperationID] {
-					return nil, fmt.Errorf("response link %s %s targets hidden operation %q", source.OperationID, name, target.OperationID)
+				if !visible[operationRouteKey(target)] {
+					return nil, fmt.Errorf("response link %s %s targets hidden operation %q", operationLabel(source), name, operationLabel(target))
 				}
 				definition, err := linkDefinition(document, source, target, link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", source.OperationID, name, err)
+					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
 				}
 				serverURL, err := linkServerURL(link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", source.OperationID, name, err)
+					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
 				}
 				result = append(result, generatedLink{SourceOperation: source, Status: status, Name: name, TargetOperation: target, Definition: definition, ServerURL: serverURL})
 			}
 		}
 	}
 	sort.Slice(result, func(left, right int) bool {
-		if result[left].SourceOperation.OperationID == result[right].SourceOperation.OperationID {
+		if operationRouteKey(result[left].SourceOperation) == operationRouteKey(result[right].SourceOperation) {
 			if result[left].Name == result[right].Name {
 				return result[left].Status < result[right].Status
 			}
 			return result[left].Name < result[right].Name
 		}
-		return result[left].SourceOperation.OperationID < result[right].SourceOperation.OperationID
+		return operationRouteKey(result[left].SourceOperation) < operationRouteKey(result[right].SourceOperation)
 	})
 	return result, nil
 }
@@ -263,8 +265,11 @@ func emitLinkInterface(output *bytes.Buffer, document *ir.Document, links []gene
 	output.WriteString("  /** OpenAPI response links grouped by source operation. */\n")
 	output.WriteString("  readonly $links: {\n")
 	for _, source := range linkSourceOperations(links) {
+		if source.OperationID == "" {
+			continue
+		}
 		fmt.Fprintf(output, "    readonly %s: {\n", quoteTS(source.OperationID))
-		for _, group := range linkGroupsForSource(links, source.OperationID) {
+		for _, group := range linkGroupsForSource(links, operationRouteKey(source)) {
 			contract, err := linkGroupContract(document, group)
 			if err != nil {
 				return err
@@ -283,11 +288,11 @@ type generatedLinkGroup struct {
 	Links           []generatedLink
 }
 
-func linkGroupsForSource(links []generatedLink, operationID string) []generatedLinkGroup {
+func linkGroupsForSource(links []generatedLink, routeKey string) []generatedLinkGroup {
 	byName := map[string][]generatedLink{}
 	var source ir.Operation
 	for _, link := range links {
-		if link.SourceOperation.OperationID != operationID {
+		if operationRouteKey(link.SourceOperation) != routeKey {
 			continue
 		}
 		source = link.SourceOperation
@@ -326,9 +331,9 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		if err != nil {
 			return "", err
 		}
-		output := operationSlotType(link.TargetOperation.OperationID, "output")
+		output := operationSlotType(operationRouteKey(link.TargetOperation), "output")
 		targetInputs[input] = true
-		targetOptions[operationSlotType(link.TargetOperation.OperationID, "options")] = true
+		targetOptions[operationSlotType(operationRouteKey(link.TargetOperation), "options")] = true
 		targetOutputs[output] = true
 		if operationRequiresOptions(link.TargetOperation) {
 			requiresOptions = true
@@ -337,9 +342,9 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		if err != nil {
 			return "", err
 		}
-		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(group.SourceOperation.OperationID, "rawResponse")+" | APIError, "+linkInvocationParameter(input, operationSlotType(link.TargetOperation.OperationID, "options"), sourceInput, operationRequiresOptions(link.TargetOperation))+") => Promise<"+output+">")
+		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse")+" | APIError, "+linkInvocationParameter(input, operationSlotType(operationRouteKey(link.TargetOperation), "options"), sourceInput, operationRequiresOptions(link.TargetOperation))+") => Promise<"+output+">")
 	}
-	return "{ (response: " + operationSlotType(group.SourceOperation.OperationID, "rawResponse") + " | APIError, " + linkInvocationParameter(sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, requiresOptions) + "): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
+	return "{ (response: " + operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse") + " | APIError, " + linkInvocationParameter(sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, requiresOptions) + "): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
 }
 
 func linkInvocationParameter(input, options, sourceInput string, required bool) string {
@@ -357,7 +362,7 @@ func linkSourceInputType(document *ir.Document, operation ir.Operation) (string,
 	if len(inputs) == 0 {
 		return "never", nil
 	}
-	return operationSlotType(operation.OperationID, "input"), nil
+	return operationSlotType(operationRouteKey(operation), "input"), nil
 }
 
 func linkTargetInputType(document *ir.Document, operation ir.Operation) (string, error) {
@@ -404,23 +409,23 @@ func emitLinkValues(output *bytes.Buffer, document *ir.Document, links []generat
 		if err != nil {
 			return err
 		}
-		targetProperty := operationValueName(link.TargetOperation.OperationID)
+		targetProperty := operationValueName(operationRouteKey(link.TargetOperation))
 		targetInputs, err := operationInputTypes(document, link.TargetOperation)
 		if err != nil {
 			return err
 		}
-		targetInput := operationSlotType(link.TargetOperation.OperationID, "input")
-		targetOptions := operationSlotType(link.TargetOperation.OperationID, "options")
-		sourceRawResponse := operationSlotType(link.SourceOperation.OperationID, "rawResponse")
+		targetInput := operationSlotType(operationRouteKey(link.TargetOperation), "input")
+		targetOptions := operationSlotType(operationRouteKey(link.TargetOperation), "options")
+		sourceRawResponse := operationSlotType(operationRouteKey(link.SourceOperation), "rawResponse")
 		sourceInputs, err := operationInputTypes(document, link.SourceOperation)
 		if err != nil {
 			return err
 		}
 		sourceInput := "never"
 		if len(sourceInputs) != 0 {
-			sourceInput = operationSlotType(link.SourceOperation.OperationID, "input")
+			sourceInput = operationSlotType(operationRouteKey(link.SourceOperation), "input")
 		}
-		targetOutput := operationSlotType(link.TargetOperation.OperationID, "output")
+		targetOutput := operationSlotType(operationRouteKey(link.TargetOperation), "output")
 		invocationType := "LinkInvocation"
 		invocationDefault := " = {}"
 		if operationRequiresOptions(link.TargetOperation) {
@@ -438,7 +443,7 @@ func emitLinkValues(output *bytes.Buffer, document *ir.Document, links []generat
 		fmt.Fprintf(output, "  const %s = (response: %s | APIError, invocation: %s<%s, %s, %s>%s): Promise<%s> => %s(mergeLinkInput(resolveLinkInput<%s>(response, %s, invocation.sourceInput), invocation.input), %s)\n", name, sourceRawResponse, invocationType, targetInput, targetOptions, sourceInput, invocationDefault, targetOutput, targetProperty, targetInput, link.Definition, options)
 	}
 	for _, source := range linkSourceOperations(links) {
-		for _, group := range linkGroupsForSource(links, source.OperationID) {
+		for _, group := range linkGroupsForSource(links, operationRouteKey(source)) {
 			if err := emitLinkGroupValue(output, document, group); err != nil {
 				return err
 			}
@@ -469,9 +474,9 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		if err != nil {
 			return err
 		}
-		output := operationSlotType(link.TargetOperation.OperationID, "output")
+		output := operationSlotType(operationRouteKey(link.TargetOperation), "output")
 		targetInputs[input] = true
-		targetOptions[operationSlotType(link.TargetOperation.OperationID, "options")] = true
+		targetOptions[operationSlotType(operationRouteKey(link.TargetOperation), "options")] = true
 		targetOutputs[output] = true
 		if operationRequiresOptions(link.TargetOperation) {
 			requiresOptions = true
@@ -483,7 +488,7 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		invocationType = "RequiredLinkInvocation"
 		invocationDefault = ""
 	}
-	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %s | APIError, invocation: %s<%s, %s, %s>%s): Promise<%s> => {\n", variable, contract, operationSlotType(group.SourceOperation.OperationID, "rawResponse"), invocationType, sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, invocationDefault, sortedStringSet(targetOutputs))
+	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %s | APIError, invocation: %s<%s, %s, %s>%s): Promise<%s> => {\n", variable, contract, operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse"), invocationType, sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, invocationDefault, sortedStringSet(targetOutputs))
 	for _, link := range group.Links {
 		if link.Status == "default" {
 			continue
@@ -540,8 +545,11 @@ func emitLinkReturnValue(output *bytes.Buffer, links []generatedLink) error {
 	}
 	sources := make([]runtimeProperty, 0)
 	for _, source := range linkSourceOperations(links) {
+		if source.OperationID == "" {
+			continue
+		}
 		groups := make([]runtimeProperty, 0)
-		for _, group := range linkGroupsForSource(links, source.OperationID) {
+		for _, group := range linkGroupsForSource(links, operationRouteKey(source)) {
 			variable, err := generatedLinkGroupVariableName(group)
 			if err != nil {
 				return err
@@ -557,24 +565,56 @@ func emitLinkReturnValue(output *bytes.Buffer, links []generatedLink) error {
 func linkSourceOperations(links []generatedLink) []ir.Operation {
 	seen := map[string]ir.Operation{}
 	for _, link := range links {
-		seen[link.SourceOperation.OperationID] = link.SourceOperation
+		seen[operationRouteKey(link.SourceOperation)] = link.SourceOperation
 	}
 	result := make([]ir.Operation, 0, len(seen))
 	for _, operation := range seen {
 		result = append(result, operation)
 	}
-	sort.Slice(result, func(left, right int) bool { return result[left].OperationID < result[right].OperationID })
+	sort.Slice(result, func(left, right int) bool { return operationRouteKey(result[left]) < operationRouteKey(result[right]) })
 	return result
 }
 
-func linksForSource(links []generatedLink, operationID string) []generatedLink {
+func linksForSource(links []generatedLink, routeKey string) []generatedLink {
 	result := make([]generatedLink, 0)
 	for _, link := range links {
-		if link.SourceOperation.OperationID == operationID {
+		if operationRouteKey(link.SourceOperation) == routeKey {
 			result = append(result, link)
 		}
 	}
 	return result
+}
+
+func routeLinksType(document *ir.Document, links []generatedLink, routeKey string) (string, error) {
+	groups := linkGroupsForSource(links, routeKey)
+	if len(groups) == 0 {
+		return "never", nil
+	}
+	members := make([]string, 0, len(groups))
+	for _, group := range groups {
+		contract, err := linkGroupContract(document, group)
+		if err != nil {
+			return "", err
+		}
+		members = append(members, "readonly "+quoteTS(group.Name)+": "+contract)
+	}
+	return "{ " + strings.Join(members, "; ") + " }", nil
+}
+
+func routeLinksValue(links []generatedLink, routeKey string) (string, error) {
+	groups := linkGroupsForSource(links, routeKey)
+	if len(groups) == 0 {
+		return "", nil
+	}
+	values := make([]runtimeProperty, 0, len(groups))
+	for _, group := range groups {
+		variable, err := generatedLinkGroupVariableName(group)
+		if err != nil {
+			return "", err
+		}
+		values = append(values, runtimeProperty{key: group.Name, value: variable})
+	}
+	return runtimeObjectExpression(values), nil
 }
 
 func generatedLinkVariableName(link generatedLink) (string, error) {
@@ -582,9 +622,9 @@ func generatedLinkVariableName(link generatedLink) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return stablePrivateIdentifier("link-value", link.SourceOperation.OperationID+"\x00"+link.Name+"\x00"+link.Status), nil
+	return stablePrivateIdentifier("link-value", operationRouteKey(link.SourceOperation)+"\x00"+link.Name+"\x00"+link.Status), nil
 }
 
 func generatedLinkGroupVariableName(group generatedLinkGroup) (string, error) {
-	return stablePrivateIdentifier("link-group-value", group.SourceOperation.OperationID+"\x00"+group.Name), nil
+	return stablePrivateIdentifier("link-group-value", operationRouteKey(group.SourceOperation)+"\x00"+group.Name), nil
 }

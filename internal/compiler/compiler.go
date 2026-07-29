@@ -15,15 +15,15 @@ import (
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	openapidoc "github.com/connextable/openapi-sdkgen/internal/compiler/openapi"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/validate"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 func Compile(data []byte) (*ir.Document, error) {
-	return compile(data, false)
+	return compile(data, true)
 }
 
 func CompileProject(data []byte) (*ir.Document, error) {
-	return compile(data, true)
+	return Compile(data)
 }
 
 func CompileFile(path string) (*ir.Document, error) {
@@ -58,15 +58,17 @@ func CompileInputWithOptions(input string, options CompileOptions) (*ir.Document
 }
 
 func CompileProjectFile(path string) (*ir.Document, error) {
-	source, err := loadFileInput(path)
-	if err != nil {
-		return nil, err
-	}
-	return compileInput(source, true, CompileOptions{})
+	return CompileFile(path)
 }
 
 func compileInput(source inputSource, project bool, options CompileOptions) (*ir.Document, error) {
 	data := source.data
+	if findings, err := reservedExtensionDiagnostics(data, source.display); err != nil {
+		return nil, err
+	} else if len(findings) != 0 {
+		location := diagnostic.NewSourceRegistry([]string{findings[0].Location.Source}).Display(findings[0].Location.Source)
+		return nil, fmt.Errorf("%s at %s%s", findings[0].Message, location, findings[0].Location.Pointer)
+	}
 	if source.remoteBase != nil {
 		var err error
 		data, err = absolutizeRelativeRemoteReferences(data, source.remoteBase)
@@ -171,6 +173,7 @@ func compileInput(source inputSource, project bool, options CompileOptions) (*ir
 	if err != nil {
 		return nil, err
 	}
+	attachDocumentProvenance(document, source)
 	if lock != nil && options.UpdateRefLock {
 		if err := writeReferenceLock(lockPath, lock); err != nil {
 			return nil, err
@@ -417,7 +420,15 @@ func rejectProjectExternalReferences(data []byte) error {
 	return visit(root)
 }
 
-func compile(data []byte, project bool) (*ir.Document, error) {
+func compile(data []byte, source bool) (*ir.Document, error) {
+	if source {
+		if findings, err := reservedExtensionDiagnostics(data, "in-memory OpenAPI document"); err != nil {
+			return nil, err
+		} else if len(findings) != 0 {
+			location := diagnostic.NewSourceRegistry([]string{findings[0].Location.Source}).Display(findings[0].Location.Source)
+			return nil, fmt.Errorf("%s at %s%s", findings[0].Message, location, findings[0].Location.Pointer)
+		}
+	}
 	// libopenapi resolves `$ref` while it reads. JSON Schema anchors are valid
 	// in OpenAPI 3.1/3.2 but are not component pointers, so normalize them
 	// before the library's OpenAPI reference resolver sees the document.
@@ -447,10 +458,8 @@ func compile(data []byte, project bool) (*ir.Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	if project {
-		if err := validate.Project(model); err != nil {
-			return nil, err
-		}
+	if source {
+		attachDocumentProvenance(model, inputSource{data: data, display: "in-memory OpenAPI document"})
 	}
 	return model, nil
 }

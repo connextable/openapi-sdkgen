@@ -924,7 +924,7 @@ func findItemsSchema(document *ir.Document, schema map[string]any, seen map[stri
 
 func operationInputTypes(document *ir.Document, operation ir.Operation) ([]string, error) {
 	var result []string
-	name := operationTypeName(operation.OperationID)
+	name := operationTypeName(operationRouteKey(operation))
 	if parameters, err := parametersIn(document, operation, "path"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 {

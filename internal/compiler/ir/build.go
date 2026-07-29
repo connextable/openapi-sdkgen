@@ -261,6 +261,7 @@ func jsonPointerToken(token string) (string, error) {
 
 func buildOperation(path, method string, pathItemRaw, raw map[string]any) Operation {
 	return Operation{
+		RouteKey:           method + " " + path,
 		OperationID:        stringValue(raw, "operationId"),
 		Method:             method,
 		Path:               path,

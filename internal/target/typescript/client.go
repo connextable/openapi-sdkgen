@@ -77,9 +77,9 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	output.WriteString("} from \"./runtime.js\"\n")
 	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
 
-	operationsByID := make(map[string]ir.Operation, len(document.Operations))
+	operationsByRoute := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
-		operationsByID[operation.OperationID] = operation
+		operationsByRoute[operationRouteKey(operation)] = operation
 	}
 	resourceReachable := make(map[string]bool)
 	resourceOperationIDs(tree, resourceReachable)
@@ -88,19 +88,20 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if item.Visibility == "hidden" {
 			continue
 		}
-		operation := operationsByID[item.OperationID]
+		operation := operationsByRoute[manifestRouteKey(item)]
 		if err := emitOperationTypes(&output, document, operation, item); err != nil {
 			return nil, err
 		}
 	}
 
-	output.WriteString("/** Type catalog keyed by OpenAPI operation ID. */\n")
-	output.WriteString("export interface Operations {\n")
+	output.WriteString("/** Canonical operation catalog keyed by HTTP method and exact OpenAPI path. */\n")
+	output.WriteString("export interface Routes {\n")
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		operationName := operationTypeName(operation.OperationID)
+		routeKey := manifestRouteKey(operation)
+		operationName := operationTypeName(routeKey)
 		inputType := operationInputAlias(operation)
 		resourceInputType := inputType
 		if len(operation.PathParameterOrder) > 0 {
@@ -109,21 +110,36 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		paginationType := "never"
 		callType := operationName + "Call"
 		if operation.Pagination != "" {
-			itemType, err := operationItemTypeForScope(document, operationsByID[operation.OperationID], typeRenderContract)
+			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
 			paginationType = paginationFunctionType(operation, itemType)
 			callType = "(" + callType + ") & { readonly paginate: " + paginationType + " }"
 		}
+		linksType, err := routeLinksType(document, links, routeKey)
+		if err != nil {
+			return nil, err
+		}
+		if linksType != "never" {
+			callType = "(" + callType + ") & { readonly links: " + linksType + " }"
+		}
+		streamType := "never"
+		if stream, exists := streamForRoute(streams, routeKey); exists {
+			streamType, err = streamFunctionType(document, stream)
+			if err != nil {
+				return nil, err
+			}
+			callType = "(" + callType + ") & { readonly stream: " + streamType + " }"
+		}
 		resourceCallType := callType
-		if operation.Visibility == "internal" || !resourceReachable[operation.OperationID] {
+		if operation.Visibility == "internal" || !resourceReachable[routeKey] {
 			resourceCallType = "never"
 		} else if len(operation.PathParameterOrder) > 0 {
 			resourceCallType = operationName + "ResourceCall"
 		}
 		emitOperationCatalogJSDoc(&output, "  ", operation)
-		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(operation.OperationID))
+		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(routeKey))
 		fmt.Fprintf(&output, "    /** Complete generated input type. */\n")
 		fmt.Fprintf(&output, "    readonly input: %s\n", inputType)
 		fmt.Fprintf(&output, "    /** Input remaining after resource path binding. */\n")
@@ -142,16 +158,42 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		fmt.Fprintf(&output, "    readonly resourceCall: %s\n", resourceCallType)
 		fmt.Fprintf(&output, "    /** Pagination capability, when declared. */\n")
 		fmt.Fprintf(&output, "    readonly pagination: %s\n", paginationType)
+		fmt.Fprintf(&output, "    /** Response-link capabilities, when declared. */\n")
+		fmt.Fprintf(&output, "    readonly links: %s\n", linksType)
+		fmt.Fprintf(&output, "    /** Streaming capability, when declared. */\n")
+		fmt.Fprintf(&output, "    readonly stream: %s\n", streamType)
 		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n\n")
 
-	output.WriteString("/** Generated API client with operation-ID and resource-oriented call surfaces. */\n")
+	output.WriteString("/** Compatibility aliases keyed only by explicit OpenAPI operation IDs. */\n")
+	output.WriteString("export interface Operations {\n")
+	for _, operation := range manifest.Operations {
+		if operation.Visibility == "hidden" || operation.OperationID == "" {
+			continue
+		}
+		emitOperationCatalogJSDoc(&output, "  ", operation)
+		fmt.Fprintf(&output, "  readonly %s: Routes[%s]\n", quoteTS(operation.OperationID), quoteTS(manifestRouteKey(operation)))
+	}
+	output.WriteString("}\n\n")
+
+	output.WriteString("/** Generated API client with route, operation-ID, and resource-oriented call surfaces. */\n")
 	output.WriteString("export interface Client {\n")
-	output.WriteString("  /** Every public operation keyed by its exact OpenAPI operation ID. */\n")
-	output.WriteString("  readonly $operations: {\n")
+	output.WriteString("  /** Every non-hidden operation keyed by method and exact path. */\n")
+	output.WriteString("  readonly $routes: {\n")
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
+			continue
+		}
+		emitOperationJSDoc(&output, "    ", operation)
+		routeKey := manifestRouteKey(operation)
+		fmt.Fprintf(&output, "    readonly %s: Routes[%s][\"call\"]\n", quoteTS(routeKey), quoteTS(routeKey))
+	}
+	output.WriteString("  }\n")
+	output.WriteString("  /** Operations with explicit IDs keyed by their exact OpenAPI operation ID. */\n")
+	output.WriteString("  readonly $operations: {\n")
+	for _, operation := range manifest.Operations {
+		if operation.Visibility == "hidden" || operation.OperationID == "" {
 			continue
 		}
 		emitOperationJSDoc(&output, "    ", operation)
@@ -188,31 +230,36 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		binding := operationValueName(operation.OperationID)
+		routeKey := manifestRouteKey(operation)
+		binding := operationValueName(routeKey)
 		baseBinding := binding
-		if operation.Pagination != "" {
-			baseBinding = operationBaseValueName(operation.OperationID)
+		linkValue, err := routeLinksValue(links, routeKey)
+		if err != nil {
+			return nil, err
+		}
+		_, hasStream := streamForRoute(streams, routeKey)
+		if operation.Pagination != "" || linkValue != "" || hasStream {
+			baseBinding = operationBaseValueName(routeKey)
 		}
 		outputType := operation.renderOutput(typeRenderContract)
-		definition, err := operationDefinition(document, operationsByID[operation.OperationID], operation)
+		definition, err := operationDefinition(document, operationsByRoute[routeKey], operation)
 		if err != nil {
 			return nil, err
 		}
 		inputType := "never"
 		hasInput := false
 		if len(operation.InputTypes) > 0 {
-			inputType = operationTypeName(operation.OperationID) + "Input"
+			inputType = operationTypeName(routeKey) + "Input"
 			hasInput = true
 		}
-		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(operation.OperationID), operationTypeName(operation.OperationID), definition, hasInput, operationTypeName(operation.OperationID))
+		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(routeKey), operationTypeName(routeKey), definition, hasInput, operationTypeName(routeKey))
 		if operation.Pagination != "" {
-			itemType, err := operationItemTypeForScope(document, operationsByID[operation.OperationID], typeRenderContract)
+			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
-			paginationBinding := operationPaginationValueName(operation.OperationID)
-			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", paginationBinding, itemType, operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), baseBinding, quoteTS(operation.Pagination))
-			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, { paginate: %s }) as Operations[%s][\"call\"]\n", binding, baseBinding, paginationBinding, quoteTS(operation.OperationID))
+			paginationBinding := operationPaginationValueName(routeKey)
+			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", paginationBinding, itemType, operationTypeName(routeKey), outputType, quoteTS(operation.Pagination), operationTypeName(routeKey), baseBinding, quoteTS(operation.Pagination))
 		}
 	}
 	if err := emitLinkValues(&output, document, links); err != nil {
@@ -221,18 +268,47 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	if err := emitStreamValues(&output, document, streams); err != nil {
 		return nil, err
 	}
+	for _, operation := range manifest.Operations {
+		if operation.Visibility == "hidden" {
+			continue
+		}
+		routeKey := manifestRouteKey(operation)
+		properties := make([]runtimeProperty, 0, 3)
+		if operation.Pagination != "" {
+			properties = append(properties, runtimeProperty{key: "paginate", value: operationPaginationValueName(routeKey)})
+		}
+		linkValue, err := routeLinksValue(links, routeKey)
+		if err != nil {
+			return nil, err
+		}
+		if linkValue != "" {
+			properties = append(properties, runtimeProperty{key: "links", value: linkValue})
+		}
+		if stream, exists := streamForRoute(streams, routeKey); exists {
+			properties = append(properties, runtimeProperty{key: "stream", value: stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation))})
+		}
+		if len(properties) != 0 {
+			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, %s) as Routes[%s][\"call\"]\n", operationValueName(routeKey), operationBaseValueName(routeKey), runtimeObjectExpression(properties), quoteTS(routeKey))
+		}
+	}
 	output.WriteString("\n")
 	if err := emitResourceTreeValues(&output, document, tree); err != nil {
 		return nil, err
 	}
 	output.WriteString("\n  return {\n")
+	routeValues := make([]runtimeProperty, 0)
 	operationValues := make([]runtimeProperty, 0)
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		operationValues = append(operationValues, runtimeProperty{key: operation.OperationID, value: operationValueName(operation.OperationID)})
+		routeKey := manifestRouteKey(operation)
+		routeValues = append(routeValues, runtimeProperty{key: routeKey, value: operationValueName(routeKey)})
+		if operation.OperationID != "" {
+			operationValues = append(operationValues, runtimeProperty{key: operation.OperationID, value: operationValueName(routeKey)})
+		}
 	}
+	fmt.Fprintf(&output, "    $routes: %s as unknown as Client[\"$routes\"],\n", runtimeObjectExpression(routeValues))
 	fmt.Fprintf(&output, "    $operations: %s as unknown as Client[\"$operations\"],\n", runtimeObjectExpression(operationValues))
 	if err := emitLinkReturnValue(&output, links); err != nil {
 		return nil, err
@@ -252,7 +328,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		output.WriteString(",\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(tree); ok {
-		fmt.Fprintf(&output, "    paginate: %s,\n", operationPaginationValueName(paginated.OperationID))
+		fmt.Fprintf(&output, "    paginate: %s,\n", operationPaginationValueName(manifestRouteKey(paginated)))
 	}
 	output.WriteString("  }\n")
 	output.WriteString("}\n")
@@ -260,7 +336,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 }
 
 func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, item ManifestOperation) error {
-	operationName := operationTypeName(operation.OperationID)
+	operationName := operationTypeName(operationRouteKey(operation))
 	if err := emitOperationOptions(output, document, operationName, operation); err != nil {
 		return err
 	}
@@ -371,7 +447,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 }
 
 func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, item ManifestOperation) error {
-	operationName := operationTypeName(operation.OperationID)
+	operationName := operationTypeName(operationRouteKey(operation))
 	inputType := "never"
 	if len(item.InputTypes) > 0 {
 		inputType = operationName + "Input"
@@ -394,7 +470,7 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 }
 
 func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType, outputType, rawType string) error {
-	operationName := operationTypeName(operation.OperationID)
+	operationName := operationTypeName(operationRouteKey(operation))
 	requiresOptions := operation.Idempotency == "required" || operation.Concurrency == "required"
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
@@ -873,7 +949,7 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 		if item.Visibility != "public" {
 			continue
 		}
-		operation := findOperation(document, item.OperationID)
+		operation := findOperation(document, manifestRouteKey(item))
 		if hasDuplicateStrings(operation.PathParameterOrder) {
 			continue
 		}
@@ -994,19 +1070,22 @@ func validateTemplatedResourcePaths(document *ir.Document) error {
 }
 
 func validateOperationIdentities(document *ir.Document) error {
-	seen := make(map[string]string, len(document.Operations))
+	seenRoutes := make(map[string]string, len(document.Operations))
+	seenIDs := make(map[string]string, len(document.Operations))
 	for _, operation := range document.Operations {
 		location := operation.Method + " " + operation.Path
-		if operation.OperationID == "" {
-			if operation.Visibility == "hidden" {
-				continue
-			}
-			return fmt.Errorf("OpenAPI operation %s is missing operationId required by the TypeScript target", location)
+		routeKey := operationRouteKey(operation)
+		if previous, exists := seenRoutes[routeKey]; exists {
+			return fmt.Errorf("OpenAPI route identity %q is duplicated by %s and %s", routeKey, previous, location)
 		}
-		if previous, exists := seen[operation.OperationID]; exists {
+		seenRoutes[routeKey] = location
+		if operation.OperationID == "" {
+			continue
+		}
+		if previous, exists := seenIDs[operation.OperationID]; exists {
 			return fmt.Errorf("OpenAPI operationId %q is duplicated by %s and %s", operation.OperationID, previous, location)
 		}
-		seen[operation.OperationID] = location
+		seenIDs[operation.OperationID] = location
 	}
 	return nil
 }
@@ -1111,7 +1190,7 @@ func resourceNodeEmpty(node *resourceNode) bool {
 
 func resourceOperationIDs(node *resourceNode, result map[string]bool) {
 	for _, operation := range node.operations {
-		result[operation.OperationID] = true
+		result[manifestRouteKey(operation)] = true
 	}
 	if node.parameterChild != nil {
 		resourceOperationIDs(node.parameterChild, result)
@@ -1208,7 +1287,7 @@ func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root
 		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(root); ok {
-		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
+		itemType, err := operationItemTypeForScope(document, findOperation(document, manifestRouteKey(paginated)), typeRenderContract)
 		if err != nil {
 			return err
 		}
@@ -1228,7 +1307,7 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
-		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
+		itemType, err := operationItemTypeForScope(document, findOperation(document, manifestRouteKey(paginated)), typeRenderContract)
 		if err != nil {
 			return err
 		}
@@ -1316,7 +1395,7 @@ func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *r
 		output.WriteString(",\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
-		fmt.Fprintf(output, "%spaginate: %s,\n", memberIndent, operationPaginationValueName(paginated.OperationID))
+		fmt.Fprintf(output, "%spaginate: %s,\n", memberIndent, operationPaginationValueName(manifestRouteKey(paginated)))
 	}
 	output.WriteString(indent + "}")
 	return nil
@@ -1344,7 +1423,8 @@ func emitResourceMemberValue(output *bytes.Buffer, document *ir.Document, node *
 }
 
 func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, operation ManifestOperation, bound []string) error {
-	property := operationValueName(operation.OperationID)
+	routeKey := manifestRouteKey(operation)
+	property := operationValueName(routeKey)
 	if len(operation.PathParameterOrder) == 0 {
 		output.WriteString(property)
 		return nil
@@ -1356,38 +1436,38 @@ func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, ope
 		}
 		values = append(values, quoteTS(parameter)+": "+bound[index])
 	}
-	name := operationTypeName(operation.OperationID)
+	name := operationTypeName(routeKey)
 	hasInput := len(operation.InputTypes) > 1
 	fmt.Fprintf(output, "bindPathOperation<%sInput, %sResourceInput, %s, %sOptions, %sRawResponse>(%s, { %s }, %t)", name, name, operation.renderOutput(typeRenderContract), name, name, property, strings.Join(values, ", "), hasInput)
 	return nil
 }
 
-func findOperation(document *ir.Document, operationID string) ir.Operation {
+func findOperation(document *ir.Document, identity string) ir.Operation {
 	for _, operation := range document.Operations {
-		if operation.OperationID == operationID {
+		if operationRouteKey(operation) == identity || operation.OperationID == identity {
 			return operation
 		}
 	}
-	return ir.Operation{OperationID: operationID}
+	return ir.Operation{RouteKey: identity}
 }
 
 func operationFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return "Operations[" + quoteTS(operation.OperationID) + "][\"call\"]"
+	return "Routes[" + quoteTS(manifestRouteKey(operation)) + "][\"call\"]"
 }
 
 func operationResourceFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return "Operations[" + quoteTS(operation.OperationID) + "][\"resourceCall\"]"
+	return "Routes[" + quoteTS(manifestRouteKey(operation)) + "][\"resourceCall\"]"
 }
 
 func operationInputAlias(operation ManifestOperation) string {
 	if len(operation.InputTypes) == 0 {
 		return "never"
 	}
-	return operationTypeName(operation.OperationID) + "Input"
+	return operationTypeName(manifestRouteKey(operation)) + "Input"
 }
 
 func paginationFunctionType(operation ManifestOperation, itemType string) string {
-	operationName := operationTypeName(operation.OperationID)
+	operationName := operationTypeName(manifestRouteKey(operation))
 	optional := "?"
 	if operation.Idempotency == "required" || operation.Concurrency == "required" {
 		optional = ""
@@ -1399,8 +1479,8 @@ func operationValueName(operationID string) string {
 	return stablePrivateIdentifier("operation-value", operationID)
 }
 
-func operationSlotType(operationID, slot string) string {
-	return "Operations[" + quoteTS(operationID) + "][" + quoteTS(slot) + "]"
+func operationSlotType(routeKey, slot string) string {
+	return "Routes[" + quoteTS(routeKey) + "][" + quoteTS(slot) + "]"
 }
 
 func operationBaseValueName(operationID string) string {
@@ -1450,11 +1530,14 @@ func hasVisibleResponseBodies(document *ir.Document) bool {
 func operationDefinition(document *ir.Document, irOperation ir.Operation, operation ManifestOperation) (string, error) {
 	var fields []string
 	fields = append(fields,
-		"operationID: "+quoteTS(operation.OperationID),
+		"route: "+quoteTS(manifestRouteKey(operation)),
 		"method: "+quoteTS(operation.Method),
 		"path: "+quoteTS(operation.Path),
 		"envelope: "+quoteTS(operation.Envelope),
 	)
+	if operation.OperationID != "" {
+		fields = append(fields, "operationID: "+quoteTS(operation.OperationID))
+	}
 	parameters, err := operationParameters(document, irOperation)
 	if err != nil {
 		return "", err
@@ -1637,7 +1720,7 @@ func inlineJSDocType(value string) string {
 func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
 	comment := operation.Summary
 	if comment == "" {
-		comment = operation.OperationID
+		comment = manifestRouteKey(operation)
 	}
 	fmt.Fprintf(output, "%s/**\n", indent)
 	fmt.Fprintf(output, "%s * %s\n", indent, sanitizeComment(comment))
@@ -1646,7 +1729,11 @@ func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation Ma
 		fmt.Fprintf(output, "%s * %s\n", indent, sanitizeComment(operation.Description))
 	}
 	fmt.Fprintf(output, "%s *\n", indent)
-	fmt.Fprintf(output, "%s * Operation ID: `%s`. HTTP: `%s %s`.\n", indent, operation.OperationID, operation.Method, operation.Path)
+	if operation.OperationID != "" {
+		fmt.Fprintf(output, "%s * Operation ID: `%s`. HTTP: `%s %s`.\n", indent, operation.OperationID, operation.Method, operation.Path)
+	} else {
+		fmt.Fprintf(output, "%s * HTTP: `%s %s`.\n", indent, operation.Method, operation.Path)
+	}
 	if operation.Deprecated {
 		fmt.Fprintf(output, "%s *\n", indent)
 		fmt.Fprintf(output, "%s * @deprecated This operation is deprecated.\n", indent)
@@ -1657,7 +1744,7 @@ func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation Ma
 func emitOperationJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
 	comment := operation.Summary
 	if comment == "" {
-		comment = operation.OperationID
+		comment = manifestRouteKey(operation)
 	}
 	fmt.Fprintf(output, "%s/**\n", indent)
 	fmt.Fprintf(output, "%s * %s\n", indent, sanitizeComment(comment))
@@ -1666,7 +1753,9 @@ func emitOperationJSDoc(output *bytes.Buffer, indent string, operation ManifestO
 		fmt.Fprintf(output, "%s * %s\n", indent, sanitizeComment(operation.Description))
 	}
 	fmt.Fprintf(output, "%s *\n", indent)
-	fmt.Fprintf(output, "%s * Operation ID: `%s`.\n", indent, operation.OperationID)
+	if operation.OperationID != "" {
+		fmt.Fprintf(output, "%s * Operation ID: `%s`.\n", indent, operation.OperationID)
+	}
 	fmt.Fprintf(output, "%s * HTTP: `%s %s`.\n", indent, operation.Method, operation.Path)
 	if operation.Deprecated {
 		fmt.Fprintf(output, "%s *\n", indent)

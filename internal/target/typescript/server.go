@@ -28,6 +28,7 @@ type webhookDefinition struct {
 
 type callbackDefinition struct {
 	name              string
+	sourceRouteKey    string
 	sourceOperationID string
 	componentName     string
 	callbackName      string
@@ -74,7 +75,7 @@ func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	result := make([]callbackDefinition, 0)
 	for _, operation := range document.Operations {
 		callbacks, _ := operation.Raw["callbacks"].(map[string]any)
-		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operation.OperationID, "")
+		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operationRouteKey(operation), operation.OperationID, "")
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +85,7 @@ func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	componentCallbacks, _ := components["callbacks"].(map[string]any)
 	for _, componentName := range sortedAnyKeys(componentCallbacks) {
 		value := map[string]any{componentName: componentCallbacks[componentName]}
-		definitions, err := collectCallbackMap(document, value, openAPIPointer("components", "callbacks"), "", componentName)
+		definitions, err := collectCallbackMap(document, value, openAPIPointer("components", "callbacks"), "", "", componentName)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +95,7 @@ func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	return result, nil
 }
 
-func collectCallbackMap(document *ir.Document, values map[string]any, path, sourceOperationID, componentName string) ([]callbackDefinition, error) {
+func collectCallbackMap(document *ir.Document, values map[string]any, path, sourceRouteKey, sourceOperationID, componentName string) ([]callbackDefinition, error) {
 	names := sortedAnyKeys(values)
 	result := make([]callbackDefinition, 0, len(names))
 	for _, name := range names {
@@ -139,9 +140,9 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 				if security == nil {
 					security = document.Raw["security"]
 				}
-				identity := sourceOperationID + "\x00" + componentName + "\x00" + name + "\x00" + expression + "\x00" + method
+				identity := sourceRouteKey + "\x00" + componentName + "\x00" + name + "\x00" + expression + "\x00" + method
 				result = append(result, callbackDefinition{
-					name: appendOpenAPIPointer(path, name), sourceOperationID: sourceOperationID, componentName: componentName, callbackName: name,
+					name: appendOpenAPIPointer(path, name), sourceRouteKey: sourceRouteKey, sourceOperationID: sourceOperationID, componentName: componentName, callbackName: name,
 					typeName: stablePrivateIdentifier("callback-type", identity), expression: expression, operationID: operationID, method: method,
 					bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType,
 					responseType: responseType, responsePlan: responsePlan, security: security,
@@ -153,7 +154,7 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 }
 
 func callbackIdentity(callback callbackDefinition) string {
-	return callback.sourceOperationID + "\x00" + callback.componentName + "\x00" + callback.callbackName + "\x00" + callback.expression + "\x00" + callback.method
+	return callback.sourceRouteKey + "\x00" + callback.componentName + "\x00" + callback.callbackName + "\x00" + callback.expression + "\x00" + callback.method
 }
 
 type callbackCatalogNode struct {
@@ -161,14 +162,21 @@ type callbackCatalogNode struct {
 	callback *callbackDefinition
 }
 
-func buildCallbackCatalog(callbacks []callbackDefinition, components bool) *callbackCatalogNode {
+func buildCallbackCatalog(callbacks []callbackDefinition, components, routeKeys bool) *callbackCatalogNode {
 	root := &callbackCatalogNode{children: make(map[string]*callbackCatalogNode)}
 	for index := range callbacks {
 		callback := &callbacks[index]
 		if (callback.componentName != "") != components {
 			continue
 		}
-		keys := []string{callback.sourceOperationID, callback.callbackName, callback.expression, callback.method}
+		sourceKey := callback.sourceOperationID
+		if routeKeys {
+			sourceKey = callback.sourceRouteKey
+		}
+		if !components && sourceKey == "" {
+			continue
+		}
+		keys := []string{sourceKey, callback.callbackName, callback.expression, callback.method}
 		if components {
 			keys = []string{callback.componentName, callback.expression, callback.method}
 		}
@@ -241,15 +249,18 @@ func emitCallbackCatalogObject(output *bytes.Buffer, node *callbackCatalogNode, 
 	output.WriteString(strings.Repeat("  ", len(path)) + "}")
 }
 
-func callbackCatalogPath(callback callbackDefinition) (string, []string) {
+func callbackCatalogPath(callback callbackDefinition, routeKeys bool) (string, []string) {
 	if callback.componentName != "" {
 		return "ComponentCallbacks", []string{callback.componentName, callback.expression, callback.method}
+	}
+	if routeKeys {
+		return "RouteCallbacks", []string{callback.sourceRouteKey, callback.callbackName, callback.expression, callback.method}
 	}
 	return "Callbacks", []string{callback.sourceOperationID, callback.callbackName, callback.expression, callback.method}
 }
 
-func callbackAccess(root string, callback callbackDefinition) string {
-	_, path := callbackCatalogPath(callback)
+func callbackAccess(root string, callback callbackDefinition, routeKeys bool) string {
+	_, path := callbackCatalogPath(callback, routeKeys)
 	for _, key := range path {
 		root += "?." + "[" + quoteTS(key) + "]"
 	}
@@ -264,9 +275,12 @@ func callbackEndpointSymbol(callback callbackDefinition) string {
 	return stablePrivateIdentifier("callback-endpoint", callbackIdentity(callback))
 }
 
-func callbackRootField(callback callbackDefinition) string {
+func callbackRootField(callback callbackDefinition, routeKeys bool) string {
 	if callback.componentName != "" {
 		return "componentCallbacks"
+	}
+	if routeKeys {
+		return "routeCallbacks"
 	}
 	return "callbacks"
 }
@@ -432,8 +446,9 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	if err := emitInboundSecuritySchemes(&output, document); err != nil {
 		return nil, err
 	}
-	operationCatalog := buildCallbackCatalog(callbacks, false)
-	componentCatalog := buildCallbackCatalog(callbacks, true)
+	routeCatalog := buildCallbackCatalog(callbacks, false, true)
+	operationCatalog := buildCallbackCatalog(callbacks, false, false)
+	componentCatalog := buildCallbackCatalog(callbacks, true, false)
 	for _, callback := range callbacks {
 		fmt.Fprintf(&output, "/** Host-owned Callback endpoint for URL expression %s. No route is generated. */\n", quoteTS(callback.expression))
 		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n  readonly params: %s\n", callback.typeName, callback.paramsType)
@@ -445,6 +460,7 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		output.WriteString("}\n")
 		fmt.Fprintf(&output, "type %sResponse = %s\n", callback.typeName, callback.responseType)
 	}
+	emitCallbackTypeCatalog(&output, "RouteCallbacks", routeCatalog)
 	emitCallbackTypeCatalog(&output, "Callbacks", operationCatalog)
 	emitCallbackTypeCatalog(&output, "ComponentCallbacks", componentCatalog)
 	for _, callback := range callbacks {
@@ -454,27 +470,46 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		}
 		fmt.Fprintf(&output, "const %s = { operationID: %s, method: %s, parameters: %s satisfies readonly InboundParameterDefinition[], responses: %s, security: %s } as const\n", callbackDefinitionSymbol(callback), quoteTS(callback.operationID), quoteTS(callback.method), callback.parameters, callback.responsePlan, security)
 	}
-	output.WriteString("\n/** Application handlers keyed by exact Callback identity. */\nexport interface CallbackHandlers {\n  readonly callbacks?: ")
+	output.WriteString("\n/** Application handlers keyed by exact Callback identity. */\nexport interface CallbackHandlers {\n  readonly routeCallbacks?: ")
+	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogHandlers)
+	output.WriteString("\n  readonly callbacks?: ")
 	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogHandlers)
 	output.WriteString("\n  readonly componentCallbacks?: ")
 	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogHandlers)
-	output.WriteString("\n}\n\n/** Optional host authentication, media codecs, and host-bound path parameters for generated Callback endpoints. */\nexport interface CallbackHandlerOptions {\n  readonly authenticate?: Authenticate | undefined\n  readonly codecs?: Readonly<Record<string, MediaCodec<unknown>>> | undefined\n  readonly maxStreamItemBytes?: number | undefined\n  readonly pathParams?: {\n    readonly callbacks?: ")
+	output.WriteString("\n}\n\n/** Optional host authentication, media codecs, and host-bound path parameters for generated Callback endpoints. */\nexport interface CallbackHandlerOptions {\n  readonly authenticate?: Authenticate | undefined\n  readonly codecs?: Readonly<Record<string, MediaCodec<unknown>>> | undefined\n  readonly maxStreamItemBytes?: number | undefined\n  readonly pathParams?: {\n    readonly routeCallbacks?: ")
+	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogPathParams)
+	output.WriteString("\n    readonly callbacks?: ")
 	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogPathParams)
 	output.WriteString("\n    readonly componentCallbacks?: ")
 	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogPathParams)
-	output.WriteString("\n  } | undefined\n}\n\n/** Fetch-compatible endpoint for one host-mounted Callback route. */\nexport interface CallbackEndpoint {\n  fetch(request: Request): Promise<Response>\n}\n\n/** Callback endpoints preserving every exact source identity dimension. */\nexport interface CallbackEndpoints {\n  readonly callbacks: ")
+	output.WriteString("\n  } | undefined\n}\n\n/** Fetch-compatible endpoint for one host-mounted Callback route. */\nexport interface CallbackEndpoint {\n  fetch(request: Request): Promise<Response>\n}\n\n/** Callback endpoints preserving every exact source identity dimension. */\nexport interface CallbackEndpoints {\n  readonly routeCallbacks: ")
+	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogEndpoints)
+	output.WriteString("\n  readonly callbacks: ")
 	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogEndpoints)
 	output.WriteString("\n  readonly componentCallbacks: ")
 	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogEndpoints)
 	output.WriteString("\n}\n\n/**\n * Creates Fetch-native endpoints for dynamic OpenAPI Callback URLs.\n * The host chooses each concrete route and mounts the matching endpoint.\n */\nexport function createCallbackHandlers(handlers: CallbackHandlers, options: CallbackHandlerOptions = {}): CallbackEndpoints {\n  const inboundCodecs = normalizeInboundMediaCodecs(options.codecs)\n")
 	for _, callback := range callbacks {
 		definition := callbackDefinitionSymbol(callback)
-		handler := callbackAccess("handlers."+callbackRootField(callback), callback)
-		pathParams := callbackAccess("options.pathParams?."+callbackRootField(callback), callback)
+		routeHandler := callbackAccess("handlers."+callbackRootField(callback, true), callback, true)
+		aliasHandler := "undefined"
+		if callback.componentName != "" {
+			aliasHandler = routeHandler
+		} else if callback.sourceOperationID != "" {
+			aliasHandler = callbackAccess("handlers."+callbackRootField(callback, false), callback, false)
+		}
+		routePathParams := callbackAccess("options.pathParams?."+callbackRootField(callback, true), callback, true)
+		aliasPathParams := "undefined"
+		if callback.componentName != "" {
+			aliasPathParams = routePathParams
+		} else if callback.sourceOperationID != "" {
+			aliasPathParams = callbackAccess("options.pathParams?."+callbackRootField(callback, false), callback, false)
+		}
 		fmt.Fprintf(&output, "  const %s: CallbackEndpoint = {\n    async fetch(request: Request): Promise<Response> {\n", callbackEndpointSymbol(callback))
 		fmt.Fprintf(&output, "      if (request.method !== %s) return new Response(\"Method Not Allowed\", { status: 405, headers: { allow: %s } })\n", quoteTS(callback.method), quoteTS(callback.method))
-		fmt.Fprintf(&output, "      const handler = %s\n      if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", handler)
-		fmt.Fprintf(&output, "      let params: %s\n      try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %s) as %s } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n      const context = { request, operationID: %s.operationID, method: %s.method, path: new URL(request.url).pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) } as Omit<%sContext, \"body\">\n", callback.paramsType, definition, pathParams, callback.paramsType, definition, definition, definition, definition, callback.typeName)
+		fmt.Fprintf(&output, "      const routeHandler = %s\n      const operationHandler = %s\n      if (routeHandler !== undefined && operationHandler !== undefined && routeHandler !== operationHandler) throw new TypeError(\"callback handler was supplied through both routeCallbacks and callbacks\")\n      const handler = routeHandler ?? operationHandler\n      if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", routeHandler, aliasHandler)
+		fmt.Fprintf(&output, "      const routePathParams = %s\n      const operationPathParams = %s\n      if (routePathParams !== undefined && operationPathParams !== undefined && routePathParams !== operationPathParams) throw new TypeError(\"callback path parameters were supplied through both routeCallbacks and callbacks\")\n      const pathParams = routePathParams ?? operationPathParams\n", routePathParams, aliasPathParams)
+		fmt.Fprintf(&output, "      let params: %s\n      try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, pathParams) as %s } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n      const context = { request, operationID: %s.operationID, method: %s.method, path: new URL(request.url).pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) } as Omit<%sContext, \"body\">\n", callback.paramsType, definition, callback.paramsType, definition, definition, definition, definition, callback.typeName)
 		output.WriteString("      if (requiresInboundAuthentication(context.security)) {\n        if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n        try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n        catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n      }\n")
 		if callback.hasBody {
 			output.WriteString("      try {\n")
@@ -490,7 +525,8 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	}
 	fmt.Fprintf(
 		&output,
-		"  return { callbacks: %s as unknown as CallbackEndpoints[\"callbacks\"], componentCallbacks: %s as unknown as CallbackEndpoints[\"componentCallbacks\"] }\n}\n",
+		"  return { routeCallbacks: %s as unknown as CallbackEndpoints[\"routeCallbacks\"], callbacks: %s as unknown as CallbackEndpoints[\"callbacks\"], componentCallbacks: %s as unknown as CallbackEndpoints[\"componentCallbacks\"] }\n}\n",
+		callbackRuntimeCatalog(routeCatalog),
 		callbackRuntimeCatalog(operationCatalog),
 		callbackRuntimeCatalog(componentCatalog),
 	)

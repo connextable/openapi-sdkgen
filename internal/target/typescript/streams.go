@@ -18,12 +18,12 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 	visible := map[string]bool{}
 	for _, operation := range manifest.Operations {
 		if operation.Visibility != "hidden" {
-			visible[operation.OperationID] = true
+			visible[manifestRouteKey(operation)] = true
 		}
 	}
 	var result []generatedStream
 	for _, operation := range document.Operations {
-		if !visible[operation.OperationID] {
+		if !visible[operationRouteKey(operation)] {
 			continue
 		}
 		responses, _ := operation.Raw["responses"].(map[string]any)
@@ -49,7 +49,7 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 				}
 				itemSchema, exists := media["itemSchema"]
 				if !exists {
-					return nil, fmt.Errorf("streaming response %s %s has no itemSchema", operation.OperationID, mediaType)
+					return nil, fmt.Errorf("streaming response %s %s has no itemSchema", operationLabel(operation), mediaType)
 				}
 				itemType, err := schemaTypeForScope(document, itemSchema, projectionOutput, typeRenderContract)
 				if err != nil {
@@ -63,7 +63,7 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 		}
 	}
 	sort.Slice(result, func(left, right int) bool {
-		return result[left].Operation.OperationID < result[right].Operation.OperationID
+		return operationRouteKey(result[left].Operation) < operationRouteKey(result[right].Operation)
 	})
 	return result, nil
 }
@@ -75,12 +75,15 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 	output.WriteString("  /** Lazy typed response streams keyed by OpenAPI operation ID. */\n")
 	output.WriteString("  readonly $streams: {\n")
 	for _, stream := range streams {
+		if stream.Operation.OperationID == "" {
+			continue
+		}
 		inputs, err := operationInputTypes(document, stream.Operation)
 		if err != nil {
 			return err
 		}
-		inputType := operationSlotType(stream.Operation.OperationID, "input")
-		optionsType := operationSlotType(stream.Operation.OperationID, "options")
+		inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
+		optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
 		optionMarker := "?"
 		if operationRequiresOptions(stream.Operation) {
 			optionMarker = ""
@@ -97,7 +100,7 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 
 func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []generatedStream) error {
 	for _, stream := range streams {
-		definition, err := operationDefinition(document, stream.Operation, ManifestOperation{OperationID: stream.Operation.OperationID, Method: stream.Operation.Method, Path: stream.Operation.Path, Envelope: stream.Operation.Envelope})
+		definition, err := operationDefinition(document, stream.Operation, ManifestOperation{RouteKey: operationRouteKey(stream.Operation), OperationID: stream.Operation.OperationID, Method: stream.Operation.Method, Path: stream.Operation.Path, Envelope: stream.Operation.Envelope})
 		if err != nil {
 			return err
 		}
@@ -105,13 +108,13 @@ func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []gen
 		if err != nil {
 			return err
 		}
-		inputType := operationSlotType(stream.Operation.OperationID, "input")
-		optionsType := operationSlotType(stream.Operation.OperationID, "options")
+		inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
+		optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
 		optionMarker := "?"
 		if operationRequiresOptions(stream.Operation) {
 			optionMarker = ""
 		}
-		variable := stablePrivateIdentifier("stream-value", stream.Operation.OperationID)
+		variable := stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation))
 		if len(inputs) == 0 {
 			fmt.Fprintf(output, "  const %s = (options%s: %s): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, optionMarker, optionsType, stream.ItemType, stream.ItemType, definition)
 		} else {
@@ -131,13 +134,41 @@ func emitStreamReturnValue(output *bytes.Buffer, streams []generatedStream) erro
 	}
 	values := make([]runtimeProperty, 0, len(streams))
 	for _, stream := range streams {
+		if stream.Operation.OperationID == "" {
+			continue
+		}
 		values = append(values, runtimeProperty{
 			key:   stream.Operation.OperationID,
-			value: stablePrivateIdentifier("stream-value", stream.Operation.OperationID),
+			value: stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation)),
 		})
 	}
 	fmt.Fprintf(output, "    $streams: %s as unknown as Client[\"$streams\"],\n", runtimeObjectExpression(values))
 	return nil
+}
+
+func streamForRoute(streams []generatedStream, routeKey string) (generatedStream, bool) {
+	for _, stream := range streams {
+		if operationRouteKey(stream.Operation) == routeKey {
+			return stream, true
+		}
+	}
+	return generatedStream{}, false
+}
+
+func streamFunctionType(document *ir.Document, stream generatedStream) (string, error) {
+	inputs, err := operationInputTypes(document, stream.Operation)
+	if err != nil {
+		return "", err
+	}
+	optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
+	optionMarker := "?"
+	if operationRequiresOptions(stream.Operation) {
+		optionMarker = ""
+	}
+	if len(inputs) == 0 {
+		return "(options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
+	}
+	return "(input: " + operationSlotType(operationRouteKey(stream.Operation), "input") + ", options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
 }
 
 func isStreamMediaType(mediaType string) bool {

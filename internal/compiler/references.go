@@ -157,6 +157,7 @@ type remoteReferenceResolver struct {
 	client        *http.Client
 	trustedClient *http.Client
 	trustedConfig *httpInputConfig
+	diagnostics   *diagnostic.Collector
 	lookup        hostLookup
 	mu            sync.Mutex
 	errs          []error
@@ -207,7 +208,7 @@ func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cac
 	if options.remoteReferenceLookup != nil {
 		lookup = options.remoteReferenceLookup
 	}
-	resolver := &remoteReferenceResolver{origins: origins, trustedOrigin: trustedOrigin, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, lookup: lookup}
+	resolver := &remoteReferenceResolver{origins: origins, trustedOrigin: trustedOrigin, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, diagnostics: options.diagnostics, lookup: lookup}
 	resolver.client = secureRemoteHTTPClient(resolver)
 	if options.remoteReferenceClient != nil {
 		resolver.client = options.remoteReferenceClient
@@ -410,6 +411,9 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	if len(body) > remoteReferenceMaxBytes {
 		return nil, fmt.Errorf("remote reference %s exceeds %d byte limit", u.String(), remoteReferenceMaxBytes)
 	}
+	if err := r.scanRemoteSource(body, key); err != nil {
+		return nil, err
+	}
 	digest := sha256.Sum256(body)
 	encoded := hex.EncodeToString(digest[:])
 	if previous, ok := r.lock.References[key]; ok && previous != encoded && !r.update {
@@ -456,6 +460,9 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 	if hex.EncodeToString(actual[:]) != digest {
 		return nil, fmt.Errorf("cached remote reference %s digest does not match the reference lock", key)
 	}
+	if err := r.scanRemoteSource(data, key); err != nil {
+		return nil, err
+	}
 	return &http.Response{
 		StatusCode:    http.StatusOK,
 		Status:        "200 OK",
@@ -463,6 +470,21 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 		Body:          io.NopCloser(bytes.NewReader(data)),
 		ContentLength: int64(len(data)),
 	}, nil
+}
+
+func (r *remoteReferenceResolver) scanRemoteSource(data []byte, source string) error {
+	findings, err := reservedExtensionDiagnostics(data, source)
+	if err != nil {
+		return err
+	}
+	if r.diagnostics != nil {
+		r.diagnostics.Extend(findings)
+	}
+	if len(findings) != 0 {
+		location := diagnostic.NewSourceRegistry([]string{findings[0].Location.Source}).Display(findings[0].Location.Source)
+		return fmt.Errorf("%s at %s%s", findings[0].Message, location, findings[0].Location.Pointer)
+	}
+	return nil
 }
 
 func (r *remoteReferenceResolver) cacheBody(digest string, body []byte, protected bool) error {
