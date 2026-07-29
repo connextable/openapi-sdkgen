@@ -164,7 +164,8 @@ describe("exact identity collision fixture", () => {
       }
       if (path === "/pets/legacy") {
         const value = new URL(String(input)).searchParams.get("legacy-id");
-        if (value !== "linked" && value !== "direct") throw new Error(`legacy input mismatch: ${value}`);
+        if (value !== "linked" && value !== "direct")
+          throw new Error(`legacy input mismatch: ${value}`);
         return new Response(null, { status: 204 });
       }
       if (path === "/streams/modern") {
@@ -303,9 +304,9 @@ describe("exact identity collision fixture", () => {
     ).toBe(204);
     expect(
       (
-        await callbacks.callbacks["get-pet-secondary"]["component-status"][
-          expression
-        ].POST.fetch(new Request("https://host.test/reused", { method: "POST" }))
+        await callbacks.callbacks["get-pet-secondary"]["component-status"][expression].POST.fetch(
+          new Request("https://host.test/reused", { method: "POST" }),
+        )
       ).status,
     ).toBe(204);
   });
