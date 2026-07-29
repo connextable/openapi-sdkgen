@@ -46,6 +46,16 @@ func TestResolveComponentObjectDecodesEscapedComponentNames(t *testing.T) {
 	}
 }
 
+func TestComponentSchemaReferenceNameDecodesURIFragmentEscapes(t *testing.T) {
+	got, err := componentSchemaReferenceName("#%2Fcomponents%2Fschemas%2FFoo%2DBar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Foo-Bar" {
+		t.Fatalf("component name = %q, want Foo-Bar", got)
+	}
+}
+
 func TestResolveComponentObjectRejectsExternalUnresolvedAndCyclicReferences(t *testing.T) {
 	for _, test := range []struct {
 		name      string

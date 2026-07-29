@@ -1252,8 +1252,8 @@ catch (error) { if (!String(error).includes("schema is false") && !String(error.
 	}
 }
 
-func TestRuntimeRejectsUnevaluatedPropertiesAndItemsBeforeFetch(t *testing.T) {
-	document, err := sdkgen.Compile([]byte(`{"openapi":"3.1.0","info":{"title":"Unevaluated","version":"1"},"paths":{"/object":{"post":{"operationId":"createObject","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","allOf":[{"properties":{"id":{"type":"string"}}},{"properties":{"name":{"type":"string"}}}],"unevaluatedProperties":false}}}},"responses":{"204":{"description":"No Content"}}}},"/array":{"post":{"operationId":"createArray","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"array","prefixItems":[{"type":"string"}],"unevaluatedItems":false}}}},"responses":{"204":{"description":"No Content"}}}}}}`))
+func TestBooleanFalseBinarySchemasRejectRequestAndResponseValues(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{"openapi":"3.1.0","info":{"title":"Never binary","version":"1"},"paths":{"/input":{"post":{"operationId":"createBinary","requestBody":{"required":true,"content":{"application/octet-stream":{"schema":false}}},"responses":{"204":{"description":"No Content"}}}},"/output":{"get":{"operationId":"getBinary","responses":{"200":{"description":"Impossible","content":{"application/octet-stream":{"schema":false}}}}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1261,13 +1261,68 @@ func TestRuntimeRejectsUnevaluatedPropertiesAndItemsBeforeFetch(t *testing.T) {
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
-let fetched = false;
-const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { fetched = true; throw new Error("fetch must not run"); } });
+let fetched = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { fetched++; return new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "application/octet-stream" } }); } });
+try { await api.$operations.createBinary({ body: new Uint8Array([1]) }); throw new Error("false binary request schema accepted a value"); }
+catch (error) { if (!String(error).includes("schema is false") && !String(error.cause).includes("schema is false")) throw error; }
+if (fetched !== 0) throw new Error("false binary request reached fetch");
+try { await api.$operations.getBinary(); throw new Error("false binary response schema accepted a value"); }
+catch (error) { if (!String(error).includes("schema is false") && !String(error.cause).includes("schema is false")) throw error; }
+if (fetched !== 1) throw new Error("binary response fixture did not run");
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute TypeScript false binary schema test: %v\n%s", err, output)
+	}
+}
+
+func TestOpenAPI30NullableRequestRuntimeMatchesGeneratedType(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{"openapi":"3.0.3","info":{"title":"Nullable","version":"1"},"paths":{"/value":{"post":{"operationId":"createValue","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"string","nullable":true}}}},"responses":{"204":{"description":"No Content"}}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let fetched = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { fetched++; return new Response(null, { status: 204 }); } });
+await api.$operations.createValue({ body: null });
+try { await api.$operations.createValue({ body: 1 }); throw new Error("invalid nullable value accepted"); }
+catch (error) { if (!String(error).includes("expected string | null") && !String(error.cause).includes("expected string | null")) throw error; }
+if (fetched !== 1) throw new Error("nullable request validation did not run before fetch");
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute OpenAPI 3.0 nullable runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimeRejectsUnevaluatedPropertiesAndItemsBeforeFetch(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+	  "openapi":"3.1.0","info":{"title":"Unevaluated","version":"1"},
+	  "paths":{
+	    "/object":{"post":{"operationId":"createObject","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","allOf":[{"properties":{"id":{"type":"string"}}},{"properties":{"name":{"type":"string"}}}],"unevaluatedProperties":false}}}},"responses":{"204":{"description":"No Content"}}}},
+	    "/array":{"post":{"operationId":"createArray","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"array","prefixItems":[{"type":"string"}],"additionalProperties":false,"unevaluatedItems":false}}}},"responses":{"204":{"description":"No Content"}}}},
+	    "/referenced":{"post":{"operationId":"createReferenced","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Base","unevaluatedProperties":false}}}},"responses":{"204":{"description":"No Content"}}}},
+	    "/dependent":{"post":{"operationId":"createDependent","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","properties":{"enabled":{"type":"boolean"}},"dependentSchemas":{"enabled":{"properties":{"label":{"type":"string"}}}},"unevaluatedProperties":false}}}},"responses":{"204":{"description":"No Content"}}}}
+	  },
+	  "components":{"schemas":{"Base":{"type":"object","properties":{"id":{"type":"string"}}}}}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let fetched = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { fetched++; return new Response(null, { status: 204 }); } });
 for (const [operation, input, expected] of [["createObject", { body: { id: "one", name: "widget", extra: true } }, "unexpected unevaluated property extra"], ["createArray", { body: ["one", "extra"] }, "unexpected unevaluated item 1"]]) {
   try { await api.$operations[operation](input); throw new Error("unevaluated value accepted"); }
   catch (error) { if (!String(error).includes(expected) && !String(error.cause).includes(expected)) throw error; }
 }
-if (fetched) throw new Error("fetch ran before unevaluated-value validation");
+await api.$operations.createReferenced({ body: { id: "one" } });
+await api.$operations.createDependent({ body: { enabled: true, label: "ok" } });
+if (fetched !== 2) throw new Error("valid referenced/dependent annotations were not merged");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript unevaluated runtime test: %v\n%s", err, output)
@@ -1275,7 +1330,7 @@ if (fetched) throw new Error("fetch ran before unevaluated-value validation");
 }
 
 func TestDiscriminatorRuntimeSelectsMappedBranch(t *testing.T) {
-	document, err := sdkgen.Compile([]byte(`{"openapi":"3.1.0","info":{"title":"Pets","version":"1"},"paths":{"/pet":{"get":{"operationId":"getPet","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Pet"}}}}}}}},"components":{"schemas":{"Pet":{"oneOf":[{"$ref":"#/components/schemas/Cat"},{"$ref":"#/components/schemas/Dog"}],"discriminator":{"propertyName":"kind","mapping":{"cat":"#/components/schemas/Cat","dog":"#/components/schemas/Dog"}}},"Cat":{"type":"object","required":["kind","lives"],"properties":{"kind":{"const":"cat"},"lives":{"type":"integer"}}},"Dog":{"type":"object","required":["kind","barks"],"properties":{"kind":{"const":"dog"},"barks":{"type":"boolean"}}}}}}`))
+	document, err := sdkgen.Compile([]byte(`{"openapi":"3.1.0","info":{"title":"Pets","version":"1"},"paths":{"/pet":{"get":{"operationId":"getPet","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Pet"}}}}}}}},"components":{"schemas":{"Pet":{"oneOf":[{"$ref":"#/components/schemas/Cat"},{"$ref":"#/components/schemas/Dog"}],"discriminator":{"propertyName":"kind","mapping":{"cat":"#%2Fcomponents%2Fschemas%2FCat","dog":"#/components/schemas/Dog"}}},"Cat":{"type":"object","required":["kind","lives"],"properties":{"kind":{"const":"cat"},"lives":{"type":"integer"}}},"Dog":{"type":"object","required":["kind","barks"],"properties":{"kind":{"const":"dog"},"barks":{"type":"boolean"}}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

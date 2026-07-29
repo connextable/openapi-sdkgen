@@ -50,7 +50,7 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 	output.WriteString("/** Type catalog keyed by exact OpenAPI component schema names. */\n")
 	output.WriteString("export interface Components {\n")
 	for _, schemaName := range names {
-		schema := document.ComponentSchemas[schemaName]
+		schema := componentSchemaValue(document, schemaName)
 		input, err := schemaType(document, schema, projectionInput)
 		if err != nil {
 			return nil, fmt.Errorf("component %s input: %w", schemaName, err)
@@ -59,7 +59,11 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("component %s output: %w", schemaName, err)
 		}
-		emitSchemaValueJSDoc(&output, "  ", schema, "OpenAPI component `"+sanitizeComment(schemaName)+"`.")
+		if object, ok := schema.(map[string]any); ok {
+			emitSchemaValueJSDoc(&output, "  ", object, "OpenAPI component `"+sanitizeComment(schemaName)+"`.")
+		} else {
+			fmt.Fprintf(&output, "  /** OpenAPI component `%s`. */\n", sanitizeComment(schemaName))
+		}
 		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(schemaName))
 		output.WriteString("    /** Request/input projection. */\n")
 		fmt.Fprintf(&output, "    readonly input: %s\n", input)
@@ -76,7 +80,11 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 	enumBindings := make([]runtimeProperty, 0)
 	enumNames := make([]string, 0)
 	for _, schemaName := range names {
-		values, exists := document.ComponentSchemas[schemaName]["enum"].([]any)
+		schema, ok := componentSchemaValue(document, schemaName).(map[string]any)
+		if !ok {
+			continue
+		}
+		values, exists := schema["enum"].([]any)
 		if !exists {
 			continue
 		}
@@ -117,7 +125,7 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 				}
 				if !found[name] {
 					found[name] = true
-					visit(document.ComponentSchemas[name], found)
+					visit(componentSchemaValue(document, name), found)
 				}
 			}
 			for key, item := range typed {
@@ -142,8 +150,15 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 	visit(document.Raw["webhooks"], visible)
 	components, _ := document.Raw["components"].(map[string]any)
 	visit(components["callbacks"], visible)
-	result := make(map[string]bool, len(document.ComponentSchemas))
+	all := make(map[string]bool, len(document.ComponentSchemas)+len(document.Schemas))
 	for name := range document.ComponentSchemas {
+		all[name] = true
+	}
+	for name := range document.Schemas {
+		all[name] = true
+	}
+	result := make(map[string]bool, len(all))
+	for name := range all {
 		if !hidden[name] || visible[name] {
 			result[name] = true
 		}
@@ -155,9 +170,16 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 		roots = append(roots, name)
 	}
 	for _, name := range roots {
-		visit(document.ComponentSchemas[name], result)
+		visit(componentSchemaValue(document, name), result)
 	}
 	return result
+}
+
+func componentSchemaValue(document *ir.Document, name string) any {
+	if schema, ok := document.Schemas[name]; ok {
+		return schema.Value
+	}
+	return document.ComponentSchemas[name]
 }
 
 func emitSchemaValueJSDoc(output *bytes.Buffer, indent string, schema map[string]any, fallback string) {
@@ -503,18 +525,7 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 }
 
 func referencedType(document *ir.Document, name string, direction projection, scope typeRenderScope) (string, error) {
-	_, exists := document.ComponentSchemas[name]
-	if !exists {
-		if compiled, ok := document.Schemas[name]; ok {
-			if boolean, ok := compiled.Value.(bool); ok {
-				if boolean {
-					return "unknown", nil
-				}
-				return "never", nil
-			}
-		}
-		return componentProjectionTypeExpression(name, direction).render(scope), nil
-	}
+	_ = document
 	return componentProjectionTypeExpression(name, direction).render(scope), nil
 }
 
@@ -570,13 +581,18 @@ func operationOutputTypeForScope(document *ir.Document, operation ir.Operation, 
 			if err != nil {
 				return "", err
 			}
-			schema, hasSchema := media["schema"].(map[string]any)
+			schemaValue, hasSchema := media["schema"]
 			if !hasSchema {
 				// A Media Type Object without a Schema Object still has a body.
 				// Its shape is unconstrained, not absent.
 				result = append(result, "unknown")
 				continue
 			}
+			if schemaValue == false {
+				result = append(result, "never")
+				continue
+			}
+			schema, _ := schemaValue.(map[string]any)
 			if isBinaryMedia(mediaType, schema) {
 				result = append(result, "ReadableStream<Uint8Array>")
 				continue
@@ -651,7 +667,9 @@ func operationRawResponseTypeForScope(document *ir.Document, operation ir.Operat
 			schemaObject, _ := schema.(map[string]any)
 			valueType := "void"
 			if schema != nil {
-				if isBinaryMedia(mediaType, schemaObject) {
+				if schema == false {
+					valueType = "never"
+				} else if isBinaryMedia(mediaType, schemaObject) {
 					valueType = "ReadableStream<Uint8Array>"
 				} else if isTextMedia(mediaType) {
 					valueType = "string"
@@ -754,7 +772,9 @@ func operationMediaOutputTypesForScope(document *ir.Document, operation ir.Opera
 			schemaObject, _ := schema.(map[string]any)
 			valueType := "void"
 			if schema != nil {
-				if isBinaryMedia(mediaType, schemaObject) {
+				if schema == false {
+					valueType = "never"
+				} else if isBinaryMedia(mediaType, schemaObject) {
 					valueType = "ReadableStream<Uint8Array>"
 				} else if isTextMedia(mediaType) {
 					valueType = "string"

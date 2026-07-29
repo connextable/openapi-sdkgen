@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -11,10 +12,18 @@ const componentSchemaReferencePrefix = "#/components/schemas/"
 // pointer. Nested JSON Pointers need a different target type/wire model and
 // must be rejected before generation rather than being mistaken for a name.
 func componentSchemaReferenceName(reference string) (string, error) {
-	if !strings.HasPrefix(reference, componentSchemaReferencePrefix) {
+	if !strings.HasPrefix(reference, "#") {
 		return "", fmt.Errorf("unsupported schema reference %q", reference)
 	}
-	token := strings.TrimPrefix(reference, componentSchemaReferencePrefix)
+	pointer, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	if err != nil {
+		return "", fmt.Errorf("schema reference %q has an invalid URI fragment escape", reference)
+	}
+	prefix := strings.TrimPrefix(componentSchemaReferencePrefix, "#")
+	if !strings.HasPrefix(pointer, prefix) {
+		return "", fmt.Errorf("unsupported schema reference %q", reference)
+	}
+	token := strings.TrimPrefix(pointer, prefix)
 	if token == "" || strings.Contains(token, "/") {
 		return "", fmt.Errorf("schema reference %q must target one component schema", reference)
 	}

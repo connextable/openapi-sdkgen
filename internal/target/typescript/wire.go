@@ -29,7 +29,7 @@ func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string
 		if schema, ok := document.Schemas[schemaName]; ok {
 			value = schema.Value
 		}
-		descriptor, err := wireSchemaDescriptor(value, direction)
+		descriptor, err := wireSchemaDescriptorForDocument(document, value, direction)
 		if err != nil {
 			return fmt.Errorf("component %s wire schema: %w", schemaName, err)
 		}
@@ -40,7 +40,12 @@ func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string
 }
 
 func wireSchemaDescriptor(value any, direction projection) (string, error) {
-	return wireSchemaDescriptorScoped(value, direction, schemaRequiresFormatAssertion(value))
+	return wireSchemaDescriptorScoped(value, direction, schemaRequiresFormatAssertion(value), false)
+}
+
+func wireSchemaDescriptorForDocument(document *ir.Document, value any, direction projection) (string, error) {
+	legacyNullable := document != nil && document.OpenAPIVersionLine == "3.0"
+	return wireSchemaDescriptorScoped(value, direction, schemaRequiresFormatAssertion(value), legacyNullable)
 }
 
 const formatAssertionVocabulary = "https://json-schema.org/draft/2020-12/vocab/format-assertion"
@@ -58,7 +63,7 @@ func schemaRequiresFormatAssertion(value any) bool {
 	return required
 }
 
-func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion bool) (string, error) {
+func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion, legacyNullable bool) (string, error) {
 	if boolean, ok := value.(bool); ok {
 		return fmt.Sprintf("{ boolean: %t }", boolean), nil
 	}
@@ -89,11 +94,11 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 				siblings[key] = value
 			}
 		}
-		siblingDescriptor, err := wireSchemaDescriptorScoped(siblings, direction, formatAssertion)
+		siblingDescriptor, err := wireSchemaDescriptorScoped(siblings, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
-		return "{ allOf: [" + referenceDescriptor + ", " + siblingDescriptor + "] }", nil
+		return mergeWireSchemaDescriptors(referenceDescriptor, siblingDescriptor), nil
 	}
 	if reference, _ := schema["$ref"].(string); reference != "" {
 		name, err := componentSchemaReferenceName(reference)
@@ -110,18 +115,28 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 				siblings[key] = value
 			}
 		}
-		siblingDescriptor, err := wireSchemaDescriptorScoped(siblings, direction, formatAssertion)
+		siblingDescriptor, err := wireSchemaDescriptorScoped(siblings, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
-		return "{ allOf: [" + referenceDescriptor + ", " + siblingDescriptor + "] }", nil
+		return mergeWireSchemaDescriptors(referenceDescriptor, siblingDescriptor), nil
 	}
 
 	var fields []string
 	if anchor, _ := schema["x-sdkgen-dynamic-anchor"].(string); anchor != "" {
 		fields = append(fields, "dynamicAnchor: "+quoteTS(anchor))
 	}
-	if types := schemaTypes(schema["type"]); len(types) > 0 {
+	types := schemaTypes(schema["type"])
+	if nullable, _ := schema["nullable"].(bool); legacyNullable && nullable && len(types) > 0 {
+		hasNull := false
+		for _, value := range types {
+			hasNull = hasNull || value == "null"
+		}
+		if !hasNull {
+			types = append(types, "null")
+		}
+	}
+	if len(types) > 0 {
 		values := make([]string, 0, len(types))
 		for _, value := range types {
 			values = append(values, quoteTS(value))
@@ -201,7 +216,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		fields = append(fields, "contentMediaType: "+quoteTS(value))
 	}
 	if value, exists := schema["contentSchema"]; exists {
-		descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -231,7 +246,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			if direction == projectionOutput && boolValue(propertySchema, "writeOnly") {
 				continue
 			}
-			nested, err := wireSchemaDescriptorScoped(propertyValue, direction, formatAssertion)
+			nested, err := wireSchemaDescriptorScoped(propertyValue, direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -249,8 +264,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		sort.Strings(names)
 		entries := make([]runtimeProperty, 0, len(names))
 		for _, name := range names {
-			child, _ := patterns[name].(map[string]any)
-			descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion)
+			descriptor, err := wireSchemaDescriptorScoped(patterns[name], direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -258,8 +272,8 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		}
 		fields = append(fields, "patternProperties: "+runtimeObjectExpression(entries))
 	}
-	if propertyNames, ok := schema["propertyNames"].(map[string]any); ok {
-		descriptor, err := wireSchemaDescriptorScoped(propertyNames, direction, formatAssertion)
+	if propertyNames, exists := schema["propertyNames"]; exists {
+		descriptor, err := wireSchemaDescriptorScoped(propertyNames, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -292,8 +306,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		sort.Strings(names)
 		entries := make([]runtimeProperty, 0, len(names))
 		for _, name := range names {
-			child, _ := dependencies[name].(map[string]any)
-			descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion)
+			descriptor, err := wireSchemaDescriptorScoped(dependencies[name], direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -323,14 +336,14 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		}
 	}
 	if items, exists := schema["items"]; exists {
-		descriptor, err := wireSchemaDescriptorScoped(items, direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(items, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
 		fields = append(fields, "items: "+descriptor)
 	}
-	if contains, ok := schema["contains"].(map[string]any); ok {
-		descriptor, err := wireSchemaDescriptorScoped(contains, direction, formatAssertion)
+	if contains, exists := schema["contains"]; exists {
+		descriptor, err := wireSchemaDescriptorScoped(contains, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -348,7 +361,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 	if prefixItems, ok := schema["prefixItems"].([]any); ok && len(prefixItems) > 0 {
 		items := make([]string, 0, len(prefixItems))
 		for _, value := range prefixItems {
-			descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion)
+			descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -360,7 +373,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		if boolean, ok := additional.(bool); ok && !boolean {
 			fields = append(fields, "additionalProperties: false")
 		} else {
-			descriptor, err := wireSchemaDescriptorScoped(additional, direction, formatAssertion)
+			descriptor, err := wireSchemaDescriptorScoped(additional, direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -376,7 +389,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			fields = append(fields, keyword+": false")
 			continue
 		}
-		descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -389,7 +402,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		}
 		items := make([]string, 0, len(variants))
 		for _, value := range variants {
-			descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion)
+			descriptor, err := wireSchemaDescriptorScoped(value, direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -398,7 +411,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		fields = append(fields, keyword+": ["+strings.Join(items, ", ")+"]")
 	}
 	if negated, exists := schema["not"]; exists {
-		descriptor, err := wireSchemaDescriptorScoped(negated, direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(negated, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -409,7 +422,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 		if !exists {
 			continue
 		}
-		descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return "", err
 		}
@@ -417,7 +430,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 	}
 	if discriminator, ok := schema["discriminator"].(map[string]any); ok {
 		if property, ok := discriminator["propertyName"].(string); ok && property != "" {
-			mapping, err := discriminatorWireMapping(schema, discriminator, direction, formatAssertion)
+			mapping, err := discriminatorWireMapping(schema, discriminator, direction, formatAssertion, legacyNullable)
 			if err != nil {
 				return "", err
 			}
@@ -441,7 +454,19 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 	return "{ " + strings.Join(fields, ", ") + " }", nil
 }
 
-func discriminatorWireMapping(schema, discriminator map[string]any, direction projection, formatAssertion bool) ([]runtimeProperty, error) {
+func mergeWireSchemaDescriptors(reference, sibling string) string {
+	if sibling == "{}" {
+		return reference
+	}
+	reference = strings.TrimSuffix(strings.TrimPrefix(reference, "{ "), " }")
+	sibling = strings.TrimSuffix(strings.TrimPrefix(sibling, "{ "), " }")
+	if sibling == "" {
+		return "{ " + reference + " }"
+	}
+	return "{ " + reference + ", " + sibling + " }"
+}
+
+func discriminatorWireMapping(schema, discriminator map[string]any, direction projection, formatAssertion, legacyNullable bool) ([]runtimeProperty, error) {
 	mapping := make(map[string]any)
 	if explicit, ok := discriminator["mapping"].(map[string]any); ok {
 		for name, value := range explicit {
@@ -471,7 +496,7 @@ func discriminatorWireMapping(schema, discriminator map[string]any, direction pr
 	sort.Strings(names)
 	entries := make([]runtimeProperty, 0, len(names))
 	for _, name := range names {
-		descriptor, err := wireSchemaDescriptorScoped(mapping[name], direction, formatAssertion)
+		descriptor, err := wireSchemaDescriptorScoped(mapping[name], direction, formatAssertion, legacyNullable)
 		if err != nil {
 			return nil, err
 		}
@@ -485,7 +510,7 @@ func discriminatorReferenceDescriptor(reference string, direction projection) (s
 }
 
 func normalizedDiscriminatorReference(reference string) string {
-	if strings.HasPrefix(reference, "#/components/schemas/") || strings.Contains(reference, ":") || strings.HasPrefix(reference, "./") || strings.HasPrefix(reference, "../") {
+	if strings.HasPrefix(reference, "#") || strings.Contains(reference, ":") || strings.HasPrefix(reference, "./") || strings.HasPrefix(reference, "../") {
 		return reference
 	}
 	return "#/components/schemas/" + strings.ReplaceAll(strings.ReplaceAll(reference, "~", "~0"), "/", "~1")
@@ -515,17 +540,19 @@ func operationRequestWireBodies(document *ir.Document, operation ir.Operation) (
 		}
 		schema := media["schema"]
 		schemaObject, _ := schema.(map[string]any)
+		booleanSchema, isBooleanSchema := schema.(bool)
+		schemaIsFalse := isBooleanSchema && !booleanSchema
 		descriptor := "{}"
-		if !isBinaryMedia(mediaType, schemaObject) {
+		if schemaIsFalse || !isBinaryMedia(mediaType, schemaObject) {
 			var err error
-			descriptor, err = wireSchemaDescriptor(schema, projectionInput)
+			descriptor, err = wireSchemaDescriptorForDocument(document, schema, projectionInput)
 			if err != nil {
 				return "", false, err
 			}
 		}
 		entry := "{ contentType: " + quoteTS(mediaType) + ", schema: " + descriptor
 		if itemSchema, exists := media["itemSchema"]; exists {
-			itemDescriptor, err := wireSchemaDescriptor(itemSchema, projectionInput)
+			itemDescriptor, err := wireSchemaDescriptorForDocument(document, itemSchema, projectionInput)
 			if err != nil {
 				return "", false, err
 			}
@@ -677,7 +704,7 @@ func multipartWireHeaders(document *ir.Document, value any, direction projection
 		if err != nil {
 			return "", err
 		}
-		descriptor, err := wireSchemaDescriptor(schema, direction)
+		descriptor, err := wireSchemaDescriptorForDocument(document, schema, direction)
 		if err != nil {
 			return "", err
 		}
@@ -736,17 +763,19 @@ func operationResponseWireBodies(document *ir.Document, operation ir.Operation) 
 			}
 			schema := media["schema"]
 			schemaObject, _ := schema.(map[string]any)
+			booleanSchema, isBooleanSchema := schema.(bool)
+			schemaIsFalse := isBooleanSchema && !booleanSchema
 			descriptor := "{}"
-			if !isBinaryMedia(mediaType, schemaObject) {
+			if schemaIsFalse || !isBinaryMedia(mediaType, schemaObject) {
 				var err error
-				descriptor, err = wireSchemaDescriptor(schema, projectionOutput)
+				descriptor, err = wireSchemaDescriptorForDocument(document, schema, projectionOutput)
 				if err != nil {
 					return "", false, err
 				}
 			}
 			entry := "{ status: " + quoteTS(status) + ", contentType: " + quoteTS(mediaType) + ", schema: " + descriptor
 			if itemSchema, exists := media["itemSchema"]; exists {
-				itemDescriptor, err := wireSchemaDescriptor(itemSchema, projectionOutput)
+				itemDescriptor, err := wireSchemaDescriptorForDocument(document, itemSchema, projectionOutput)
 				if err != nil {
 					return "", false, err
 				}
@@ -813,7 +842,7 @@ func responseWireHeaders(document *ir.Document, response map[string]any) (string
 		if err != nil {
 			return "", err
 		}
-		descriptor, err := wireSchemaDescriptor(schema, projectionOutput)
+		descriptor, err := wireSchemaDescriptorForDocument(document, schema, projectionOutput)
 		if err != nil {
 			return "", err
 		}

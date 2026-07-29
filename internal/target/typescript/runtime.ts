@@ -2616,22 +2616,20 @@ function transformWireValue(
   validateWireValue(value, schema, components, direction, dynamicScope);
   if (value === null || value === undefined) return value;
   const dynamicTarget = resolveDynamicReference(schema, scope);
-  if (dynamicTarget !== undefined) return transformWireValue(value, dynamicTarget, components, direction, scope);
+  let transformed: unknown = value;
+  if (dynamicTarget !== undefined) transformed = transformWireValue(transformed, dynamicTarget, components, direction, scope);
   if (schema.reference !== undefined) {
     const referenced = components[schema.reference];
-    return referenced === undefined
-      ? value
-      : transformWireValue(value, referenced, components, direction, scope);
+    if (referenced !== undefined) transformed = transformWireValue(transformed, referenced, components, direction, scope);
   }
-  if (Array.isArray(value)) {
-    return value.map((item, index) => {
+  if (Array.isArray(transformed)) {
+    return transformed.map((item, index) => {
       const itemSchema = schema.prefixItems?.[index] ?? schema.items;
       return itemSchema === undefined
         ? item
         : transformWireValue(item, itemSchema, components, direction, scope);
     });
   }
-  let transformed: unknown = value;
   if (
     isRecord(transformed) &&
     (schema.properties !== undefined || schema.additionalProperties !== undefined)
@@ -2670,8 +2668,8 @@ function transformWireValue(
     }
     transformed = result;
   }
-  for (const variant of schema.allOf ?? []) {
-    transformed = transformWireValue(transformed, variant, components, direction, scope);
+  for (const branch of schema.allOf ?? []) {
+    transformed = transformWireValue(transformed, branch, components, direction, scope);
   }
 	if (schema.if !== undefined) {
 		const branch = schemaMatches(transformed, schema.if, components, direction, scope) ? schema.then : schema.else;
@@ -2720,12 +2718,10 @@ export function validateWireValue(
   const dynamicTarget = resolveDynamicReference(schema, scope);
   if (dynamicTarget !== undefined) {
     validateWireValue(value, dynamicTarget, components, direction, scope);
-    return;
   }
   if (schema.reference !== undefined) {
     const referenced = components[schema.reference];
     if (referenced !== undefined) validateWireValue(value, referenced, components, direction, scope);
-    return;
   }
   if (schema.types !== undefined && !schema.types.some((type) => valueMatchesType(value, type))) {
     throw new TypeError(`expected ${schema.types.join(" | ")}`);
@@ -2802,7 +2798,10 @@ export function validateWireValue(
   for (const [wireName, definition] of Object.entries(properties)) {
     const sourceName = direction === "encode" ? definition.property : wireName;
     allowed.add(sourceName);
-    if (Object.hasOwn(value, sourceName)) validateWireValue(value[sourceName], definition.schema, components, direction, scope);
+    if (Object.hasOwn(value, sourceName)) {
+      try { validateWireValue(value[sourceName], definition.schema, components, direction, scope); }
+      catch (cause) { throw new TypeError(`property ${wireName}: ${cause instanceof Error ? cause.message : "invalid value"}`, { cause }); }
+    }
   }
   for (const required of schema.required ?? []) {
     const definition = properties[required];
@@ -2993,13 +2992,13 @@ function evaluatedArrayIndexes(
 	const result = new Set<number>();
 	const scope = extendDynamicScope(dynamicScope, schema);
 	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) return evaluatedArrayIndexes(value, dynamicTarget, components, direction, scope, seen);
+	if (dynamicTarget !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, dynamicTarget, components, direction, scope, seen));
 	if (schema.reference !== undefined) {
 		const referenced = components[schema.reference];
-		if (referenced !== undefined) return evaluatedArrayIndexes(value, referenced, components, direction, scope, seen);
+		if (referenced !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, referenced, components, direction, scope, seen));
 	}
 	for (let index = 0; index < Math.min(value.length, schema.prefixItems?.length ?? 0); index++) result.add(index);
-	if (schema.items !== undefined || schema.additionalProperties !== undefined) {
+	if (schema.items !== undefined) {
 		for (let index = schema.prefixItems?.length ?? 0; index < value.length; index++) result.add(index);
 	}
 	if (schema.contains !== undefined) {
@@ -3029,10 +3028,10 @@ function evaluatedPropertyNames(
 	const result = new Set<string>();
 	const scope = extendDynamicScope(dynamicScope, schema);
 	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) return evaluatedPropertyNames(value, dynamicTarget, components, direction, scope, seen);
+	if (dynamicTarget !== undefined) mergeProperties(result, evaluatedPropertyNames(value, dynamicTarget, components, direction, scope, seen));
 	if (schema.reference !== undefined) {
 		const referenced = components[schema.reference];
-		if (referenced !== undefined) return evaluatedPropertyNames(value, referenced, components, direction, scope, seen);
+		if (referenced !== undefined) mergeProperties(result, evaluatedPropertyNames(value, referenced, components, direction, scope, seen));
 	}
 	for (const [wireName, definition] of Object.entries(schema.properties ?? {})) {
 		const name = direction === "encode" ? definition.property : wireName;
@@ -3050,6 +3049,9 @@ function evaluatedPropertyNames(
 	if (schema.if !== undefined) {
 		const child = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
 		if (child !== undefined) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
+	}
+	for (const [property, child] of Object.entries(schema.dependentSchemas ?? {})) {
+		if (Object.hasOwn(value, property)) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
 	}
 	return result;
 }

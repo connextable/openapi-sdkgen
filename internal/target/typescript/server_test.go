@@ -22,7 +22,7 @@ func TestGeneratedWebhookRouterExecutesThroughFetch(t *testing.T) {
 	  {"name":"page","in":"query","required":true,"schema":{"type":"integer"}},
 	  {"name":"filter","in":"query","style":"deepObject","explode":true,"schema":{"type":"object","required":["kind_name","count"],"properties":{"kind_name":{"type":"string"},"count":{"type":"integer"}}}},
 	  {"name":"meta","in":"header","style":"simple","explode":true,"schema":{"type":"object","required":["trace_id","enabled"],"properties":{"trace_id":{"type":"integer"},"enabled":{"type":"boolean"}}}},
-	  {"name":"payload","in":"query","content":{"application/xml":{"schema":{"type":"object","required":["event_id"],"properties":{"event_id":{"type":"string","xml":{"name":"event"}}}}}}},
+	  {"name":"payload","in":"query","content":{"application/xml":{"schema":{"type":"object","required":["event_id","choice"],"properties":{"event_id":{"type":"string","xml":{"name":"event"}},"choice":{"oneOf":[{"type":"integer"},{"type":"boolean"}]}}}}}},
 	  {"name":"custom","in":"header","content":{"application/vnd.example.parameter":{"schema":{"type":"object","required":["event_id"],"properties":{"event_id":{"type":"string"}}}}}},
 	  {"name":"X-Trace","in":"header","required":true,"schema":{"type":"string"}},
 	  {"name":"tags","in":"cookie","style":"cookie","explode":true,"schema":{"type":"array","items":{"type":"string"}}},
@@ -96,7 +96,7 @@ const router = createWebhookRouter({
 	if (securityCandidates.signature?.value === "boom") throw new Error("private authenticator detail");
 	if (method !== "POST" || path !== "/hooks/orders" || JSON.stringify(security) !== JSON.stringify([{ signature: [] }]) || (securityCandidates.signature?.value !== undefined && securityCandidates.signature.value !== "sig-1")) throw new Error("bad auth context");
 } });
-const response = await router.fetch(new Request("https://host.test/hooks/orders?page=2&filter[kind_name]=fresh&filter[count]=3&payload=%3Cpayload%3E%3Cevent%3Exml-event%3C%2Fevent%3E%3C%2Fpayload%3E", { method: "POST", headers: { "content-type": "application/json", "x-signature": "sig-1", "x-trace": "trace-1", "meta": "trace_id=4,enabled=true", "custom": "custom-event", "cookie": "session=one; tags=one; tags=two; theme=dark; event_id=a%2Fb" }, body: JSON.stringify({ id: "order-1" }) }));
+const response = await router.fetch(new Request("https://host.test/hooks/orders?page=2&filter[kind_name]=fresh&filter[count]=3&payload=%3Cpayload%3E%3Cevent%3Exml-event%3C%2Fevent%3E%3Cchoice%3E2%3C%2Fchoice%3E%3C%2Fpayload%3E", { method: "POST", headers: { "content-type": "application/json", "x-signature": "sig-1", "x-trace": "trace-1", "meta": "trace_id=4,enabled=true", "custom": "custom-event", "cookie": "session=one; tags=one; tags=two; theme=dark; event_id=a%2Fb" }, body: JSON.stringify({ id: "order-1" }) }));
 if (response.status !== 202 || response.headers.get("x-rate") !== "2" || response.headers.get("x-list") !== "1,2" || response.headers.get("x-object") !== "event_id=outbound" || response.headers.get("x-meta") !== '{"event_id":"outbound"}' || response.headers.get("x-custom") !== "custom:custom-outbound" || JSON.stringify(await response.json()) !== JSON.stringify({ accepted: "order-1" })) throw new Error("handler response was not encoded");
 const plain = await router.fetch(new Request("https://host.test/hooks/plain", { method: "GET" }));
 if (plain.status !== 200 || plain.headers.get("content-type") !== "application/vnd.example.plain" || await plain.text() !== "custom:plain") throw new Error("custom response was not encoded");
@@ -106,7 +106,7 @@ const binary = await router.fetch(new Request("https://host.test/hooks/binary", 
 if (binary.status !== 200 || binary.headers.get("content-type") !== "application/pdf" || JSON.stringify([...new Uint8Array(await binary.arrayBuffer())]) !== "[1,2,3]") throw new Error("binary response was not encoded");
 const xml = await router.fetch(new Request("https://host.test/hooks/xml", { method: "GET" }));
 if (xml.status !== 200 || xml.headers.get("content-type") !== "application/xml" || await xml.text() !== '<receipt id="receipt-1"><message>hello &amp; goodbye</message></receipt>') throw new Error("XML response was not encoded from its schema");
-if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, filter: { kind_name: "fresh", count: 3 }, payload: { event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
+if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, filter: { kind_name: "fresh", count: 3 }, payload: { choice: 2, event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
 const selectorResponse = await router.fetch(new Request("https://host.test/hooks/selectors/.role,admin,enabled,true/;matrix=role,owner,enabled,false", { method: "GET" }));
 if (selectorResponse.status !== 204 || JSON.stringify(selectorParams) !== JSON.stringify({ label: { role: "admin", enabled: true }, matrix: { role: "owner", enabled: false } })) throw new Error("label/matrix path objects were not decoded");
 const denied = createWebhookRouter({ orderCreated: { POST: async () => ({ status: 202 }) } }, { routes: { orderCreated: "/hooks/orders" }, authenticate: () => new Response("no", { status: 401 }) });
@@ -661,12 +661,33 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
         "dependent":{"type":"object","dependentRequired":{"a":["b"]}},
         "noItems":{"type":"array","items":false}
       }
-    }}}},"responses":{"204":{"description":"OK"}}}}
+    }}}},"responses":{"204":{"description":"OK"}}}},
+    "allowBool":{"post":{"operationId":"allowBool","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Allow"}}}},"responses":{"204":{"description":"OK"}}}},
+    "denyBool":{"post":{"operationId":"denyBool","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Deny"}}}},"responses":{"204":{"description":"OK"}}}},
+    "refSibling":{"post":{"operationId":"refSibling","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/BaseNumber","minimum":10}}}},"responses":{"204":{"description":"OK"}}}},
+    "advanced":{"post":{"operationId":"advanced","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["xcount","closed","tuple"],"propertyNames":{"pattern":"^[a-z]+$"},"patternProperties":{"^x":{"type":"integer"}},"properties":{"closed":{"allOf":[{"type":"object","properties":{"id":{"type":"string"}}}],"unevaluatedProperties":false},"tuple":{"type":"array","prefixItems":[{"type":"string"}],"unevaluatedItems":false}},"additionalProperties":false}}}},"responses":{"204":{"description":"OK"}}}},
+    "annotation":{"post":{"operationId":"annotation","requestBody":{"required":true,"content":{"application/json":{"schema":{"x-sdkgen-boolean-schema":false}}}},"responses":{"204":{"description":"OK"}}}},
+    "encodedRef":{"post":{"operationId":"encodedRef","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#%2Fcomponents%2Fschemas%2FFoo%2DBar"}}}},"responses":{"204":{"description":"OK"}}}},
+    "parameters":{"get":{"operationId":"parameters","parameters":[{"name":"count","in":"query","required":true,"schema":{"$ref":"#/components/schemas/Integer"}},{"name":"enabled","in":"header","required":true,"schema":{"$ref":"#/components/schemas/Boolean"}},{"name":"values","in":"query","required":true,"schema":{"type":"array","items":{"$ref":"#/components/schemas/Integer","minimum":1}}},{"name":"ambiguousValues","in":"query","required":true,"schema":{"type":"array","items":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]}}},{"name":"tuple","in":"query","required":true,"explode":false,"schema":{"type":"array","prefixItems":[{"type":"integer"},{"type":"boolean"}],"items":false}},{"name":"variant","in":"query","required":true,"schema":{"oneOf":[{"type":"integer"},{"type":"boolean"}]}},{"name":"constrained","in":"query","required":true,"schema":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]}},{"name":"typeless","in":"query","required":true,"schema":{"enum":[1,2]}},{"name":"typelessBool","in":"query","required":true,"schema":{"const":true}},{"name":"dynamicValue","in":"query","required":true,"schema":{"$dynamicRef":"#value"}},{"name":"scalarArray","in":"query","required":true,"schema":{"oneOf":[{"type":"string"},{"type":"array","minItems":2,"items":{"type":"string"}}]}},{"name":"selected","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","oneOf":[{"required":["kind","value"],"properties":{"kind":{"const":"n"},"value":{"type":"integer"}}},{"required":["kind","value"],"properties":{"kind":{"const":"s"},"value":{"type":"string"}}}]}},{"name":"dynamic","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},{"name":"flags","in":"query","required":true,"style":"deepObject","explode":true,"schema":{"type":"object","patternProperties":{"^x":{"type":"boolean"}},"additionalProperties":false}},{"name":"composed","in":"query","required":true,"schema":{"allOf":[{"type":"integer"},{"minimum":1}]}},{"name":"xmlChoice","in":"query","required":true,"content":{"application/xml":{"schema":{"oneOf":[{"type":"integer"},{"type":"boolean"}],"xml":{"name":"choice"}}}}}],"responses":{"204":{"description":"OK"}}}},
+    "formRef":{"post":{"operationId":"formRef","requestBody":{"required":true,"content":{"application/x-www-form-urlencoded":{"schema":{"$ref":"#/components/schemas/BaseForm","required":["enabled","choice","ambiguous","arrayChoice","typelessArray"],"properties":{"count":{"allOf":[{"minimum":1}]},"choice":{"oneOf":[{"const":"true"},{"const":"false"}]},"enabled":{"type":"boolean"},"ambiguous":{"allOf":[{"oneOf":[{"type":"string"},{"type":"integer"}]},{"enum":[1,2]}]},"arrayChoice":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"integer"}}]},"typelessArray":{"items":{"type":"integer"}}},"oneOf":[{"required":["mode","branchValue"],"properties":{"mode":{"const":"n"},"branchValue":{"type":"integer"}}},{"required":["mode","branchValue"],"properties":{"mode":{"const":"s"},"branchValue":{"type":"string"}}}]}}}},"responses":{"204":{"description":"OK"}}}},
+    "schemaless":{"get":{"operationId":"schemaless","responses":{"200":{"description":"OK","content":{"application/json":{}}}}}},
+    "falseResponse":{"get":{"operationId":"falseResponse","responses":{"200":{"description":"OK","content":{"application/json":{"schema":false}}}}}},
+    "noSchemaRequest":{"post":{"operationId":"noSchemaRequest","requestBody":{"required":true,"content":{"application/json":{}}},"responses":{"204":{"description":"OK"}}}},
+    "nullable":{"post":{"operationId":"nullable","requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"string","nullable":true}}}},"responses":{"204":{"description":"OK"}}}},
+    "falseBinary":{"get":{"operationId":"falseBinary","responses":{"200":{"description":"OK","content":{"application/octet-stream":{"schema":false}}}}}},
+    "falseBinaryInput":{"post":{"operationId":"falseBinaryInput","requestBody":{"required":true,"content":{"application/octet-stream":{"schema":false}}},"responses":{"204":{"description":"OK"}}}},
+    "xmlRef":{"post":{"operationId":"xmlRef","requestBody":{"required":true,"content":{"application/xml":{"schema":{"$ref":"#/components/schemas/XMLPayload"}}}},"responses":{"204":{"description":"OK"}}}},
+    "rootXML":{"post":{"operationId":"rootXML","requestBody":{"required":true,"content":{"application/xml":{"schema":{"$ref":"#/components/schemas/RootTags"}}}},"responses":{"204":{"description":"OK"}}}},
+    "inlineRootXML":{"post":{"operationId":"inlineRootXML","requestBody":{"required":true,"content":{"application/xml":{"schema":{"type":"array","xml":{"wrapped":true,"prefix":"p"},"items":{"type":"array","xml":{"wrapped":true,"prefix":"p"},"items":{"type":"string","xml":{"name":"member","prefix":"p"}}}}}}},"responses":{"204":{"description":"OK"}}}},
+    "nestedXML":{"post":{"operationId":"nestedXML","requestBody":{"required":true,"content":{"application/xml":{"schema":{"type":"object","required":["matrix"],"properties":{"matrix":{"type":"array","xml":{"name":"matrix","prefix":"p"},"items":{"type":"array","xml":{"wrapped":true},"items":{"type":"string","xml":{"name":"value"}}}}}}}}},"responses":{"204":{"description":"OK"}}}}
   },
-  "components":{"pathItems":{
-    "PurgeHook":{"$ref":"#/paths/~1shared-hook"},
-    "CopyCallback":{"$ref":"#/paths/~1shared-callback"}
-  }}
+  "components":{
+    "pathItems":{
+      "PurgeHook":{"$ref":"#/paths/~1shared-hook"},
+      "CopyCallback":{"$ref":"#/paths/~1shared-callback"}
+    },
+    "schemas":{"Allow":true,"Deny":false,"BaseNumber":{"type":"number"},"Foo-Bar":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}},"Integer":{"type":"integer"},"DynamicInteger":{"$dynamicAnchor":"value","type":"integer"},"Boolean":{"type":"boolean"},"RootTags":{"type":"array","xml":{"wrapped":true,"prefix":"p"},"items":{"type":"string","xml":{"name":"tag","prefix":"p"}}},"BaseForm":{"type":"object","required":["count","enabled","choice"],"properties":{"count":{"allOf":[{"type":"integer"}]},"enabled":{"type":"boolean"},"choice":{"oneOf":[{"type":"string"},{"type":"boolean"}]},"mode":{"type":"string"},"branchValue":{"oneOf":[{"type":"string"},{"type":"integer"}]},"arrayChoice":{"oneOf":[{"type":"string"},{"type":"array","items":{"type":"integer"}}]},"typelessArray":{"items":{"type":"integer"}}},"additionalProperties":{"type":"integer"}},"BaseTree":{"$id":"https://schemas.example.test/base-tree","$dynamicAnchor":"node","type":"object","properties":{"child":{"$dynamicRef":"#node"}}},"StrictTree":{"$id":"https://schemas.example.test/strict-tree","$dynamicAnchor":"node","allOf":[{"$ref":"#/components/schemas/BaseTree"},{"type":"object","required":["strict"],"properties":{"strict":{"type":"boolean"}}}]},"XMLPayload":{"type":"object","xml":{"name":"payload"},"required":["count","values","flags","choice","variantObject","tree","textValue","wrappedTags"],"properties":{"count":{"$ref":"#/components/schemas/Integer","xml":{"name":"count","prefix":"p","attribute":true}},"values":{"type":"array","xml":{"name":"value"},"items":{"$ref":"#/components/schemas/Integer"}},"flags":{"type":"array","prefixItems":[{"type":"integer","xml":{"name":"flag"}},{"type":"boolean","xml":{"name":"flag"}}],"items":false},"choice":{"oneOf":[{"type":"integer"},{"type":"boolean"}],"xml":{"name":"choice","prefix":"p"}},"variantObject":{"oneOf":[{"type":"object","required":["kind","value"],"properties":{"kind":{"const":"n"},"value":{"type":"integer"}}},{"type":"object","required":["kind","value"],"properties":{"kind":{"const":"s"},"value":{"type":"string"}}}]},"tree":{"$ref":"#/components/schemas/StrictTree"},"textValue":{"type":"integer","xml":{"nodeType":"text"}},"wrappedTags":{"type":"array","xml":{"name":"tags","wrapped":true},"items":{"type":"string"}}},"additionalProperties":false}}
+  }
 }`))
 	if err != nil {
 		t.Fatal(err)
@@ -750,12 +771,33 @@ void [handler, context, response, endpoint]
 import { pathToFileURL } from "node:url";
 const webhookModule = await import(pathToFileURL(process.argv[1]).href);
 const callbackModule = await import(pathToFileURL(process.argv[2]).href);
-let second = 0, purge = 0, valid = 0;
+let second = 0, purge = 0, valid = 0, advanced = 0, annotation = 0, encoded = 0, parameters = 0, form = 0, nullable = 0, xml = 0, rootXML = 0, inlineRootXML = 0, nestedXML = 0;
+let formBody;
+let responseBody = { ok: true };
+let responseContentType = "application/json";
 const router = webhookModule.createWebhookRouter({
   second: { POST: async () => { second++; return { status: 204 }; } },
   purged: { Purge: async () => { purge++; return { status: 204 }; } },
   validated: { POST: async () => { valid++; return { status: 204 }; } },
-}, { routes: { first: "/same/{id}", second: "/same/{id}", purged: "/purged", validated: "/validated" } });
+  allowBool: { POST: async () => ({ status: 204 }) },
+  denyBool: { POST: async () => ({ status: 204 }) },
+  refSibling: { POST: async () => ({ status: 204 }) },
+  advanced: { POST: async () => { advanced++; return { status: 204 }; } },
+  annotation: { POST: async () => { annotation++; return { status: 204 }; } },
+  encodedRef: { POST: async () => { encoded++; return { status: 204 }; } },
+  parameters: { GET: async ({ params }) => { if (params.query.count !== 2 || params.headerParams.enabled !== true || JSON.stringify(params.query.values) !== "[1,2]" || JSON.stringify(params.query.ambiguousValues) !== "[1,2]" || JSON.stringify(params.query.tuple) !== "[2,true]" || ![3, true].includes(params.query.variant) || params.query.constrained !== 1 || params.query.typeless !== 1 || params.query.typelessBool !== true || params.query.dynamicValue !== 4 || params.query.scalarArray !== "foo" || params.query.selected.kind !== "n" || params.query.selected.value !== 1 || params.query.selected.extra !== "kept" || params.query.dynamic.a !== 2 || params.query.flags.xone !== true || params.query.composed !== 3 || params.query.xmlChoice !== 2) throw new Error("referenced parameter was not coerced"); parameters++; return { status: 204 }; } },
+  formRef: { POST: async ({ body }) => { formBody = body; form++; return { status: 204 }; } },
+  schemaless: { GET: async () => ({ status: 200, contentType: responseContentType, body: responseBody }) },
+  falseResponse: { GET: async () => ({ status: 200, body: "invalid" }) },
+  noSchemaRequest: { POST: async () => ({ status: 204 }) },
+  nullable: { POST: async ({ body }) => { if (body !== "ok") throw new Error("nullable annotation changed the body"); nullable++; return { status: 204 }; } },
+  falseBinary: { GET: async () => ({ status: 200, contentType: "application/octet-stream", body: new Uint8Array([1]) }) },
+  falseBinaryInput: { POST: async () => ({ status: 204 }) },
+  xmlRef: { POST: async ({ body }) => { if (body.count !== 2 || JSON.stringify(body.values) !== "[3,4]" || JSON.stringify(body.flags) !== "[2,true]" || body.choice !== 2 || body.variantObject.kind !== "n" || body.variantObject.value !== 1 || body.tree.strict !== true || body.tree.child.strict !== false || body.tree.child.child.strict !== true || body.textValue !== 5 || JSON.stringify(body.wrappedTags) !== '["ok"]') throw new Error("referenced XML values were not coerced"); xml++; return { status: 204 }; } },
+  rootXML: { POST: async ({ body }) => { if (JSON.stringify(body) !== '["ok"]') throw new Error("root wrapped XML values were not coerced"); rootXML++; return { status: 204 }; } },
+  inlineRootXML: { POST: async ({ body }) => { if (JSON.stringify(body) !== '[["ok"]]') throw new Error("inline root wrapped XML values were not coerced"); inlineRootXML++; return { status: 204 }; } },
+  nestedXML: { POST: async ({ body }) => { if (JSON.stringify(body.matrix) !== '[["ok"]]') throw new Error("nested wrapped XML values were not coerced"); nestedXML++; return { status: 204 }; } },
+}, { routes: { first: "/same/{id}", second: "/same/{id}", purged: "/purged", validated: "/validated", allowBool: "/allow", denyBool: "/deny", refSibling: "/ref-sibling", advanced: "/advanced", annotation: "/annotation", encodedRef: "/encoded", parameters: "/parameters", formRef: "/form", schemaless: "/schemaless", falseResponse: "/false-response", noSchemaRequest: "/no-schema-request", nullable: "/nullable", falseBinary: "/false-binary", falseBinaryInput: "/false-binary-input", xmlRef: "/xml-ref", rootXML: "/root-xml", inlineRootXML: "/inline-root-xml", nestedXML: "/nested-xml" } });
 const same = await router.fetch(new Request("https://host.test/same/value?id=7", { method: "POST", headers: { id: "true", cookie: "id=cookie" } }));
 if (same.status !== 204 || second !== 1) throw new Error("unhandled webhook shadowed a handled route");
 if ((await router.fetch(new Request("https://host.test/purged", { method: "Purge" }))).status !== 204 || purge !== 1) throw new Error("referenced mixed-case additional webhook did not dispatch");
@@ -782,6 +824,70 @@ for (const [name, patch] of [
 ]) {
   const response = await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...baseline, ...patch }) }));
   if (response.status !== 400 || valid !== 1) throw new Error(name + " constraint was ignored");
+}
+const jsonPost = (path, body) => router.fetch(new Request("https://host.test" + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+if ((await jsonPost("/allow", { any: "value" })).status !== 204) throw new Error("true component schema was not accepted");
+if ((await jsonPost("/deny", { any: "value" })).status !== 400) throw new Error("false component schema was accepted");
+if ((await jsonPost("/ref-sibling", 5)).status !== 400 || (await jsonPost("/ref-sibling", 10)).status !== 204) throw new Error("$ref assertion sibling was ignored");
+if ((await jsonPost("/advanced", { xcount: 1, closed: { id: "ok" }, tuple: ["ok"] })).status !== 204 || advanced !== 1) throw new Error("valid advanced schema was rejected");
+for (const [name, body] of [
+  ["propertyNames", { Xcount: 1, closed: { id: "ok" }, tuple: ["ok"] }],
+  ["patternProperties", { xcount: "bad", closed: { id: "ok" }, tuple: ["ok"] }],
+  ["additionalProperties", { xcount: 1, extra: true, closed: { id: "ok" }, tuple: ["ok"] }],
+  ["unevaluatedProperties", { xcount: 1, closed: { id: "ok", extra: true }, tuple: ["ok"] }],
+  ["unevaluatedItems", { xcount: 1, closed: { id: "ok" }, tuple: ["ok", "extra"] }],
+]) if ((await jsonPost("/advanced", body)).status !== 400 || advanced !== 1) throw new Error(name + " constraint was ignored");
+if ((await jsonPost("/annotation", "allowed")).status !== 204 || annotation !== 1) throw new Error("annotation collided with boolean schema state");
+if ((await jsonPost("/encoded", { id: "ok" })).status !== 204 || (await jsonPost("/encoded", {})).status !== 400 || encoded !== 1) throw new Error("URI-encoded component reference was not resolved");
+const parameterURL = (variant, values = "values=1&values=2") => "https://host.test/parameters?count=2&" + values + "&ambiguousValues=1&ambiguousValues=2&tuple=2,true&variant=" + variant + "&constrained=1&typeless=1&typelessBool=true&dynamicValue=4&scalarArray=foo&selected[kind]=n&selected[value]=1&selected[extra]=kept&dynamic[a]=2&flags[xone]=true&composed=3&xmlChoice=%3Cchoice%3E2%3C%2Fchoice%3E";
+if ((await router.fetch(new Request(parameterURL("3"), { headers: { enabled: "true" } }))).status !== 204 || (await router.fetch(new Request(parameterURL("true"), { headers: { enabled: "true" } }))).status !== 204 || parameters !== 2) throw new Error("referenced/variant parameters did not dispatch");
+if ((await router.fetch(new Request(parameterURL("3", "values=0"), { headers: { enabled: "true" } }))).status !== 400 || parameters !== 2) throw new Error("referenced item assertion sibling was ignored");
+if ((await router.fetch(new Request(parameterURL("3") + "&flags[bad]=true", { headers: { enabled: "true" } }))).status !== 400 || parameters !== 2) throw new Error("closed deep-object field was sanitized instead of rejected");
+for (const invalidXML of ["%3Cchoice%3E", "%3Cchoice%3Enope%3C%2Fchoice%3E"]) {
+  if ((await router.fetch(new Request(parameterURL("3").replace("%3Cchoice%3E2%3C%2Fchoice%3E", invalidXML), { headers: { enabled: "true" } }))).status !== 400 || parameters !== 2) throw new Error("invalid XML parameter was not rejected");
+}
+const validForm = await router.fetch(new Request("https://host.test/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "count=2&enabled=true&choice=true&ambiguous=1&arrayChoice=1&arrayChoice=2&typelessArray=1&typelessArray=2&mode=n&branchValue=1&extra=3" }));
+if (validForm.status !== 204 || form !== 1 || formBody.count !== 2 || formBody.enabled !== true || formBody.choice !== "true" || formBody.ambiguous !== 1 || JSON.stringify(formBody.arrayChoice) !== "[1,2]" || JSON.stringify(formBody.typelessArray) !== "[1,2]" || formBody.mode !== "n" || formBody.branchValue !== 1 || formBody.extra !== 3) throw new Error("referenced form body did not dispatch: " + validForm.status + " " + await validForm.text() + " " + JSON.stringify(formBody));
+if ((await router.fetch(new Request("https://host.test/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "count=0&enabled=true&choice=true&ambiguous=1&arrayChoice=1&arrayChoice=2&typelessArray=1&typelessArray=2&mode=n&branchValue=1&extra=3" }))).status !== 400 || form !== 1) throw new Error("overlapping referenced form property constraint was ignored");
+if ((await router.fetch(new Request("https://host.test/false-response"))).status !== 500) throw new Error("false response schema accepted a body");
+if ((await jsonPost("/no-schema-request", { any: "value" })).status !== 204) throw new Error("schema-less request media type was rejected");
+if ((await jsonPost("/nullable", "ok")).status !== 204 || nullable !== 1 || (await jsonPost("/nullable", null)).status !== 400) throw new Error("3.1+ nullable annotation changed validation");
+if ((await router.fetch(new Request("https://host.test/false-binary"))).status !== 500) throw new Error("false binary response schema accepted a body");
+if ((await router.fetch(new Request("https://host.test/false-binary-input", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: new Uint8Array([1]) }))).status !== 400) throw new Error("false binary request schema accepted a body");
+if ((await router.fetch(new Request("https://host.test/xml-ref", { method: "POST", headers: { "content-type": "application/xml" }, body: '<payload xmlns="https://schemas.example.test/payload" xmlns:p="https://schemas.example.test/qualified" p:count="2">5<value>3</value><value>4</value><flag>2</flag><flag>true</flag><p:choice>2</p:choice><variantObject><kind>n</kind><value>1</value></variantObject><tree><strict>true</strict><child><strict>false</strict><child><strict>true</strict></child></child></tree><tags><tags>ok</tags></tags></payload>' }))).status !== 204 || xml !== 1) throw new Error("referenced XML body did not dispatch");
+if ((await router.fetch(new Request("https://host.test/xml-ref", { method: "POST", headers: { "content-type": "application/xml" }, body: '<payload xmlns:p="https://schemas.example.test/qualified" p:count="1" p:count="2">5<value>3</value><value>4</value><flag>2</flag><flag>true</flag><p:choice>2</p:choice><variantObject><kind>n</kind><value>1</value></variantObject><tree><strict>true</strict><child><strict>false</strict><child><strict>true</strict></child></child></tree><tags><tags>ok</tags></tags></payload>' }))).status !== 400 || xml !== 1) throw new Error("duplicate XML attribute was accepted");
+if ((await router.fetch(new Request("https://host.test/xml-ref", { method: "POST", headers: { "content-type": "application/xml" }, body: '<payload xmlns:p="https://schemas.example.test/qualified" p:count="2">5<value>3</value><value>4</value><flag>2</flag><flag>true</flag><p:choice>2</p:choice><variantObject><kind>n</kind><value>1</value></variantObject><tree><strict>true</strict><child><strict>false</strict><child><strict>true</strict></child></child></tree><tags><tags>ok</tags><extra>bad</extra></tags></payload>' }))).status !== 400 || xml !== 1) throw new Error("wrapped XML field was sanitized instead of rejected");
+if ((await router.fetch(new Request("https://host.test/xml-ref", { method: "POST", headers: { "content-type": "application/xml" }, body: '<payload xmlns:p="https://schemas.example.test/qualified" p:count="2">5<value>3</value><value>4</value><flag>2</flag><flag>true</flag><p:choice>2</p:choice><variantObject><kind>n</kind><value>1</value></variantObject><tree><strict>true</strict><child><strict>false</strict><child><strict>true</strict></child></child></tree><tags extra="bad"><tags>ok</tags></tags></payload>' }))).status !== 400 || xml !== 1) throw new Error("wrapped XML attribute was sanitized instead of rejected");
+if ((await router.fetch(new Request("https://host.test/xml-ref", { method: "POST", headers: { "content-type": "application/xml" }, body: '<payload xmlns:p="https://schemas.example.test/qualified" p:count="2">5<value>3</value><value>4</value><flag>2</flag><flag>true</flag><p:choice>2</p:choice><variantObject><kind>n</kind><value>1</value></variantObject><tree><strict>true</strict><child><strict>false</strict><child><strict>true</strict></child></child></tree><tags>bad<tags>ok</tags></tags></payload>' }))).status !== 400 || xml !== 1) throw new Error("wrapped XML text was sanitized instead of rejected");
+if ((await router.fetch(new Request("https://host.test/root-xml", { method: "POST", headers: { "content-type": "application/xml" }, body: '<p:RootTags xmlns:p="https://schemas.example.test/tags"><p:tag>ok</p:tag></p:RootTags>' }))).status !== 204 || rootXML !== 1) throw new Error("referenced root wrapped XML body did not dispatch");
+for (const body of ['<p:wrong><p:tag>ok</p:tag></p:wrong>', '<p:RootTags><p:wrong>ok</p:wrong></p:RootTags>', '<p:RootTags extra="bad"><p:tag>ok</p:tag></p:RootTags>', '<p:RootTags>bad<p:tag>ok</p:tag></p:RootTags>']) {
+  if ((await router.fetch(new Request("https://host.test/root-xml", { method: "POST", headers: { "content-type": "application/xml" }, body }))).status !== 400 || rootXML !== 1) throw new Error("invalid root wrapped XML was sanitized instead of rejected: " + body);
+}
+if ((await router.fetch(new Request("https://host.test/inline-root-xml", { method: "POST", headers: { "content-type": "application/xml" }, body: '<p:root><p:root><p:member>ok</p:member></p:root></p:root>' }))).status !== 204 || inlineRootXML !== 1) throw new Error("inline nested root wrapped XML body did not dispatch");
+if ((await router.fetch(new Request("https://host.test/inline-root-xml", { method: "POST", headers: { "content-type": "application/xml" }, body: '<p:wrong><p:root><p:member>ok</p:member></p:root></p:wrong>' }))).status !== 400 || inlineRootXML !== 1) throw new Error("inline root wrapped XML accepted a wrong root");
+if ((await router.fetch(new Request("https://host.test/nested-xml", { method: "POST", headers: { "content-type": "application/xml" }, body: '<root xmlns:p="https://schemas.example.test/matrix"><p:matrix><value>ok</value></p:matrix></root>' }))).status !== 204 || nestedXML !== 1) throw new Error("prefixed unwrapped XML array lost its nested fallback");
+if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 200) throw new Error("valid schemaless JSON response was rejected");
+responseContentType = "application/json; charset=utf-8";
+if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 200) throw new Error("parameterized JSON response media type was not normalized");
+responseContentType = "application/json";
+responseBody = [NaN];
+if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 500) throw new Error("non-finite schemaless JSON response was serialized lossily");
+responseBody = Array(2); responseBody[1] = null;
+if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 500) throw new Error("sparse schemaless JSON response was serialized lossily");
+for (const body of [new Map([["x", 1]]), new Date(0), { toJSON() { return null; } }, new Number(NaN)]) {
+  responseBody = body;
+  if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 500) throw new Error("non-JSON object was serialized lossily");
+}
+responseBody = [1]; responseBody.extra = 2;
+if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 500) throw new Error("array property was serialized lossily");
+for (const body of [
+  new (class extends Array {}) (1),
+  Object.defineProperty([1], "extra", { value: 2 }),
+  Object.defineProperty([1], "0", { enumerable: true, get() { return 1; } }),
+  Object.defineProperty({}, "value", { enumerable: true, get() { return 1; } }),
+]) {
+  responseBody = body;
+  if ((await router.fetch(new Request("https://host.test/schemaless"))).status !== 500) throw new Error("custom JSON property behavior was serialized lossily");
 }
 const endpoints = callbackModule.createCallbackHandlers({ callbacks: { createSource: { copied: { "{$request.body#/callback}": { Copy: async () => ({ status: 204 }) } } } } });
 if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].Copy.fetch(new Request("https://host.test/callback", { method: "Copy" }))).status !== 204) throw new Error("referenced mixed-case additional callback did not dispatch");

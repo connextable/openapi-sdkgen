@@ -790,6 +790,9 @@ func requestBodyTypeForScope(document *ir.Document, body map[string]any, scope t
 		}
 		schema := media["schema"]
 		schemaObject, _ := schema.(map[string]any)
+		if schema == false {
+			return "never", nil
+		}
 		if isBinaryMedia(mediaTypes[0], schemaObject) {
 			return "BinaryBody", nil
 		}
@@ -805,7 +808,9 @@ func requestBodyTypeForScope(document *ir.Document, body map[string]any, scope t
 		schema := media["schema"]
 		schemaObject, _ := schema.(map[string]any)
 		valueType := "string"
-		if isStreamingRequestMediaType(mediaType, media) {
+		if schema == false {
+			valueType = "never"
+		} else if isStreamingRequestMediaType(mediaType, media) {
 			itemSchema, exists := media["itemSchema"]
 			if !exists {
 				return "", fmt.Errorf("streaming request body %s has no itemSchema", mediaType)
@@ -1028,7 +1033,7 @@ func resourceParameterSignature(document *ir.Document, parameter operationParame
 	if err != nil {
 		return "", err
 	}
-	wireSchema, err := wireSchemaDescriptorScoped(parameter.Schema, projectionInput, false)
+	wireSchema, err := wireSchemaDescriptorForDocument(document, parameter.Schema, projectionInput)
 	if err != nil {
 		return "", err
 	}
@@ -1469,7 +1474,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 	if len(parameters) > 0 {
 		items := make([]string, 0, len(parameters))
 		for _, parameter := range parameters {
-			descriptor, err := wireSchemaDescriptor(parameter.Schema, projectionInput)
+			descriptor, err := wireSchemaDescriptorForDocument(document, parameter.Schema, projectionInput)
 			if err != nil {
 				return "", err
 			}

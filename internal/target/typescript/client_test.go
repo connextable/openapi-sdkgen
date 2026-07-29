@@ -45,6 +45,11 @@ func TestRequestBodyTypeRepresentsEmptyTextJSONAndMultiMediaBodies(t *testing.T)
 		{name: "empty", body: map[string]any{}, want: "unknown"},
 		{name: "text", body: map[string]any{"content": map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "object"}}}}, want: "string"},
 		{name: "json", body: map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "integer"}}}}, want: "number"},
+		{name: "false binary", body: map[string]any{"content": map[string]any{"application/octet-stream": map[string]any{"schema": false}}}, want: "never"},
+		{name: "false binary variant", body: map[string]any{"content": map[string]any{
+			"application/json":         map[string]any{"schema": map[string]any{"type": "string"}},
+			"application/octet-stream": map[string]any{"schema": false},
+		}}, want: `{ readonly contentType: "application/json"; readonly value: string } | { readonly contentType: "application/octet-stream"; readonly value: never }`},
 		{name: "multi", body: map[string]any{"content": map[string]any{
 			"application/json":         map[string]any{"schema": map[string]any{"type": "string"}},
 			"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},

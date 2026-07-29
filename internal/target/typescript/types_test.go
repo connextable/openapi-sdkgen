@@ -160,6 +160,27 @@ func TestOperationOutputTypesNormalizeMediaTypeCasing(t *testing.T) {
 	}
 }
 
+func TestOperationOutputTypesPreserveFalseBinarySchemasAsNever(t *testing.T) {
+	operation := ir.Operation{Raw: map[string]any{"responses": map[string]any{
+		"200": map[string]any{"description": "Impossible", "content": map[string]any{
+			"application/octet-stream": map[string]any{"schema": false},
+		}},
+	}}}
+	document := &ir.Document{}
+	output, err := operationOutputType(document, operation)
+	if err != nil || output != "never" {
+		t.Fatalf("output = %q, %v", output, err)
+	}
+	raw, err := operationRawResponseType(document, operation)
+	if err != nil || !strings.Contains(raw, `RawResponseFor<200, "application/octet-stream", never`) {
+		t.Fatalf("raw output = %q, %v", raw, err)
+	}
+	media, err := operationMediaOutputTypes(document, operation)
+	if err != nil || media["application/octet-stream"] != "never" {
+		t.Fatalf("media output = %#v, %v", media, err)
+	}
+}
+
 func TestOperationOutputTypeUsesUnknownForSchemaLessMediaBodies(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{{
 		OperationID: "getValue",

@@ -64,10 +64,44 @@ func TestSourceArtifactsEmitsBooleanSchemaFromAnOpenAPI31Document(t *testing.T) 
 		if !strings.Contains(source, "boolean: false") {
 			t.Fatalf("boolean schema descriptor missing:\n%s", source)
 		}
-		for _, expected := range []string{"bindOperation<never, unknown", "BodyInput = unknown"} {
+		for _, expected := range []string{"bindOperation<never, never", "BodyInput = unknown"} {
 			if !strings.Contains(source, expected) {
 				t.Fatalf("boolean schema type missing %q:\n%s", expected, source)
 			}
+		}
+	}
+}
+
+func TestSourceArtifactsCatalogsNamedBooleanSchemas(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1",
+  "info":{"title":"Named booleans","version":"1"},
+  "paths":{"/value":{"post":{"operationId":"createValue","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Always"}}}},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Never"}}}}}}}},
+  "components":{"schemas":{"Always":true,"Never":false,"Unused":true}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/types.ts"))
+	for _, expected := range []string{
+		`readonly "Always": {`,
+		`readonly "Never": {`,
+		`readonly "Unused": {`,
+		`readonly input: unknown`,
+		`readonly output: never`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("named boolean component catalog missing %q:\n%s", expected, source)
+		}
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{`Contract.ComponentInput<"Always">`, `Contract.ComponentOutput<"Never">`} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("named boolean operation bypassed catalog projection %q:\n%s", expected, client)
 		}
 	}
 }
@@ -190,7 +224,7 @@ func TestSourceArtifactsEmitsSchemaReferenceSiblingsWithWireSemantics(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, "allOf:") || !strings.Contains(source, "minLength: 3") {
+		if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `reference: "Widget", minLength: 3`) {
 			t.Fatalf("reference sibling descriptor missing:\n%s", source)
 		}
 	}
@@ -205,8 +239,13 @@ func TestSourceArtifactsAllowsSchemaReferenceVendorExtensions(t *testing.T) {
 		}}}},
 	}}}
 	for _, generate := range []func(*ir.Document) ([]Artifact, error){SourceArtifacts} {
-		if _, err := generate(document); err != nil {
+		artifacts, err := generate(document)
+		if err != nil {
 			t.Fatal(err)
+		}
+		source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+		if !strings.Contains(source, `reference: "Widget"`) || strings.Contains(source, `reference: "Widget", {}`) {
+			t.Fatalf("annotation-only reference sibling produced an invalid descriptor:\n%s", source)
 		}
 	}
 }
@@ -327,6 +366,76 @@ func TestSourceArtifactsAcceptsDependentSchemaAssertion(t *testing.T) {
 	}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWireSchemaDescriptorPreservesBooleanSubschemas(t *testing.T) {
+	descriptor, err := wireSchemaDescriptor(map[string]any{
+		"type":              "object",
+		"patternProperties": map[string]any{"^x": false},
+		"propertyNames":     false,
+		"dependentSchemas":  map[string]any{"enabled": false},
+		"contains":          false,
+	}, projectionInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`patternProperties: Object.fromEntries([["^x", { boolean: false }]])`,
+		`propertyNames: { boolean: false }`,
+		`dependentSchemas: Object.fromEntries([["enabled", { boolean: false }]])`,
+		`contains: { boolean: false }`,
+	} {
+		if !strings.Contains(descriptor, expected) {
+			t.Fatalf("boolean subschema descriptor missing %q:\n%s", expected, descriptor)
+		}
+	}
+}
+
+func TestWireSchemaDescriptorAppliesNullableOnlyToOpenAPI30TypedSchemas(t *testing.T) {
+	schema := map[string]any{"type": "string", "nullable": true}
+	descriptor, err := wireSchemaDescriptorForDocument(&ir.Document{OpenAPIVersionLine: "3.0"}, schema, projectionInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(descriptor, `types: ["string", "null"]`) {
+		t.Fatalf("nullable wire type missing:\n%s", descriptor)
+	}
+	for name, document := range map[string]*ir.Document{
+		"OpenAPI 3.1":            {OpenAPIVersionLine: "3.1"},
+		"OpenAPI 3.2":            {OpenAPIVersionLine: "3.2"},
+		"OpenAPI 3.0 no type":    {OpenAPIVersionLine: "3.0"},
+		"target-neutral default": nil,
+	} {
+		value := any(schema)
+		if name == "OpenAPI 3.0 no type" {
+			value = map[string]any{"nullable": true}
+		}
+		var got string
+		if document == nil {
+			got, err = wireSchemaDescriptor(value, projectionInput)
+		} else {
+			got, err = wireSchemaDescriptorForDocument(document, value, projectionInput)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, `"null"`) {
+			t.Fatalf("%s unexpectedly asserted null: %s", name, got)
+		}
+	}
+}
+
+func TestWireSchemaDescriptorIgnoresAnnotationOnlyDynamicReferenceSiblings(t *testing.T) {
+	descriptor, err := wireSchemaDescriptor(map[string]any{
+		"x-sdkgen-dynamic-reference": map[string]any{"anchor": "node", "reference": "#/components/schemas/Node"},
+		"description":                "annotation only",
+	}, projectionInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(descriptor, `dynamicReference: { anchor: "node"`) || strings.Contains(descriptor, "{},") || strings.Contains(descriptor, ", {}") {
+		t.Fatalf("dynamic reference annotation produced an invalid descriptor:\n%s", descriptor)
 	}
 }
 
