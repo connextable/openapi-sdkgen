@@ -297,7 +297,7 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 }
 
 func operationCall(operation ir.Operation, inputTypes []string) (string, []string, error) {
-	parts := strings.Split(strings.Trim(operation.Path, "/"), "/")
+	parts := resourcePathParts(operation.Path)
 	segments := make([]string, 0, len(parts))
 	chain := "api"
 	for _, part := range parts {
@@ -328,6 +328,14 @@ func operationCall(operation ir.Operation, inputTypes []string) (string, []strin
 		return "api.$operations." + operationName + callInput(operation, inputTypes, false, operation.PathParameterOrder), segments, nil
 	}
 	return chain + "." + terminal + callInput(operation, inputTypes, len(operation.PathParameterOrder) > 0, operation.PathParameterOrder), segments, nil
+}
+
+func resourcePathParts(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
 }
 
 // resourceTerminalName keeps literal path segments as namespaces. For example,

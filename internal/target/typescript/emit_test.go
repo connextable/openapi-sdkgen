@@ -392,6 +392,64 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	}
 }
 
+func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Root path", "version": "1.0.0"},
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "getServiceIndex",
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		"readonly get: GetServiceIndexCall",
+		"get: getServiceIndex,",
+	} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("root resource surface missing %q:\n%s", expected, client)
+		}
+	}
+
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Operations) != 2 {
+		t.Fatalf("manifest operations = %#v, want two operations", manifest.Operations)
+	}
+	root := manifest.Operations[0]
+	if root.OperationID != "getServiceIndex" {
+		t.Fatalf("root operation = %#v", root)
+	}
+	if root.CallExpression != "api.get()" {
+		t.Fatalf("root call = %q, want %q", root.CallExpression, "api.get()")
+	}
+	if len(root.ResourceSegments) != 0 {
+		t.Fatalf("root resource segments = %#v, want none", root.ResourceSegments)
+	}
+	if manifest.Operations[1].CallExpression != "api.health.get()" {
+		t.Fatalf("non-root call = %q, want %q", manifest.Operations[1].CallExpression, "api.health.get()")
+	}
+}
+
 type generatedJSDocCoverage struct {
 	name           string
 	source         string

@@ -207,6 +207,16 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	if err := emitStreamReturnValue(&output, streams); err != nil {
 		return nil, err
 	}
+	for _, terminal := range sortedManifestOperationNames(tree.operations) {
+		fmt.Fprintf(&output, "    %s: ", terminal)
+		if err := emitResourceOperationValue(&output, document, tree.operations[terminal], nil); err != nil {
+			return nil, err
+		}
+		output.WriteString(",\n")
+	}
+	if paginated, ok := paginatedResourceNodeOperation(tree); ok {
+		fmt.Fprintf(&output, "    paginate: paginate%s,\n", operationTypeName(paginated.OperationID))
+	}
 	for _, name := range sortedResourceChildNames(tree) {
 		fmt.Fprintf(&output, "    %s,\n", name)
 	}
@@ -849,7 +859,8 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 			byName[parameter.Name] = parameter
 		}
 		node := root
-		for _, part := range strings.Split(strings.Trim(operation.Path, "/"), "/") {
+		parts := resourcePathParts(operation.Path)
+		for _, part := range parts {
 			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 				name := strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}")
 				parameter, ok := byName[name]
@@ -873,7 +884,7 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 			}
 			node = node.children[property]
 		}
-		terminal, err := resourceTerminalName(operation, strings.Split(strings.Trim(operation.Path, "/"), "/"))
+		terminal, err := resourceTerminalName(operation, parts)
 		if err != nil {
 			return nil, err
 		}
@@ -960,6 +971,19 @@ func resourceTreeHasPagination(node *resourceNode) bool {
 }
 
 func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root *resourceNode) error {
+	for _, terminal := range sortedManifestOperationNames(root.operations) {
+		operation := root.operations[terminal]
+		emitOperationJSDoc(output, "  ", operation)
+		fmt.Fprintf(output, "  readonly %s: %s\n", terminal, operationFunctionType(document, operation))
+	}
+	if paginated, ok := paginatedResourceNodeOperation(root); ok {
+		itemType, err := operationItemType(document, findOperation(document, paginated.OperationID))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "  /** Lazily iterates every item from {@link Operations.%s} pagination. */\n", paginated.OperationID)
+		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, qualifyClientType(document, itemType)))
+	}
 	for _, name := range sortedResourceChildNames(root) {
 		output.WriteString("  /** Resource-oriented operations generated from the OpenAPI path tree. */\n")
 		fmt.Fprintf(output, "  readonly %s: ", name)
