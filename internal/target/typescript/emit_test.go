@@ -242,6 +242,50 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeSource})
 }
 
+func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.1",
+  "info": {"title": "Path-bound pagination", "version": "1"},
+  "paths": {
+    "/orders/{orderID}/items": {
+      "get": {
+        "operationId": "listOrderItems",
+        "parameters": [
+          {"name": "orderID", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {"application/json": {"schema": {"type": "array", "items": {"type": "string"}}}}
+          }
+        },
+        "x-envelope": "none",
+        "x-pagination": "cursor"
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		"  createPaginator,",
+		"  type PaginateInput,",
+		`readonly "listOrderItems": {`,
+		" = createPaginator<",
+	} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("path-bound pagination client missing %q:\n%s", expected, client)
+		}
+	}
+}
+
 func TestGeneratorAddsServerArtifactsWithoutChangingClientLayout(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(emitterFixture))
 	if err != nil {

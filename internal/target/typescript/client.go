@@ -26,7 +26,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		return nil, err
 	}
 	hasPathOperations := resourceTreeHasPathOperations(tree)
-	hasPagination := resourceTreeHasPagination(tree)
+	hasPagination := manifestHasPagination(manifest)
 	var output bytes.Buffer
 	output.WriteString("import {\n")
 	output.WriteString("  assignCallableProperties,\n")
@@ -1191,20 +1191,9 @@ func resourceTreeHasPathOperations(node *resourceNode) bool {
 	return false
 }
 
-func resourceTreeHasPagination(node *resourceNode) bool {
-	if node.pagination != nil && !node.suppressPagination {
-		return true
-	}
-	for _, operation := range node.operations {
-		if operation.Pagination != "" && len(operation.PathParameterOrder) == 0 {
-			return true
-		}
-	}
-	if node.parameterChild != nil && resourceTreeHasPagination(node.parameterChild) {
-		return true
-	}
-	for _, child := range node.children {
-		if resourceTreeHasPagination(child) {
+func manifestHasPagination(manifest Manifest) bool {
+	for _, operation := range manifest.Operations {
+		if operation.Visibility != "hidden" && operation.Pagination != "" {
 			return true
 		}
 	}
