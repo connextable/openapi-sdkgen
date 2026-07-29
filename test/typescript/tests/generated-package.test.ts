@@ -49,10 +49,10 @@ describe("generated TypeScript source", () => {
     await expect(
       api.widgets.create({
         query: { tag: ["one", "two"] },
-        headerParams: { xTraceID: "trace-1" },
-        body: { name: "first", requestID: "request-1" },
+        headerParams: { "X-Trace-Id": "trace-1" },
+        body: { name: "first", requestId: "request-1" },
       }),
-    ).resolves.toEqual({ id: "widget-1", name: "first", requestID: "request-2" });
+    ).resolves.toEqual({ id: "widget-1", name: "first", requestId: "request-2" });
     expect(api.widgets.create).toBe(api.$operations.createWidget);
   });
 
@@ -88,7 +88,7 @@ describe("generated TypeScript source", () => {
     await expect(
       api.widgets.create.raw({
         query: {},
-        headerParams: { xTraceID: "trace-raw" },
+        headerParams: { "X-Trace-Id": "trace-raw" },
         body: { name: "raw" },
       }),
     ).resolves.toMatchObject({
@@ -113,7 +113,7 @@ describe("generated TypeScript source", () => {
     });
 
     const error = await api.widgets
-      .create({ query: {}, headerParams: { xTraceID: "trace-2" }, body: { name: "invalid" } })
+      .create({ query: {}, headerParams: { "X-Trace-Id": "trace-2" }, body: { name: "invalid" } })
       .catch((cause: unknown) => cause);
     expect(isErrorCode(error, "validation_failed")).toBe(true);
     expect(isErrorCategory(error, "validation")).toBe(true);
@@ -142,7 +142,7 @@ describe("generated TypeScript source", () => {
 
     const error = await api.widgets
       .create(
-        { query: {}, headerParams: { xTraceID: "trace-3" }, body: { name: "slow" } },
+        { query: {}, headerParams: { "X-Trace-Id": "trace-3" }, body: { name: "slow" } },
         { timeoutMS: 1 },
       )
       .catch((cause: unknown) => cause);

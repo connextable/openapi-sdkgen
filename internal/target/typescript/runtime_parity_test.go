@@ -363,7 +363,7 @@ const api = createClient({ baseURL: "https://api.example.test", transport: { cap
   if (headers.get("cookie") !== "session=session-id") throw new Error("request cookie expression was not resolved");
   return new Response(null, { status: 204 });
 } } });
-const sourceInput = { query: { page: 3 }, headerParams: { xSource: "request-trace" }, cookieParams: { session: "session-id" }, body: { id: "source-id" } };
+const sourceInput = { query: { page: 3 }, headerParams: { "x-source": "request-trace" }, cookieParams: { session: "session-id" }, body: { id: "source-id" } };
 const response = await api.$operations.createSource.raw(sourceInput);
 await api.$links.createSource.follow(response, { sourceInput });
 `
@@ -532,7 +532,7 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (in
   if (new Headers(init.headers).get("x-filter") !== "<root><id>header</id></root>") throw new Error("XML header parameter was not serialized");
   return new Response(null, { status: 204 });
 } });
-await api.$operations.findRecords({ query: { filter: { id: "query" } }, headerParams: { xFilter: { id: "header" } } });
+await api.$operations.findRecords({ query: { filter: { id: "query" } }, headerParams: { "x-filter": { id: "header" } } });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript XML-parameter runtime test: %v\n%s", err, output)
@@ -565,7 +565,7 @@ const api = createClient({ baseURL: "https://api.example.test", codecs: { "appli
   if (headers.get("x-filter") !== "cbor:header" || headers.get("cookie") !== "crumb=cbor%3Acookie") throw new Error("custom header/cookie codec was not applied");
   return new Response(null, { status: 204 });
 } } });
-await api.$operations.getRecord({ path: { record: { id: "path" } }, query: { filter: { id: "query" }, whole: { id: "whole" } }, headerParams: { xFilter: { id: "header" } }, cookieParams: { crumb: { id: "cookie" } } });
+await api.$operations.getRecord({ path: { record: { id: "path" } }, query: { filter: { id: "query" } }, querystring: { whole: { id: "whole" } }, headerParams: { "X-Filter": { id: "header" } }, cookieParams: { crumb: { id: "cookie" } } });
 let fetched = false;
 const missing = createClient({ baseURL: "https://api.example.test", transport: { capabilities: { cookieJar: true }, fetch: async () => { fetched = true; throw new Error("fetch must not run"); } } });
 try { await missing.$operations.getRecord({ path: { record: { id: "path" } } }); throw new Error("missing parameter codec was accepted"); }
@@ -619,7 +619,7 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async () 
   start(controller) { controller.enqueue(encoder.encode('{"event_id":"one"}\n{"event')); controller.enqueue(encoder.encode('_id":"two"}\n')); controller.close(); },
 }), { status: 200, headers: { "content-type": "application/x-ndjson" } }) });
 const events = [];
-for await (const event of api.$streams.tailLogs()) events.push(event.eventID);
+for await (const event of api.$streams.tailLogs()) events.push(event.event_id);
 if (events.join(",") !== "one,two") throw new Error("NDJSON stream did not decode item schemas");
 const oversized = createClient({ baseURL: "https://api.example.test", fetch: async () => new Response('{"event_id":"too-long"}', { status: 200, headers: { "content-type": "application/x-ndjson" } }) });
 try { for await (const _event of oversized.$streams.tailLogs({ maxStreamItemBytes: 4 })) { /* consume */ } throw new Error("oversized stream item was accepted"); }
@@ -707,7 +707,7 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const api = createClient({ baseURL: "https://api.example.test", fetch: async () => new Response('{"event_id":"one"}\n{"event_id":"two"}\n', { status: 200, headers: { "content-type": "application/jsonl" } }) });
 const events = [];
-for await (const event of api.$streams.tailJSONLines()) events.push(event.eventID);
+for await (const event of api.$streams.tailJSONLines()) events.push(event.event_id);
 if (events.join(",") !== "one,two") throw new Error("JSON Lines stream did not decode item schemas");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -738,7 +738,7 @@ const codec = { decodeStream: async function* (reader, context) {
 } };
 const api = createClient({ baseURL: "https://api.example.test", maxStreamItemBytes: 5, codecs: { "application/vnd.acme.events": codec }, fetch: async () => new Response('{"event_id":"one"}\n{"event_id":"two"}\n', { status: 200, headers: { "content-type": "application/vnd.acme.events" } }) });
 const events = [];
-for await (const event of api.$streams.tailCustomEvents()) events.push(event.eventID);
+for await (const event of api.$streams.tailCustomEvents()) events.push(event.event_id);
 if (events.join(",") !== "one,two" || maxFrameBytes !== 5) throw new Error("custom stream codec did not receive bounded reader data");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -766,7 +766,7 @@ const api = createClient({ baseURL: "https://api.example.test", codecs: { "appli
   sent = await new Response(init.body).text();
   return new Response(null, { status: 204 });
 } });
-async function* events() { yield { eventID: "one" }; yield { eventID: "two" }; }
+async function* events() { yield { event_id: "one" }; yield { event_id: "two" }; }
 await api.$operations.publishCustomEvents({ body: events() });
 if (sent !== "one\ntwo\n") throw new Error("custom request stream codec did not receive wire-transformed items");
 let fetched = false;
@@ -798,7 +798,7 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async () 
   start(controller) { controller.enqueue(encoder.encode(body.slice(0, 37))); controller.enqueue(encoder.encode(body.slice(37, 113))); controller.enqueue(encoder.encode(body.slice(113))); controller.close(); },
 }), { status: 200, headers: { "content-type": "multipart/mixed; boundary=frames" } }) });
 const frames = [];
-for await (const frame of api.$streams.tailFrames()) frames.push(frame.frameID);
+for await (const frame of api.$streams.tailFrames()) frames.push(frame.frame_id);
 if (frames.join(",") !== "one,two") throw new Error("streaming multipart response did not decode item schemas");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -821,7 +821,7 @@ const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const body = "--bundle\r\ncontent-type: application/json\r\nx-part: manifest\r\n\r\n{\"bundle_id\":\"one\"}\r\n--bundle\r\ncontent-type: text/plain\r\n\r\nready\r\n--bundle--\r\n";
 const api = createClient({ baseURL: "https://api.example.test", fetch: async () => new Response(body, { status: 200, headers: { "content-type": "multipart/mixed; boundary=bundle" } }) });
 const bundle = await api.$operations.getBundle();
-if (JSON.stringify(bundle) !== JSON.stringify([{ bundleID: "one" }, "ready"])) throw new Error("complete multipart response did not decode positional parts");
+if (JSON.stringify(bundle) !== JSON.stringify([{ bundle_id: "one" }, "ready"])) throw new Error("complete multipart response did not decode positional parts");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript positional-multipart response runtime test: %v\n%s", err, output)
@@ -847,8 +847,8 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (_i
   if (!contentType.startsWith("multipart/mixed; boundary=") || !body.includes("Content-Type: multipart/mixed; boundary=") || !body.includes("Content-Type: application/json") || !body.includes("inner")) throw new Error("nested multipart request was not encoded");
   return new Response(responseBody, { status: 200, headers: { "content-type": "multipart/mixed; boundary=outer" } });
 } });
-const result = await api.$operations.roundTripNested({ body: [[{ topID: "in" }], [{ innerID: "in" }, "queued"]] });
-if (JSON.stringify(result) !== JSON.stringify([[{ topID: "out" }], [{ innerID: "out" }, "ready"]])) throw new Error("nested multipart response was not decoded");
+const result = await api.$operations.roundTripNested({ body: [[{ top_id: "in" }], [{ inner_id: "in" }, "queued"]] });
+if (JSON.stringify(result) !== JSON.stringify([[{ top_id: "out" }], [{ inner_id: "out" }, "ready"]])) throw new Error("nested multipart response was not decoded");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript nested-multipart runtime test: %v\n%s", err, output)
@@ -924,7 +924,7 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const api = createClient({ baseURL: "https://api.example.test", fetch: async () => new Response(JSON.stringify({ display_name: "mystery" }), { status: 200, headers: { "content-type": "application/json" } }) });
 const pet = await api.$operations.getPet();
-if (pet.displayName !== "mystery" || "display_name" in pet) throw new Error("default discriminator mapping did not select OtherPet");
+if (pet.display_name !== "mystery") throw new Error("default discriminator mapping did not select OtherPet");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript default-discriminator runtime test: %v\n%s", err, output)
@@ -1042,7 +1042,7 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let requestURL = "";
 const api = createClient({ baseURL: "https://api.example.test", fetch: async (url) => { requestURL = String(url); return new Response(null, { status: 204 }); } });
-await api.$operations.searchWholeQuery({ query: { form: { term: "widgets", page: 2 } } });
+await api.$operations.searchWholeQuery({ querystring: { form: { term: "widgets", page: 2 } } });
 if (!requestURL.includes("term=widgets&page=2")) throw new Error("whole query form mismatch: " + requestURL);
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -1063,7 +1063,7 @@ const api = createClient({ baseURL: "https://api.example.test", transport: { cap
   if (new Headers(init.headers).get("cookie") !== "theme=dark; event_id=a%2Fb") throw new Error("cookie style changed raw cookie text: " + new Headers(init.headers).get("cookie"));
   return new Response(null, { status: 204 });
 } } });
-await api.$operations.getPreferences({ cookieParams: { prefs: { theme: "dark", eventID: "a%2Fb" } } });
+await api.$operations.getPreferences({ cookieParams: { prefs: { theme: "dark", event_id: "a%2Fb" } } });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript cookie-style runtime test: %v\n%s", err, output)
@@ -1119,7 +1119,7 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const api = createClient({ baseURL: "https://api.example.test", codecs: { "application/vnd.example.header": { decodeParameter: (value) => ({ event_id: value.replace("custom:", "") }) } }, fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json", "x-rate-limit": "42", "x-context": '{"region":"kr"}', "x-event": '{"event_id":"event"}', "x-custom": "custom:client", "x-object": "event_id=object" } }) });
 const response = await api.$operations.getLimit.raw();
-if (response.headers.xRateLimit !== 42 || response.headers.xContext.region !== "kr" || response.headers.xEvent.eventID !== "event" || response.headers.xCustom.eventID !== "client" || response.headers.xObject.eventID !== "object" || response.response.headers.get("x-rate-limit") !== "42") throw new Error("typed response header mismatch");
+if (response.headers["X-Rate-Limit"] !== 42 || response.headers["X-Context"].region !== "kr" || response.headers["X-Event"].event_id !== "event" || response.headers["X-Custom"].event_id !== "client" || response.headers["X-Object"].event_id !== "object" || response.response.headers.get("x-rate-limit") !== "42") throw new Error("typed response header mismatch");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript response-header runtime test: %v\n%s", err, output)
@@ -1156,7 +1156,7 @@ const fetch = async () => new Response(null, { status: 204, headers: { "set-cook
 await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getSession.raw().then(() => { throw new Error("unreadable Set-Cookie was accepted"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
 const api = createClient({ baseURL: "https://api.example.test", transport: { capabilities: { readableResponseHeaders: ["set-cookie"] }, fetch } });
 const response = await api.$operations.getSession.raw();
-if (response.headers.setCookie !== "session=abc") throw new Error("capable Set-Cookie transport did not decode header");
+if (response.headers["Set-Cookie"] !== "session=abc") throw new Error("capable Set-Cookie transport did not decode header");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript Set-Cookie capability runtime test: %v\n%s", err, output)
@@ -1195,8 +1195,8 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (_u
   if (init.body !== '{"widget_id":"input"}') throw new Error("reusable request media type was not encoded");
   return new Response('{"widget_id":"output"}', { status: 200, headers: { "content-type": "application/json" } });
 } });
-const widget = await api.$operations.createWidget({ body: { widgetID: "input" } });
-if (widget.widgetID !== "output") throw new Error("reusable response media type was not decoded");
+const widget = await api.$operations.createWidget({ body: { widget_id: "input" } });
+if (widget.widget_id !== "output") throw new Error("reusable response media type was not decoded");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript reusable-media runtime test: %v\n%s", err, output)
@@ -1429,8 +1429,8 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (_u
   if (!body.includes('<p:pet xmlns:p="https://example.test/pets" id="7">') || !body.includes("<pet_name>Milo &amp; Co</pet_name>") || !body.includes("<tags><tag>one</tag><tag>two</tag></tags>")) throw new Error("XML request encoding mismatch: " + body);
   return new Response('<p:pet id="8"><pet_name>Rex</pet_name><tags><tag>red</tag><tag>blue</tag></tags></p:pet>', { status: 200, headers: { "content-type": "application/xml" } });
 } });
-const pet = await api.$operations.savePet({ body: { petID: 7, name: "Milo & Co", tags: ["one", "two"] } });
-if (pet.petID !== 8 || pet.name !== "Rex" || pet.tags.join(",") !== "red,blue") throw new Error("XML response decoding mismatch");
+const pet = await api.$operations.savePet({ body: { pet_id: 7, name: "Milo & Co", tags: ["one", "two"] } });
+if (pet.pet_id !== 8 || pet.name !== "Rex" || pet.tags.join(",") !== "red,blue") throw new Error("XML response decoding mismatch");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript XML runtime test: %v\n%s", err, output)

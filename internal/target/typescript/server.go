@@ -268,22 +268,18 @@ func inboundResponseHeaderValuesType(document *ir.Document, response map[string]
 		if err != nil {
 			return "", err
 		}
-		property, err := naming.Property(name)
-		if err != nil {
-			property = name
-		}
 		optional := "?"
 		if boolValue(resolved, "required") {
 			optional = ""
 		}
-		fields = append(fields, "readonly "+property+optional+": "+valueType)
+		fields = append(fields, "readonly "+quoteTS(name)+optional+": "+valueType)
 	}
 	return "Readonly<{ " + strings.Join(fields, "; ") + " }>", nil
 }
 
 func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byte, error) {
 	var output bytes.Buffer
-	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
+	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
 	output.WriteString("import type { MediaCodec, WireSchemas } from \"../generated/runtime.js\"\n")
 	if len(callbacks) > 0 {
 		output.WriteString("import type * as Contract from \"../generated/types.js\"\n")
@@ -342,7 +338,7 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		fmt.Fprintf(&output, "    %s: {\n      async fetch(request: Request): Promise<Response> {\n", property)
 		fmt.Fprintf(&output, "        if (request.method !== %s) return new Response(\"Method Not Allowed\", { status: 405, headers: { allow: %s } })\n", quoteTS(callback.method), quoteTS(callback.method))
 		fmt.Fprintf(&output, "        const handler = handlers.%s\n        if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", property)
-		fmt.Fprintf(&output, "        let params: Readonly<Record<string, unknown>>\n        try { params = await decodeInboundParameters(request, %sCallbackDefinition.parameters, inputSchemas, inputWireSchemas, inboundCodecs, options.pathParams?.%s) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %sCallbackDefinition.operationID, method: %sCallbackDefinition.method, path: new URL(request.url).pathname, params, security: %sCallbackDefinition.security, securityCandidates: collectInboundSecurityCandidates(request, %sCallbackDefinition.security, securitySchemes) }\n", property, property, property, property, property, property)
+		fmt.Fprintf(&output, "        let params: InboundParameterValues\n        try { params = await decodeInboundParameters(request, %sCallbackDefinition.parameters, inputSchemas, inputWireSchemas, inboundCodecs, options.pathParams?.%s) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %sCallbackDefinition.operationID, method: %sCallbackDefinition.method, path: new URL(request.url).pathname, params, security: %sCallbackDefinition.security, securityCandidates: collectInboundSecurityCandidates(request, %sCallbackDefinition.security, securitySchemes) }\n", property, property, property, property, property, property)
 		output.WriteString("        if (requiresInboundAuthentication(context.security)) {\n          if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n          try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n          catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n        }\n")
 		if callback.hasBody {
 			output.WriteString("        try {\n")
@@ -632,7 +628,7 @@ func emitInboundSecuritySchemes(output *bytes.Buffer, document *ir.Document) err
 
 func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, error) {
 	var output bytes.Buffer
-	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, matchInboundRoute, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
+	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, matchInboundRoute, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
 	output.WriteString("import type { MediaCodec, WireSchemas } from \"../generated/runtime.js\"\n")
 	if len(webhooks) > 0 {
 		output.WriteString("import type * as Contract from \"../generated/types.js\"\n")
@@ -708,7 +704,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 		fmt.Fprintf(&output, "        const handler = handlers.%s\n", webhook.property)
 		output.WriteString("        if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n")
 		symbol := webhookDefinitionSymbol(webhook)
-		fmt.Fprintf(&output, "        let params: Readonly<Record<string, unknown>>\n        try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %sPathParameters) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", symbol, symbol, symbol, symbol, symbol, symbol)
+		fmt.Fprintf(&output, "        let params: InboundParameterValues\n        try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %sPathParameters) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", symbol, symbol, symbol, symbol, symbol, symbol)
 		output.WriteString("        if (requiresInboundAuthentication(context.security)) {\n          if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n          try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n          catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n        }\n")
 		if webhook.hasBody {
 			output.WriteString("        try {\n")
@@ -758,7 +754,7 @@ func webhooksForProperty(webhooks []webhookDefinition, property string) []webhoo
 }
 
 func serverRuntimeSource() []byte {
-	return []byte(`import { decodeWireValue, decodeXML, encodeWireValue, encodeXML, validateWireValue, type MediaCodec, type MediaStreamReader, type WireEncodingDefinition, type WireHeaderDefinition, type WireSchema, type WireSchemas } from "../generated/runtime.js"
+	return []byte(`import { decodeWireValue, decodeXML, defineOwnDataProperty, encodeWireValue, encodeXML, validateWireValue, type MediaCodec, type MediaStreamReader, type WireEncodingDefinition, type WireHeaderDefinition, type WireSchema, type WireSchemas } from "../generated/runtime.js"
 
 /** Metadata provided to host-owned inbound authentication policy. */
 export interface InboundRequestContext {
@@ -766,10 +762,19 @@ export interface InboundRequestContext {
   readonly operationID: string
   readonly method: string
   readonly path: string
-  /** Decoded query, header, and cookie parameters keyed by generated property name. */
-  readonly params: Readonly<Record<string, unknown>>
+  /** Decoded parameters grouped by location and keyed by exact OpenAPI names. */
+  readonly params: InboundParameterValues
   readonly security: unknown
   readonly securityCandidates: Readonly<Record<string, InboundSecurityCandidate>>
+}
+
+/** Exact decoded inbound parameter containers, separated by OpenAPI location. */
+export interface InboundParameterValues {
+  readonly path: Readonly<Record<string, unknown>>
+  readonly query: Readonly<Record<string, unknown>>
+  readonly querystring: Readonly<Record<string, unknown>>
+  readonly headerParams: Readonly<Record<string, unknown>>
+  readonly cookieParams: Readonly<Record<string, unknown>>
 }
 
 /** Raw candidate derived from one declared inbound security scheme. */
@@ -800,8 +805,14 @@ export interface InboundParameterDefinition {
 }
 
 /** Decodes declared inbound parameters before host authentication and handler execution. */
-export async function decodeInboundParameters(request: Request, definitions: readonly InboundParameterDefinition[], schemas: InboundSchemas, wireSchemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined = undefined, pathParameters: Readonly<Record<string, string>> = {}): Promise<Readonly<Record<string, unknown>>> {
-  const result: Record<string, unknown> = {}
+export async function decodeInboundParameters(request: Request, definitions: readonly InboundParameterDefinition[], schemas: InboundSchemas, wireSchemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined = undefined, pathParameters: Readonly<Record<string, string>> = {}): Promise<InboundParameterValues> {
+  const result = {
+    path: Object.create(null) as Record<string, unknown>,
+    query: Object.create(null) as Record<string, unknown>,
+    querystring: Object.create(null) as Record<string, unknown>,
+    headerParams: Object.create(null) as Record<string, unknown>,
+    cookieParams: Object.create(null) as Record<string, unknown>,
+  }
   const url = new URL(request.url)
   const cookies = parseInboundCookies(request.headers.get("cookie"))
   for (const definition of definitions) {
@@ -816,7 +827,8 @@ export async function decodeInboundParameters(request: Request, definitions: rea
     const value = await decodeInboundParameterContent(raw, definition, schemas, wireSchemas, codecs)
     try {
       validateWireValue(value, definition.wireSchema, wireSchemas, "decode")
-      result[definition.property] = decodeWireValue(value, definition.wireSchema, wireSchemas)
+      const section = definition.location === "header" ? result.headerParams : definition.location === "cookie" ? result.cookieParams : result[definition.location]
+      defineOwnDataProperty(section, definition.property, decodeWireValue(value, definition.wireSchema, wireSchemas))
     } catch (error) {
       throw new InboundRequestError(new Response("Invalid parameter " + definition.name + ": " + (error instanceof Error ? error.message : "invalid value"), { status: 400 }))
     }

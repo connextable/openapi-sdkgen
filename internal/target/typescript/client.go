@@ -265,10 +265,17 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 			return err
 		}
 	}
-	if parameters, err := queryParameters(document, operation); err != nil {
+	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return err
 	} else if len(parameters) > 0 || operation.Pagination != "" {
 		if err := emitQueryTypes(output, document, operation, operationName, parameters); err != nil {
+			return err
+		}
+	}
+	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {
+		return err
+	} else if len(parameters) > 0 {
+		if err := emitParameterType(output, document, operation, operationName+"QuerystringInput", "querystring"); err != nil {
 			return err
 		}
 	}
@@ -355,18 +362,6 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 		return err
 	}
 	return nil
-}
-
-func queryParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
-	query, err := parametersIn(document, operation, "query")
-	if err != nil {
-		return nil, err
-	}
-	querystring, err := parametersIn(document, operation, "querystring")
-	if err != nil {
-		return nil, err
-	}
-	return append(query, querystring...), nil
 }
 
 func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, item ManifestOperation) error {
@@ -495,7 +490,7 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 			valueType += " | undefined"
 		}
 		emitOperationParameterJSDoc(output, "  ", parameter, locationLabel)
-		fmt.Fprintf(output, "  readonly %s%s: %s\n", parameter.Property, optional, valueType)
+		fmt.Fprintf(output, "  readonly %s%s: %s\n", quoteTS(parameter.Property), optional, valueType)
 	}
 	output.WriteString("}\n\n")
 	return nil
@@ -689,7 +684,7 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 				valueType += " | undefined"
 			}
 			emitOperationParameterJSDoc(output, "  ", parameter, "Query")
-			fmt.Fprintf(output, "  readonly %s%s: %s\n", parameter.Property, optional, valueType)
+			fmt.Fprintf(output, "  readonly %s%s: %s\n", quoteTS(parameter.Property), optional, valueType)
 		}
 		output.WriteString("}\n\n")
 		parts = append(parts, filterType)
@@ -1028,7 +1023,7 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 			return err
 		}
 		fmt.Fprintf(output, "%s/** Selects one resource by the `%s` path parameter. */\n", memberIndent, parameter.Name)
-		fmt.Fprintf(output, "%s(%s: %s): ", memberIndent, parameter.Property, parameterType)
+		fmt.Fprintf(output, "%s(%s: %s): ", memberIndent, parameter.Binding, parameterType)
 		if err := emitResourceNodeInterface(output, document, node.parameterChild, memberIndent); err != nil {
 			return err
 		}
@@ -1077,9 +1072,9 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 	for name, value := range bound {
 		nextBound[name] = value
 	}
-	nextBound[parameter.Name] = parameter.Property
+	nextBound[parameter.Name] = parameter.Binding
 	output.WriteString("Object.assign(\n")
-	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Property, parameterType)
+	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Binding, parameterType)
 	if err := emitResourceNodeValue(output, document, node.parameterChild, nextBound, indent+"  "); err != nil {
 		return err
 	}
@@ -1128,11 +1123,7 @@ func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, ope
 		if !ok {
 			return fmt.Errorf("resource operation %s is missing bound path parameter %q", operation.OperationID, parameter)
 		}
-		propertyName, err := naming.Property(parameter)
-		if err != nil {
-			return err
-		}
-		values = append(values, propertyName+": "+value)
+		values = append(values, quoteTS(parameter)+": "+value)
 	}
 	name := operationTypeName(operation.OperationID)
 	hasInput := len(operation.InputTypes) > 1

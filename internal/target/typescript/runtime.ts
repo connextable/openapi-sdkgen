@@ -1412,7 +1412,7 @@ function parseStreamJSON(value: string): unknown {
 
 async function decodeResponseHeaders(operation: OperationDefinition, response: Response, codecs: ReadonlyMap<string, MediaCodec<unknown>>): Promise<Readonly<Record<string, unknown>>> {
   const definition = selectResponseDefinition(operation, response, false);
-  const values: Record<string, unknown> = {};
+  const values = Object.create(null) as Record<string, unknown>;
   for (const header of definition?.headers ?? []) {
     const value = response.headers.get(header.name);
     if (value === null) {
@@ -1421,7 +1421,7 @@ async function decodeResponseHeaders(operation: OperationDefinition, response: R
     }
     const decoded = await decodeResponseHeaderValue(header.name, value, header.schema, header.contentType, header.explode, operation.outputSchemas ?? {}, codecs);
     validateWireValue(decoded, header.schema, operation.outputSchemas ?? {}, "decode");
-    values[header.property] = decodeWireValue(decoded, header.schema, operation.outputSchemas ?? {});
+    defineOwnDataProperty(values, header.property, decodeWireValue(decoded, header.schema, operation.outputSchemas ?? {}));
   }
   return values;
 }
@@ -1652,7 +1652,7 @@ function hasCustomParameterInput(operation: OperationDefinition, input: unknown)
   const values = isRecord(input) ? input : {};
   for (const parameter of operation.parameters ?? []) {
     if (parameter.contentType === undefined || !requiresParameterCodec(parameter.contentType)) continue;
-    const source = parameter.location === "path" ? values.path : parameter.location === "header" ? values.headerParams : parameter.location === "cookie" ? values.cookieParams : values.query;
+    const source = parameter.location === "path" ? values.path : parameter.location === "header" ? values.headerParams : parameter.location === "cookie" ? values.cookieParams : parameter.location === "querystring" ? values.querystring : values.query;
     if (isRecord(source) && source[parameter.property] !== undefined) return true;
   }
   return false;
@@ -1682,8 +1682,10 @@ function encodeRequestSynchronous(
   });
   const url = new URL(resolveOperationBaseURL(options.baseURL ?? baseURL, client.origin, client.server, operation) + (path.startsWith("/") ? path : `/${path}`));
   const queryValues = isRecord(values.query) ? values.query : {};
+  const querystringValues = isRecord(values.querystring) ? values.querystring : {};
   rejectUndefinedArrayValues(queryValues);
-  const query = appendQuerySync(queryValues, operation);
+  rejectUndefinedArrayValues(querystringValues);
+  const query = [...appendQuerySync(queryValues, operation, "query"), ...appendQuerySync(querystringValues, operation, "querystring")];
   if (query.length > 0) url.search = `${url.search}${url.search === "" ? "?" : "&"}${serializeQuery(query)}`;
   const contractHeaderNames = new Set([...(operation.headerNames ?? []), ...(operation.parameters ?? []).filter((parameter) => parameter.location === "header").map((parameter) => parameter.name)].map((name) => name.toLowerCase()));
   const headers = new Headers();
@@ -1704,7 +1706,7 @@ function encodeRequestSynchronous(
   setHeader(headers, "If-Match", options.ifMatch);
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
   rejectUndefinedArrayValues(cookieValues);
-  assertRequiredParameters(operation, pathValues, queryValues, headerParams, cookieValues);
+  assertRequiredParameters(operation, pathValues, queryValues, querystringValues, headerParams, cookieValues);
   const cookies = Object.entries(cookieValues).filter((entry): entry is [string, unknown] => entry[1] !== undefined).flatMap(([property, value]) => serializeCookieSync(operation, property, value));
   if (cookies.length > 0) {
     if (!client.transport?.capabilities?.cookieJar) throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, "Sending declared cookie parameters requires a cookie-jar transport", undefined);
@@ -1771,8 +1773,10 @@ async function encodeRequestAsync(
   const operationBaseURL = resolveOperationBaseURL(options.baseURL ?? baseURL, client.origin, client.server, operation);
   const url = new URL(operationBaseURL + (path.startsWith("/") ? path : `/${path}`));
   const queryValues = isRecord(values.query) ? values.query : {};
+  const querystringValues = isRecord(values.querystring) ? values.querystring : {};
   rejectUndefinedArrayValues(queryValues);
-  const query = await appendQuery(queryValues, operation, codecs);
+  rejectUndefinedArrayValues(querystringValues);
+  const query = [...await appendQuery(queryValues, operation, codecs, "query"), ...await appendQuery(querystringValues, operation, codecs, "querystring")];
   if (query.length > 0) url.search = `${url.search}${url.search === "" ? "?" : "&"}${serializeQuery(query)}`;
 
   const contractHeaderNames = new Set(
@@ -1812,7 +1816,7 @@ async function encodeRequestAsync(
 
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
   rejectUndefinedArrayValues(cookieValues);
-  assertRequiredParameters(operation, pathValues, queryValues, headerParams, cookieValues);
+  assertRequiredParameters(operation, pathValues, queryValues, querystringValues, headerParams, cookieValues);
   const cookiePromises = Object.entries(cookieValues)
     .filter((entry): entry is [string, unknown] => entry[1] !== undefined)
     .map(async ([property, value]) => serializeCookie(operation, property, value, codecs));
@@ -1868,13 +1872,15 @@ function assertRequiredParameters(
   operation: OperationDefinition,
   pathValues: Record<string, unknown>,
   queryValues: Record<string, unknown>,
+  querystringValues: Record<string, unknown>,
   headerValues: Record<string, unknown>,
   cookieValues: Record<string, unknown>,
 ): void {
   for (const parameter of operation.parameters ?? []) {
     if (!parameter.required) continue;
     const values = parameter.location === "path" ? pathValues
-      : parameter.location === "query" || parameter.location === "querystring" ? queryValues
+      : parameter.location === "query" ? queryValues
+      : parameter.location === "querystring" ? querystringValues
       : parameter.location === "header" ? headerValues
       : cookieValues;
     if (values[parameter.property] === undefined || values[parameter.property] === null) {
@@ -2598,7 +2604,8 @@ function transformWireValue(
     (schema.properties !== undefined || schema.additionalProperties !== undefined)
   ) {
     const source = transformed;
-    const result: Record<string, unknown> = { ...source };
+    const result = Object.create(null) as Record<string, unknown>;
+    for (const [key, item] of Object.entries(source)) defineOwnDataProperty(result, key, item);
     const known = new Set<string>();
     for (const [wireName, propertyDefinition] of Object.entries(schema.properties ?? {})) {
       const sourceName = direction === "encode" ? propertyDefinition.property : wireName;
@@ -2607,24 +2614,24 @@ function transformWireValue(
       known.add(targetName);
       if (!(sourceName in source)) continue;
       if (sourceName !== targetName) delete result[sourceName];
-      result[targetName] = transformWireValue(
+      defineOwnDataProperty(result, targetName, transformWireValue(
         source[sourceName],
         propertyDefinition.schema,
         components,
         direction,
         scope,
-      );
+      ));
     }
     if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
       for (const [key, item] of Object.entries(result)) {
         if (!known.has(key)) {
-          result[key] = transformWireValue(
+          defineOwnDataProperty(result, key, transformWireValue(
             item,
             schema.additionalProperties,
             components,
             direction,
             scope,
-          );
+          ));
         }
       }
     }
@@ -3070,11 +3077,12 @@ async function appendQuery(
   query: Readonly<Record<string, unknown>>,
   operation: OperationDefinition,
   codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  location: "query" | "querystring",
 ): Promise<QueryPart[]> {
 	const result: QueryPart[] = [];
   for (const [property, value] of Object.entries(query)) {
     if (value === undefined) continue;
-    const parameter = findParameterByProperty(operation, "query", property) ?? findParameterByProperty(operation, "querystring", property);
+    const parameter = findParameterByProperty(operation, location, property);
 		if (parameter?.location === "querystring") {
 			await appendQuerystring(result, value, parameter, operation.inputSchemas ?? {}, codecs);
 			continue;
@@ -3135,11 +3143,11 @@ async function appendQueryParameter(
   appendQueryValue(query, name, value, parameter?.allowReserved ?? false);
 }
 
-function appendQuerySync(query: Readonly<Record<string, unknown>>, operation: OperationDefinition): QueryPart[] {
+function appendQuerySync(query: Readonly<Record<string, unknown>>, operation: OperationDefinition, location: "query" | "querystring"): QueryPart[] {
   const result: QueryPart[] = [];
   for (const [property, rawValue] of Object.entries(query)) {
     if (rawValue === undefined) continue;
-    const parameter = findParameterByProperty(operation, "query", property) ?? findParameterByProperty(operation, "querystring", property);
+    const parameter = findParameterByProperty(operation, location, property);
     const value = encodeParameterWireValue(operation, parameter, rawValue);
     if (parameter?.location === "querystring") {
       appendQuerystringSync(result, value, parameter, operation.inputSchemas ?? {});
@@ -3723,6 +3731,11 @@ function awaitAbortable<Value>(value: Promise<Value>, signal: AbortSignal | unde
       },
     );
   });
+}
+
+/** Defines one enumerable own data property without prototype-setter semantics. */
+export function defineOwnDataProperty<Value>(target: Record<string, Value>, key: string, value: Value): void {
+  Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

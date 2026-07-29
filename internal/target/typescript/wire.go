@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string, direction projection) error {
@@ -232,15 +231,11 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			if direction == projectionOutput && boolValue(propertySchema, "writeOnly") {
 				continue
 			}
-			propertyName, err := naming.Property(wireName)
-			if err != nil {
-				propertyName = wireName
-			}
 			nested, err := wireSchemaDescriptorScoped(propertyValue, direction, formatAssertion)
 			if err != nil {
 				return "", err
 			}
-			entries = append(entries, fmt.Sprintf("%s: { property: %s, schema: %s }", quoteTS(wireName), quoteTS(propertyName), nested))
+			entries = append(entries, fmt.Sprintf("%s: { property: %s, schema: %s }", quoteTS(wireName), quoteTS(wireName), nested))
 		}
 		if len(entries) > 0 {
 			fields = append(fields, "properties: { "+strings.Join(entries, ", ")+" }")
@@ -814,10 +809,6 @@ func responseWireHeaders(document *ir.Document, response map[string]any) (string
 		if err != nil {
 			return "", err
 		}
-		property, err := naming.Property(name)
-		if err != nil {
-			property = name
-		}
 		schema, contentType, err := responseHeaderSchema(document, header)
 		if err != nil {
 			return "", err
@@ -834,7 +825,7 @@ func responseWireHeaders(document *ir.Document, response map[string]any) (string
 		if !hasExplode {
 			explode = style == "form"
 		}
-		entry := "{ name: " + quoteTS(name) + ", property: " + quoteTS(property) + ", style: " + quoteTS(style) + ", explode: " + fmt.Sprint(explode) + ", schema: " + descriptor
+		entry := "{ name: " + quoteTS(name) + ", property: " + quoteTS(name) + ", style: " + quoteTS(style) + ", explode: " + fmt.Sprint(explode) + ", schema: " + descriptor
 		if contentType != "" {
 			entry += ", contentType: " + quoteTS(contentType)
 		}

@@ -172,7 +172,7 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 		case "cookie":
 			location = "cookieParams"
 		case "querystring":
-			location = "query"
+			location = "querystring"
 		}
 		value, err := linkValueLiteral(values[name], sourceParameters)
 		if err != nil {

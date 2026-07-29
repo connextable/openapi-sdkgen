@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 type projection string
@@ -423,7 +422,6 @@ func objectTypeForScope(document *ir.Document, schema map[string]any, direction 
 	sort.Strings(keys)
 	var output bytes.Buffer
 	output.WriteString("{\n")
-	propertySources := make(map[string]string, len(keys))
 	for _, wireName := range keys {
 		propertyValue := properties[wireName]
 		propertySchema, _ := propertyValue.(map[string]any)
@@ -437,14 +435,7 @@ func objectTypeForScope(document *ir.Document, schema map[string]any, direction 
 		if err != nil {
 			return "", err
 		}
-		propertyName, err := naming.Property(wireName)
-		if err != nil {
-			propertyName = quoteTS(wireName)
-		}
-		if previous, exists := propertySources[propertyName]; exists {
-			return "", fmt.Errorf("object properties %q and %q both generate TypeScript property %s", previous, wireName, propertyName)
-		}
-		propertySources[propertyName] = wireName
+		propertyName := quoteTS(wireName)
 		optional := ""
 		if !required[wireName] {
 			optional = "?"
@@ -693,15 +684,11 @@ func responseHeaderType(document *ir.Document, response map[string]any, scope ty
 		if err != nil {
 			return "", err
 		}
-		property, err := naming.Property(name)
-		if err != nil {
-			property = quoteTS(name)
-		}
 		optional := "?"
 		if boolValue(resolved, "required") {
 			optional = ""
 		}
-		fields = append(fields, "readonly "+property+optional+": "+valueType)
+		fields = append(fields, "readonly "+quoteTS(name)+optional+": "+valueType)
 	}
 	return "{ " + strings.Join(fields, "; ") + " }", nil
 }
@@ -910,10 +897,15 @@ func operationInputTypes(document *ir.Document, operation ir.Operation) ([]strin
 	} else if len(parameters) > 0 {
 		result = append(result, name+"PathInput")
 	}
-	if parameters, err := queryParameters(document, operation); err != nil {
+	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 || operation.Pagination != "" || operation.Raw["x-sort"] != nil {
 		result = append(result, name+"QueryInput")
+	}
+	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {
+		return nil, err
+	} else if len(parameters) > 0 {
+		result = append(result, name+"QuerystringInput")
 	}
 	if parameters, err := parametersIn(document, operation, "header"); err != nil {
 		return nil, err

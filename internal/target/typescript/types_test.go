@@ -23,7 +23,7 @@ func TestSchemaTypeMapsCompositeOpenAPISchemas(t *testing.T) {
 		{name: "union", schema: map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer"}, map[string]any{"type": "string"}}}, want: "string | number"},
 		{name: "intersection", schema: map[string]any{"allOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}}}, want: "string & null"},
 		{name: "reference sibling", schema: map[string]any{"$ref": "#/components/schemas/Widget", "type": "object", "additionalProperties": map[string]any{"type": "string"}}, want: `(ComponentInput<"Widget">) & (Readonly<Record<string, string>>)`},
-		{name: "pattern properties", schema: map[string]any{"type": "object", "properties": map[string]any{"fixed": map[string]any{"type": "string"}}, "patternProperties": map[string]any{"^x-": map[string]any{"type": "integer"}}}, want: "({\n  /**\n   * OpenAPI property `fixed`.\n   */\n  readonly fixed?: string | undefined\n}) & (Readonly<Record<string, number>>)"},
+		{name: "pattern properties", schema: map[string]any{"type": "object", "properties": map[string]any{"fixed": map[string]any{"type": "string"}}, "patternProperties": map[string]any{"^x-": map[string]any{"type": "integer"}}}, want: "({\n  /**\n   * OpenAPI property `fixed`.\n   */\n  readonly \"fixed\"?: string | undefined\n}) & (Readonly<Record<string, number>>)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			value, err := schemaType(document, test.schema, projectionInput)
@@ -97,11 +97,11 @@ func TestSchemaTypeProjectsReadAndWriteOnlyProperties(t *testing.T) {
 		},
 	}
 	input, err := schemaType(&ir.Document{}, schema, projectionInput)
-	if err != nil || !containsAll(input, "readonly visible: string", "readonly write: string") || strings.Contains(input, "readonly read: string") {
+	if err != nil || !containsAll(input, `readonly "visible": string`, `readonly "write": string`) || strings.Contains(input, `readonly "read": string`) {
 		t.Fatalf("input = %q, %v", input, err)
 	}
 	output, err := schemaType(&ir.Document{}, schema, projectionOutput)
-	if err != nil || output == input || !containsAll(output, "readonly visible: string", "readonly read: string") || containsAll(output, "readonly write: string") {
+	if err != nil || output == input || !containsAll(output, `readonly "visible": string`, `readonly "read": string`) || containsAll(output, `readonly "write": string`) {
 		t.Fatalf("output = %q, %v", output, err)
 	}
 }
@@ -139,11 +139,11 @@ func TestOperationOutputTypesIncludeDefaultResponses(t *testing.T) {
 	}}
 	document := &ir.Document{}
 	output, err := operationOutputType(document, operation)
-	if err != nil || !strings.Contains(output, "readonly id?: string") {
+	if err != nil || !strings.Contains(output, `readonly "id"?: string`) {
 		t.Fatalf("output = %q, %v", output, err)
 	}
 	raw, err := operationRawResponseType(document, operation)
-	if err != nil || !strings.Contains(raw, "RawResponseFor<number") || !strings.Contains(raw, "readonly id?: string") {
+	if err != nil || !strings.Contains(raw, "RawResponseFor<number") || !strings.Contains(raw, `readonly "id"?: string`) {
 		t.Fatalf("raw = %q, %v", raw, err)
 	}
 }
@@ -199,7 +199,7 @@ func TestSourceArtifactsGenerateRecursiveComponentSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, `readonly next?: ComponentInput<"Node">`) || !strings.Contains(source, `readonly next?: ComponentOutput<"Node">`) {
+	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, `readonly "next"?: ComponentInput<"Node">`) || !strings.Contains(source, `readonly "next"?: ComponentOutput<"Node">`) {
 		t.Fatalf("recursive schema missing from generated types:\n%s", source)
 	}
 }

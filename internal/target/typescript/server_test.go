@@ -82,7 +82,7 @@ const router = createWebhookRouter({
   binary: async () => ({ status: 200, contentType: "application/pdf", body: new Uint8Array([1, 2, 3]) }),
   plain: async ({ request }) => { if (new URL(request.url).searchParams.has("fail")) throw new Error("private no-body handler detail"); return { status: 200, contentType: "application/vnd.example.plain", body: "plain" }; },
   xml: async () => ({ status: 200, contentType: "application/xml", body: { id: "receipt-1", note: "hello & goodbye" } }),
-  selectors: async ({ params }) => { selectorParams = params; return { status: 204 }; },
+  selectors: async ({ params }) => { selectorParams = params.path; return { status: 204 }; },
 	orderCreated: async ({ body, operationID, request, params }) => {
 	if (body.id === "explode") throw new Error("private handler detail");
 	if (body.id === "missing-header") return { status: 202, body: { accepted: body.id } };
@@ -90,7 +90,7 @@ const router = createWebhookRouter({
 	if (body.id === "raw-list") return { status: 202, headers: { "x-rate": "2", "x-list": "1,2" }, body: { accepted: body.id } };
 	if (body.id === "raw-custom") return { status: 202, headers: { "x-rate": "2", "x-custom": "custom:raw-outbound" }, body: { accepted: body.id } };
 	seen.push({ body, operationID, method: request.method, params });
-    return { status: 202, headerValues: { xRate: 2, xList: [1, 2], xObject: { eventID: "outbound" }, xMeta: { eventID: "outbound" }, xCustom: { eventID: "custom-outbound" } }, body: { accepted: body.id } };
+    return { status: 202, headerValues: { "X-Rate": 2, "X-List": [1, 2], "X-Object": { event_id: "outbound" }, "X-Meta": { event_id: "outbound" }, "X-Custom": { event_id: "custom-outbound" } }, body: { accepted: body.id } };
   },
 }, { routes: { binary: "/hooks/binary", plain: "/hooks/plain", xml: "/hooks/xml", selectors: "/hooks/selectors/{label}/{matrix}", orderCreated: "/hooks/orders" }, codecs: { "application/vnd.example.plain": { encode(value) { return "custom:" + value; } }, "application/vnd.example.parameter": { decodeParameter(value) { return { event_id: value.replace("custom:", "") }; }, encodeParameter(value) { return "custom:" + value.event_id; } } }, authenticate: async ({ method, path, security, securityCandidates }) => {
 	if (securityCandidates.signature?.value === "boom") throw new Error("private authenticator detail");
@@ -106,7 +106,7 @@ const binary = await router.fetch(new Request("https://host.test/hooks/binary", 
 if (binary.status !== 200 || binary.headers.get("content-type") !== "application/pdf" || JSON.stringify([...new Uint8Array(await binary.arrayBuffer())]) !== "[1,2,3]") throw new Error("binary response was not encoded");
 const xml = await router.fetch(new Request("https://host.test/hooks/xml", { method: "GET" }));
 if (xml.status !== 200 || xml.headers.get("content-type") !== "application/xml" || await xml.text() !== '<receipt id="receipt-1"><message>hello &amp; goodbye</message></receipt>') throw new Error("XML response was not encoded from its schema");
-if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { page: 2, filter: { count: 3, kindName: "fresh" }, meta: { enabled: true, traceID: 4 }, payload: { eventID: "xml-event" }, custom: { eventID: "custom-event" }, xTrace: "trace-1", tags: ["one", "two"], prefs: { theme: "dark", eventID: "a%2Fb" }, session: "one" } }])) throw new Error("handler context mismatch");
+if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, filter: { kind_name: "fresh", count: 3 }, payload: { event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
 const selectorResponse = await router.fetch(new Request("https://host.test/hooks/selectors/.role,admin,enabled,true/;matrix=role,owner,enabled,false", { method: "GET" }));
 if (selectorResponse.status !== 204 || JSON.stringify(selectorParams) !== JSON.stringify({ label: { role: "admin", enabled: true }, matrix: { role: "owner", enabled: false } })) throw new Error("label/matrix path objects were not decoded");
 const denied = createWebhookRouter({ orderCreated: async () => ({ status: 202 }) }, { routes: { orderCreated: "/hooks/orders" }, authenticate: () => new Response("no", { status: 401 }) });
@@ -308,7 +308,7 @@ const router = createWebhookRouter({
   xmlReceived: async ({ body }) => { seen.push(body); return { status: 204 }; },
   multipartReceived: async ({ body }) => { if (body.meta.source !== "multipart" || body.custom.source !== "custom") throw new Error("multipart fields were not decoded"); seen.push(body); return { status: 204 }; },
   binaryReceived: async ({ body }) => { seen.push({ bytes: body.byteLength }); return { status: 204 }; },
-  multiReceived: async ({ body }) => { seen.push(body.contentType === "application/json" ? body.value.eventID : body.value); return { status: 204 }; },
+  multiReceived: async ({ body }) => { seen.push(body.contentType === "application/json" ? body.value.event_id : body.value); return { status: 204 }; },
 }, { routes: { formReceived: "/form", textReceived: "/text", xmlReceived: "/xml", multipartReceived: "/multipart", binaryReceived: "/binary", multiReceived: "/multi" }, codecs: { "application/vnd.example.part": { decodeParameter: (value) => JSON.parse(value) } } });
 if ((await router.fetch(new Request("https://host.test/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "name=widget&count=2&enabled=true&tags=one&tags=two&meta=%7B%22source%22%3A%22form%22%7D" }))).status !== 204) throw new Error("form body rejected");
 if ((await router.fetch(new Request("https://host.test/text", { method: "POST", headers: { "content-type": "text/plain" }, body: "hello" }))).status !== 204) throw new Error("text body rejected");
@@ -374,7 +374,7 @@ const codecs = {
   "application/vnd.example.event": { async decodeInbound(request) { return JSON.parse(await request.text()); } },
   "application/vnd.example.events": { async *decodeInboundStream(reader) { const decoder = new TextDecoder(); let pending = ""; while (true) { const chunk = await reader.read(1024); if (chunk === null) break; pending += decoder.decode(chunk, { stream: true }); let newline; while ((newline = pending.indexOf("\n")) >= 0) { const line = pending.slice(0, newline); pending = pending.slice(newline + 1); if (line !== "") yield JSON.parse(line); } } if (pending !== "") yield JSON.parse(pending); } },
 };
-const router = createWebhookRouter({ events: async ({ body }) => { for await (const item of body) seen.push(item.eventID); return { status: 204 }; }, frames: async ({ body }) => { for await (const item of body) seen.push(item.frameID); return { status: 204 }; }, custom: async ({ body }) => { seen.push(body.eventID); return { status: 204 }; }, customStream: async ({ body }) => { for await (const item of body) seen.push(item.eventID); return { status: 204 }; }, denied: async () => ({ status: 204 }) }, { routes: { events: "/events", frames: "/frames", custom: "/custom", customStream: "/custom-stream", denied: "/denied" }, codecs, maxStreamItemBytes: 1024 });
+const router = createWebhookRouter({ events: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; }, frames: async ({ body }) => { for await (const item of body) seen.push(item.frame_id); return { status: 204 }; }, custom: async ({ body }) => { seen.push(body.event_id); return { status: 204 }; }, customStream: async ({ body }) => { for await (const item of body) seen.push(item.event_id); return { status: 204 }; }, denied: async () => ({ status: 204 }) }, { routes: { events: "/events", frames: "/frames", custom: "/custom", customStream: "/custom-stream", denied: "/denied" }, codecs, maxStreamItemBytes: 1024 });
 const encoder = new TextEncoder();
 const valid = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('{"event_id":"one"}\n{"ev')); controller.enqueue(encoder.encode('ent_id":"two"}\n')); controller.close(); } });
 const validResponse = await router.fetch(new Request("https://host.test/events", { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: valid, duplex: "half" }));
@@ -483,7 +483,7 @@ func TestServerAddOnEmitsInboundParameterDefinitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
-	for _, expected := range []string{"decodeInboundParameters", `location: "header"`, `name: "X-Signature"`, `property: "xSignature"`} {
+	for _, expected := range []string{"decodeInboundParameters", `location: "header"`, `name: "X-Signature"`, `property: "X-Signature"`} {
 		if !strings.Contains(webhooks, expected) {
 			t.Fatalf("webhook parameter metadata missing %q:\n%s", expected, webhooks)
 		}

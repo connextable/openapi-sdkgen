@@ -1,16 +1,15 @@
 package typescript
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 type operationParameter struct {
 	Name          string
 	Property      string
+	Binding       string
 	Description   string
 	Location      string
 	Style         string
@@ -38,10 +37,6 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			location, _ := raw["in"].(string)
 			if name == "" || location == "" {
 				continue
-			}
-			property, err := naming.Property(name)
-			if err != nil {
-				return nil, fmt.Errorf("parameter %s: %w", name, err)
 			}
 			style, _ := raw["style"].(string)
 			if style == "" {
@@ -75,7 +70,7 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			}
 			description, _ := raw["description"].(string)
 			merged[key] = operationParameter{
-				Name: name, Property: property, Description: description, Location: location, Style: style,
+				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operation.OperationID+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
 				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
 			}
 		}
@@ -83,14 +78,6 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 	result := make([]operationParameter, 0, len(merged))
 	for _, key := range order {
 		result = append(result, merged[key])
-	}
-	properties := make(map[string]string, len(result))
-	for _, parameter := range result {
-		key := parameter.Location + "\x00" + parameter.Property
-		if previous, exists := properties[key]; exists {
-			return nil, fmt.Errorf("%s parameters %q and %q both generate TypeScript property %q", parameter.Location, previous, parameter.Name, parameter.Property)
-		}
-		properties[key] = parameter.Name
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Location != "path" || result[j].Location != "path" {

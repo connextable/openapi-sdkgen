@@ -66,7 +66,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		`readonly "Product": {`,
 		"readonly input:",
 		"readonly output:",
-		"readonly note?: string | undefined",
+		`readonly "note"?: string | undefined`,
 		`readonly input: "ready" | 2 | null`,
 		"readonly input: readonly [number, number, ...unknown[]]",
 		"readonly output: readonly [number, number, ...unknown[]]",
@@ -83,10 +83,10 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	productOutputStart := strings.Index(product, "/** Response/output projection. */")
 	productInput := product[:productOutputStart]
 	productOutput := product[productOutputStart:]
-	if strings.Contains(productInput, "readonly id:") || !strings.Contains(productInput, "readonly secret:") {
+	if strings.Contains(productInput, `readonly "id":`) || !strings.Contains(productInput, `readonly "secret":`) {
 		t.Fatalf("input readOnly/writeOnly projection is wrong:\n%s", productInput)
 	}
-	if !strings.Contains(productOutput, "readonly id:") || strings.Contains(productOutput, "readonly secret:") {
+	if !strings.Contains(productOutput, `readonly "id":`) || strings.Contains(productOutput, `readonly "secret":`) {
 		t.Fatalf("output readOnly/writeOnly projection is wrong:\n%s", productOutput)
 	}
 	if strings.Contains(typesSource, "HiddenOnly") {
@@ -101,7 +101,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"@default \"legacy\"",
 		"@deprecated This OpenAPI value is deprecated.",
 		"Type catalog keyed by exact OpenAPI component schema names",
-		`readonly id: ComponentOutput<"Identifier">`,
+		`readonly "id": ComponentOutput<"Identifier">`,
 	} {
 		if !strings.Contains(typesSource, expected) {
 			t.Fatalf("type JSDoc missing %q:\n%s", expected, typesSource)
@@ -197,7 +197,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, `readonly "createProduct": Operations["createProduct"]["call"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "(productID: string): {") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
+	if !strings.Contains(clientSource, "(__sdkgen_getProductPathProductID_") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
 		t.Fatalf("instance resource builder missing:\n%s", clientSource)
 	}
 	for _, expected := range []string{
@@ -363,7 +363,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 		"readonly login: {",
 		`readonly post: Operations["login"]["call"]`,
 		"readonly sessions: {",
-		"(sessionID: string): {",
+		"(__sdkgen_revokeSessionPathSessionID_",
 		`readonly delete: Operations["revokeSession"]["resourceCall"]`,
 		"login: {\n      post: __sdkgen_",
 		"sessions: Object.assign(",

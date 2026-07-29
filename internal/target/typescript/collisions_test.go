@@ -55,27 +55,65 @@ func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *tes
 	}
 }
 
-func TestObjectTypeRejectsCollidingPropertyAliases(t *testing.T) {
-	_, err := objectType(&ir.Document{}, map[string]any{
+func TestObjectTypePreservesNormalizationEquivalentProperties(t *testing.T) {
+	value, err := objectType(&ir.Document{}, map[string]any{
 		"properties": map[string]any{
 			"foo-bar": map[string]any{"type": "string"},
 			"foo_bar": map[string]any{"type": "string"},
 		},
 	}, projectionInput)
-	if err == nil || !strings.Contains(err.Error(), "both generate TypeScript property") {
-		t.Fatalf("error = %v", err)
+	if err != nil || !strings.Contains(value, `readonly "foo-bar"?: string | undefined`) || !strings.Contains(value, `readonly "foo_bar"?: string | undefined`) {
+		t.Fatalf("type = %q, error = %v", value, err)
 	}
 }
 
-func TestOperationParametersRejectCollidingPropertyAliases(t *testing.T) {
-	_, err := operationParameters(&ir.Document{}, ir.Operation{Raw: map[string]any{
+func TestOperationParametersPreserveNormalizationEquivalentNames(t *testing.T) {
+	parameters, err := operationParameters(&ir.Document{}, ir.Operation{OperationID: "search", Raw: map[string]any{
 		"parameters": []any{
 			map[string]any{"name": "x-id", "in": "query", "schema": map[string]any{"type": "string"}},
 			map[string]any{"name": "x_id", "in": "query", "schema": map[string]any{"type": "string"}},
 		},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "both generate TypeScript property") {
-		t.Fatalf("error = %v", err)
+	if err != nil || len(parameters) != 2 || parameters[0].Property != parameters[0].Name || parameters[1].Property != parameters[1].Name || parameters[0].Binding == parameters[1].Binding {
+		t.Fatalf("parameters = %#v, error = %v", parameters, err)
+	}
+}
+
+func TestOperationParametersKeepSameExactNameSeparateByLocation(t *testing.T) {
+	raw := make([]any, 0, 5)
+	for _, location := range []string{"path", "query", "querystring", "header", "cookie"} {
+		raw = append(raw, map[string]any{
+			"name":     "id",
+			"in":       location,
+			"required": location == "path",
+			"schema":   map[string]any{"type": "string"},
+		})
+	}
+	parameters, err := operationParameters(&ir.Document{}, ir.Operation{
+		OperationID:        "getItem",
+		PathParameterOrder: []string{"id"},
+		Raw:                map[string]any{"parameters": raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parameters) != 5 {
+		t.Fatalf("parameter count = %d, want 5", len(parameters))
+	}
+	bindings := map[string]bool{}
+	locations := map[string]bool{}
+	for _, parameter := range parameters {
+		if parameter.Name != "id" || parameter.Property != "id" {
+			t.Fatalf("parameter identity changed: %#v", parameter)
+		}
+		if bindings[parameter.Binding] {
+			t.Fatalf("private binding %q was reused across locations", parameter.Binding)
+		}
+		bindings[parameter.Binding] = true
+		locations[parameter.Location] = true
+	}
+	if len(locations) != 5 {
+		t.Fatalf("locations = %#v", locations)
 	}
 }
 
@@ -168,7 +206,7 @@ func TestEmitQueryTypesKeepsOrdinaryLimitAndSortParameters(t *testing.T) {
 	if err := emitQueryTypes(&output, &ir.Document{}, operation, "SearchWidgets", parameters); err != nil {
 		t.Fatal(err)
 	}
-	for _, property := range []string{"readonly limit?: number | undefined", "readonly sort?: string | undefined"} {
+	for _, property := range []string{`readonly "limit"?: number | undefined`, `readonly "sort"?: string | undefined`} {
 		if !strings.Contains(output.String(), property) {
 			t.Fatalf("query input omitted %q:\n%s", property, output.String())
 		}
