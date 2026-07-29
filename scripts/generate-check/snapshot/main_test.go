@@ -41,6 +41,7 @@ func TestCountOperationsResolvesAnyLocalPathItemPointer(t *testing.T) {
 		"paths": map[string]any{
 			"/shared":     map[string]any{"additionalOperations": map[string]any{"Purge": map[string]any{}}},
 			"/referenced": map[string]any{"$ref": "#/paths/~1shared"},
+			"/encoded":    map[string]any{"$ref": "#%2Fpaths%2F~1shared"},
 		},
 		"webhooks": map[string]any{
 			"event": map[string]any{"$ref": "#/paths/~1shared"},
@@ -50,7 +51,7 @@ func TestCountOperationsResolvesAnyLocalPathItemPointer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 3; got != want {
+	if want := 4; got != want {
 		t.Fatalf("operation count = %d, want %d", got, want)
 	}
 }
@@ -63,6 +64,9 @@ func TestCountOperationsRejectsCyclicPathItems(t *testing.T) {
 		"mutual": {
 			"A": map[string]any{"$ref": "#/components/pathItems/B"},
 			"B": map[string]any{"$ref": "#/components/pathItems/A"},
+		},
+		"encoded": {
+			"A": map[string]any{"$ref": "#%2Fcomponents%2FpathItems%2FA"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

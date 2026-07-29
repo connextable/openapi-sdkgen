@@ -156,19 +156,29 @@ func ResolvePathItem(document, pathItem map[string]any) (map[string]any, error) 
 	return resolvePathItem(document, pathItem, make(map[string]bool))
 }
 
+// IsLocalPathItemReference reports whether a Path Item reference uses a local
+// JSON Pointer, including URI-fragment encoded pointers such as "#%2Fpaths".
+func IsLocalPathItemReference(reference string) (bool, error) {
+	if !strings.HasPrefix(reference, "#") {
+		return false, nil
+	}
+	pointer, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	if err != nil {
+		return false, fmt.Errorf("invalid path item reference %q: invalid URI fragment escape", reference)
+	}
+	return strings.HasPrefix(pointer, "/"), nil
+}
+
 func resolvePathItem(document, pathItem map[string]any, resolving map[string]bool) (map[string]any, error) {
 	reference, _ := pathItem["$ref"].(string)
 	if reference == "" {
 		return pathItem, nil
 	}
-	if !strings.HasPrefix(reference, "#") {
-		return nil, fmt.Errorf("external path item reference %q is not supported", reference)
-	}
-	pointer, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	local, err := IsLocalPathItemReference(reference)
 	if err != nil {
-		return nil, fmt.Errorf("invalid path item reference %q: invalid URI fragment escape", reference)
+		return nil, err
 	}
-	if !strings.HasPrefix(pointer, "/") {
+	if !local {
 		return nil, fmt.Errorf("external path item reference %q is not supported", reference)
 	}
 	if resolving[reference] {

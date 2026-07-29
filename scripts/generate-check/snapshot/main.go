@@ -161,8 +161,14 @@ func countOperations(root map[string]any) (int, error) {
 }
 
 func countPathItemOperations(root, pathItem map[string]any) (int, error) {
-	if reference, _ := pathItem["$ref"].(string); reference != "" && !strings.HasPrefix(reference, "#/") {
-		return countUnresolvedPathItemOperations(pathItem), nil
+	if reference, _ := pathItem["$ref"].(string); reference != "" {
+		local, err := ir.IsLocalPathItemReference(reference)
+		if err != nil {
+			return 0, err
+		}
+		if !local {
+			return countUnresolvedPathItemOperations(pathItem), nil
+		}
 	}
 	resolved, err := ir.ResolvePathItem(root, pathItem)
 	if err != nil {
