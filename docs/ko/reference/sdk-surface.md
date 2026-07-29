@@ -35,6 +35,7 @@ import {
   type Components,
   type ClientOptions,
   type Operations,
+  type Routes,
 } from "./generated/api";
 ```
 
@@ -44,13 +45,20 @@ import {
 
 `Components`는 모든 component schema key와 입출력 projection을 보존합니다.
 `Enums`는 component enum 값을 정확한 readonly runtime tuple로 제공합니다.
-`Operations`는 모든 `operationId`와 `input`, `resourceInput`, `options`,
-`output`, `error`, `rawResponse`, `call`, `resourceCall`, `pagination` slot의
-관계를 보존합니다.
+
+`Routes`는 모든 operation을 담는 canonical catalog입니다. 모든 non-hidden operation을
+대문자 HTTP method와 정확한 OpenAPI path 조합으로 key를 만들기 때문에 `operationId`가
+없는 문서도 빠짐없이 표현합니다. 각 route는 `input`, `resourceInput`, `options`,
+`output`, `error`, `rawResponse`, `call`, `resourceCall`, `pagination`, `links`,
+`stream` slot의 관계를 보존합니다.
+
+`Operations`는 명시적 `operationId`가 있는 operation만 제공하는 compatibility alias입니다.
+각 항목은 대응하는 `Routes` 항목을 가리킵니다.
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
+type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
 type GetPetError = Operations["get-pet"]["error"];
 const firstCurrency = Enums["Currency"][0];
@@ -63,11 +71,14 @@ Bracket access를 사용하면 `"get-pet"`과 `"get_pet"` 같은 이름도 구�
 
 operation path에서 유도한 읽기 쉬운 resource-oriented 호출입니다.
 
-### `$operations`
+### `$routes`와 `$operations`
 
-모든 visible OpenAPI `operationId`를 정확한 이름으로 빠짐없이 제공합니다.
-예: `api.$operations["get-pet"](...)`. Path에서 유도한 resource tree는 편의 API로
-계속 유지하며, 그 안의 충돌은 `$operations` 항목을 제거하지 않고 결정적으로 해결합니다.
+`api.$routes["GET /pets"](...)`는 모든 non-hidden operation을 exact route key로 제공합니다.
+`api.$operations["get-pet"](...)`는 명시적 `operationId`가 있을 때만 생기는 exact alias입니다.
+`operationId`가 없는 operation은 `$routes`에만 존재합니다.
+
+Path에서 유도한 resource tree는 편의 API로 계속 유지합니다. 그 안의 충돌은
+`$routes`나 `$operations` 항목을 제거하지 않고 결정적으로 해결합니다.
 
 ### `$links`
 

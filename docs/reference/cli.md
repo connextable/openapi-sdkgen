@@ -63,6 +63,14 @@ These options do not disable TLS verification.
 - `--target typescript` — The active source-mode target.
 - `--output <directory>` — A fresh application-source directory for generated artifacts.
 
+## Diagnostics
+
+`generate` performs preflight validation and reports all discoverable warnings
+and errors by phase and source. There is no separate `validate` command and no
+validation-only flag. Warnings still publish output; errors leave the output
+unchanged. See [Generate an SDK](../guide/generate.md) for CI usage and
+[SDK extensions](./extensions.md) for the optional contracts it validates.
+
 ## Input sources
 
 `--input` names the root document. It is not a `$ref`, so reading an HTTP(S)

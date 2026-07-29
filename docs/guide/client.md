@@ -25,10 +25,15 @@ const created = await api.todos.create({
 const page = await api.$operations.listTodos({
   query: { limit: 50 },
 });
+
+const exact = await api.$routes["GET /todos"]({
+  query: { limit: 50 },
+});
 ```
 
-Use resource calls for application code and `$operations` when an exact
-`operationId` from an
+Use resource calls for application code. `$routes` always exposes every
+non-hidden operation by exact method and path. `$operations` is an alias when
+an explicit `operationId` from an
 [Operation Object](https://spec.openapis.org/oas/v3.2.0.html#operation-object)
 is clearer or does not map cleanly to a resource name.
 

@@ -39,6 +39,7 @@ import {
   type Components,
   type ClientOptions,
   type Operations,
+  type Routes,
 } from "./generated/api";
 ```
 
@@ -48,13 +49,21 @@ import {
 
 `Components` preserves every component schema key and exposes its directional
 projections. `Enums` exposes exact readonly runtime tuples for component enum
-values. `Operations` preserves every `operationId` and correlates its `input`,
+values.
+
+`Routes` is the canonical complete operation catalog. Every non-hidden
+operation is keyed by its uppercase HTTP method and exact OpenAPI path, so it
+also covers documents without `operationId`. Each route correlates `input`,
 `resourceInput`, `options`, `output`, `error`, `rawResponse`, `call`,
-`resourceCall`, and `pagination` slots:
+`resourceCall`, `pagination`, `links`, and `stream`.
+
+`Operations` contains compatibility aliases only for operations with an
+explicit `operationId`; each entry points to the matching `Routes` entry:
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
+type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
 type GetPetError = Operations["get-pet"]["error"];
 const firstCurrency = Enums["Currency"][0];
@@ -67,12 +76,15 @@ Bracket access keeps names such as `"get-pet"` and `"get_pet"` distinct.
 
 Ergonomic resource-oriented calls derived from operation paths.
 
-### `$operations`
+### `$routes` and `$operations`
 
-Every visible OpenAPI `operationId`, exactly named and complete. For example,
-`api.$operations["get-pet"](...)`. The path-derived resource tree remains an
-ergonomic convenience; collisions there are resolved deterministically without
-removing anything from `$operations`.
+`api.$routes["GET /pets"](...)` exposes every non-hidden operation through its
+exact route key. `api.$operations["get-pet"](...)` is the exact alias for an
+explicit `operationId`; operations without one appear only in `$routes`.
+
+The path-derived resource tree remains an ergonomic convenience. Collisions
+there are resolved deterministically without removing anything from `$routes`
+or `$operations`.
 
 ### `$links`
 

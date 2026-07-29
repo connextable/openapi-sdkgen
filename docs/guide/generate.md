@@ -46,6 +46,40 @@ the client-only root entry point.
 For most applications, generation ends here: rerun the same command whenever
 the OpenAPI document changes and commit the generated source with the change.
 
+## Preflight diagnostics
+
+`generate` validates the standard OpenAPI baseline and any recognized
+[SDK extensions](../reference/extensions.md) before publishing files. There is
+no separate `validate` command.
+
+A diagnostic report starts with total error and warning counts, then groups
+findings by pipeline phase and source location. Each finding includes a stable
+diagnostic code, an RFC 6901 pointer when available, and an actionable message.
+If a prerequisite fails, the report also names the phases that could not run.
+Independent findings are accumulated instead of stopping at the first one.
+
+Warnings do not prevent generation. Any error prevents publication: a missing
+output directory remains missing, and an existing output directory remains
+byte-for-byte unchanged. Unexpected internal failures use the same report
+without exposing credentials or unbounded cause text.
+
+## CI
+
+Run the same `generate` command in CI and treat its exit status as the gate.
+Generate into a temporary directory when CI only needs validation; compare or
+copy that directory when generated source is checked in.
+
+```sh
+output="$(mktemp -d)/api"
+openapi-sdkgen generate \
+  --input ./openapi.json \
+  --target typescript \
+  --output "$output"
+```
+
+This checks the document and every requested target/add-on in one pass, so CI
+cannot validate a different configuration from the one it publishes.
+
 ::: details Advanced: locked remote references
 
 Remote [Reference Object](https://spec.openapis.org/oas/v3.2.0.html#reference-object)

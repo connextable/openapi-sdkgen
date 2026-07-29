@@ -88,7 +88,8 @@ const page = await api.todos.list({
 });
 ```
 
-resource 호출은 애플리케이션 코드에서 읽기 쉬운 API를 제공합니다. 모든 operation은 정확한
-`operationId` 이름으로 `api.$operations`에서도 접근할 수 있습니다.
+resource 호출은 애플리케이션 코드에서 읽기 쉬운 API를 제공합니다. 모든 non-hidden operation은
+정확한 method와 path로 `api.$routes`에서 접근할 수 있고, 명시적 `operationId`가 있으면 대응하는
+`api.$operations` alias도 생성됩니다.
 
 다음 단계로 [SDK 생성](./generate.md)과 [클라이언트 사용](./client.md)을 확인하세요.

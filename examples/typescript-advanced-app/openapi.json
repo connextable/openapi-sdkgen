@@ -24,11 +24,7 @@
             }
           }
         },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-pagination": "cursor",
-        "x-sdk-visibility": "public"
+        "x-pagination": "cursor"
       },
       "post": {
         "operationId": "createWidget",
@@ -77,11 +73,7 @@
               }
             }
           }
-        },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public"
+        }
       }
     },
     "/customers/{customerID}/widgets/{widgetID}": {
@@ -111,11 +103,7 @@
               }
             }
           }
-        },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public"
+        }
       }
     },
     "/uploads": {
@@ -130,11 +118,7 @@
             }
           }
         },
-        "responses": { "204": { "description": "Uploaded." } },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public"
+        "responses": { "204": { "description": "Uploaded." } }
       }
     },
     "/slow": {
@@ -154,11 +138,7 @@
               }
             }
           }
-        },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public"
+        }
       }
     }
   },

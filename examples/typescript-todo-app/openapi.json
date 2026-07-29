@@ -11,10 +11,6 @@
         "operationId": "listTodos",
         "summary": "List todos.",
         "security": [],
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public",
         "parameters": [
           {
             "name": "completed",
@@ -46,10 +42,6 @@
         "operationId": "createTodo",
         "summary": "Create a todo.",
         "security": [],
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-sdk-visibility": "public",
         "requestBody": {
           "required": true,
           "content": {

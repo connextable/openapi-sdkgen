@@ -7,14 +7,15 @@
 [OpenAPI 3.2 Object reference](https://spec.openapis.org/oas/v3.2.0.html)를 가리킵니다. generator는
 각 문서에 선언된 3.0, 3.1, 3.2 버전에 맞춰 해석하므로, 버전 전용 기능은 해당
 [3.0](https://spec.openapis.org/oas/v3.0.4.html) 또는
-[3.1](https://spec.openapis.org/oas/v3.1.1.html) 명세도 함께 확인하세요.
+[3.1](https://spec.openapis.org/oas/v3.1.1.html) 명세도 함께 확인하세요. 표준 OpenAPI가 완전한
+기본 계약이며, 선택적인 [SDK extension](./extensions.md)은 명시적으로 요청한 편의 기능만 추가합니다.
 
 ## 애플리케이션에서 사용할 수 있는 기능
 
 ### 표준 요청과 응답 형태
 
-HTTP operation, parameter, JSON/text/binary/form/multipart body, typed response를 사용하면 resource 호출과
-정확한 `operationId` 호출을 갖는 TypeScript 클라이언트가 생성됩니다.
+HTTP operation, parameter, JSON/text/binary/form/multipart body, typed response를 사용하면 exact route 호출,
+resource 호출, 명시적으로 선언한 `operationId` alias를 갖는 TypeScript 클라이언트가 생성됩니다.
 
 ### Server, security, Link, stream
 
@@ -43,4 +44,4 @@ runtime API를 만들어 내는 대신 `metadata.js`에서만 의도적으로 �
 - [Capability inventory](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-inventory.md): 그룹별 기능 목록입니다.
 - [Capability matrix](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-matrix.md): 버전별 상태와 test 근거를 제공합니다.
 - [Feature manifest](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-manifest.json): machine-readable source of truth입니다.
-- [Implementation roadmap](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-sdk-implementation-roadmap.md): architecture와 구현 계약을 설명합니다.
+- [Implementation roadmap](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-sdkgen-implementation-roadmap.md): architecture와 구현 계약을 설명합니다.

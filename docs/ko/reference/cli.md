@@ -62,6 +62,14 @@ TLS 검증을 끄지 않습니다.
 - `--target typescript` — 현재 지원하는 source-mode target입니다.
 - `--output <directory>` — 생성 artifact를 둘 비어 있는 애플리케이션 소스 디렉터리입니다.
 
+## Diagnostic
+
+`generate`가 사전 검증을 수행하고 발견 가능한 warning과 error를 phase/source별로 출력합니다.
+별도 `validate` command나 validation-only flag는 없습니다. Warning만 있으면 output을 게시하고,
+error가 있으면 output을 변경하지 않습니다. CI 사용법은
+[SDK 생성](../guide/generate.md), 선택적인 검증 계약은
+[SDK extension](./extensions.md)을 참고하세요.
+
 ## 입력 source
 
 `--input`은 루트 문서를 지정합니다. `$ref`가 아니므로 HTTP(S) 입력을 읽는 데

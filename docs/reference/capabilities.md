@@ -10,15 +10,16 @@ The generator still interprets each document according to its declared 3.0,
 3.1, or 3.2 version; use the matching
 [3.0](https://spec.openapis.org/oas/v3.0.4.html) or
 [3.1](https://spec.openapis.org/oas/v3.1.1.html) specification when a feature
-is version-specific.
+is version-specific. Standard OpenAPI is the complete baseline; the optional
+[SDK extensions](./extensions.md) add only explicitly requested conveniences.
 
 ## What works in an application
 
 ### Standard request and response shapes
 
 HTTP operations, parameters, JSON/text/binary/form/multipart bodies, and typed
-responses generate a TypeScript client with resource calls and exact
-`operationId` calls.
+responses generate a TypeScript client with exact route calls, resource calls,
+and aliases for explicitly declared `operationId` values.
 
 ### Servers, security, Links, and streams
 
@@ -51,4 +52,4 @@ Large tables scroll horizontally within the page on narrow layouts.
 - [Capability inventory](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-inventory.md): grouped feature list.
 - [Capability matrix](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-matrix.md): version-specific status and test evidence.
 - [Feature manifest](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-manifest.json): machine-readable source of truth.
-- [Implementation roadmap](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-sdk-implementation-roadmap.md): architecture and implementation contract.
+- [Implementation roadmap](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-sdkgen-implementation-roadmap.md): architecture and implementation contract.

@@ -1,4 +1,4 @@
-# OpenAPI SDK Implementation Roadmap
+# openapi-sdkgen Implementation Roadmap
 
 This document records the planned path from the current capability matrix to
 full OpenAPI 3.0.x, 3.1.x, and 3.2.x SDK generation. It complements the

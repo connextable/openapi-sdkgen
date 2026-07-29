@@ -92,7 +92,8 @@ const page = await api.todos.list({
 });
 ```
 
-Named resources offer the ergonomic API. Every operation also remains available
-by its exact `operationId` through `api.$operations`.
+Named resources offer the ergonomic API. Every non-hidden operation also
+remains available by exact method and path through `api.$routes`; an explicitly
+declared `operationId` adds the matching `api.$operations` alias.
 
 Next: [generate an SDK](./generate.md) or [use the client](./client.md).

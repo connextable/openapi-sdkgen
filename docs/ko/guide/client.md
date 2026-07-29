@@ -25,11 +25,17 @@ const created = await api.todos.create({
 const page = await api.$operations.listTodos({
   query: { limit: 50 },
 });
+
+const exact = await api.$routes["GET /todos"]({
+  query: { limit: 50 },
+});
 ```
 
-애플리케이션 코드에서는 보통 resource 호출을 사용하세요.
-[Operation Object](https://spec.openapis.org/oas/v3.2.0.html#operation-object)의 정확한 `operationId`가 더
-분명하거나 resource 이름으로 자연스럽게 매핑되지 않을 때는 `$operations`를 사용하면 됩니다.
+애플리케이션 코드에서는 보통 resource 호출을 사용하세요. `$routes`는 모든 non-hidden operation을
+정확한 method와 path로 제공합니다.
+[Operation Object](https://spec.openapis.org/oas/v3.2.0.html#operation-object)에 명시한 정확한
+`operationId`가 더 분명하거나 resource 이름으로 자연스럽게 매핑되지 않을 때는 `$operations`
+alias를 사용하면 됩니다.
 
 ## 미디어 선택과 raw response
 
