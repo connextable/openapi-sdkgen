@@ -120,6 +120,13 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 	if !strings.Contains(string(source), `"foo-bar" | "foo_bar"`) {
 		t.Fatalf("enum values missing:\n%s", source)
 	}
+	if !strings.Contains(string(source), `["Status", __sdkgen_status_`) ||
+		!strings.Contains(string(source), `readonly "Status": typeof __sdkgen_status_`) {
+		t.Fatalf("exact enum catalog entry missing:\n%s", source)
+	}
+	if strings.Contains(string(source), "FOO_BAR:") {
+		t.Fatalf("normalized enum member leaked:\n%s", source)
+	}
 }
 
 func TestBuildResourceTreeRejectsOperationAndChildNameCollision(t *testing.T) {

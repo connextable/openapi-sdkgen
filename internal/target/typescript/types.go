@@ -72,7 +72,31 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 	output.WriteString("/** Input projection for an exact OpenAPI component schema name. */\n")
 	output.WriteString("export type ComponentInput<Name extends keyof Components> = Components[Name][\"input\"]\n")
 	output.WriteString("/** Output projection for an exact OpenAPI component schema name. */\n")
-	output.WriteString("export type ComponentOutput<Name extends keyof Components> = Components[Name][\"output\"]\n")
+	output.WriteString("export type ComponentOutput<Name extends keyof Components> = Components[Name][\"output\"]\n\n")
+
+	enumBindings := make([]runtimeProperty, 0)
+	enumNames := make([]string, 0)
+	for _, schemaName := range names {
+		values, exists := document.ComponentSchemas[schemaName]["enum"].([]any)
+		if !exists {
+			continue
+		}
+		rendered, err := runtimeJSONExpression(values)
+		if err != nil {
+			return nil, fmt.Errorf("component %s enum: %w", schemaName, err)
+		}
+		binding := stablePrivateIdentifier("component-enum", schemaName)
+		fmt.Fprintf(&output, "const %s = %s as const\n", binding, rendered)
+		enumBindings = append(enumBindings, runtimeProperty{key: schemaName, value: binding})
+		enumNames = append(enumNames, schemaName)
+	}
+	output.WriteString("/** Runtime enum values keyed by exact OpenAPI component schema names. */\n")
+	fmt.Fprintf(&output, "export const Enums = %s as {\n", runtimeObjectExpression(enumBindings))
+	for index, schemaName := range enumNames {
+		fmt.Fprintf(&output, "  /** Values declared by OpenAPI component `%s`. */\n", sanitizeComment(schemaName))
+		fmt.Fprintf(&output, "  readonly %s: typeof %s\n", quoteTS(schemaName), enumBindings[index].value)
+	}
+	output.WriteString("}\n")
 	return output.Bytes(), nil
 }
 
