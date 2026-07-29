@@ -55,15 +55,15 @@ type CompileOptions struct {
 	// extensions. A manifest is never discovered implicitly.
 	SchemaExtensionManifests []string
 	// HTTPHeaderEnv maps outbound HTTP request header names to environment
-	// variable names. Each value has the form Header-Name=ENV_VAR and is only
-	// valid for an HTTP(S) --input URL.
+	// variable names. Each value has the form Header-Name=ENV_VAR and is valid
+	// for an HTTP(S) input or stdin with an HTTP(S) InputBase.
 	HTTPHeaderEnv []string
 	// TLSClientCert and TLSClientKey provide an optional client certificate for
-	// an HTTPS --input URL. They must be supplied together.
+	// an HTTPS input or stdin with an HTTPS InputBase. They must be supplied together.
 	TLSClientCert string
 	TLSClientKey  string
 	// TLSCAFile contains additional PEM certificate authorities trusted for an
-	// HTTPS --input URL.
+	// HTTPS input or stdin with an HTTPS InputBase.
 	TLSCAFile string
 	// HTTPWarningWriter receives non-secret diagnostics about HTTP input
 	// transport risks. A nil writer disables diagnostics for library callers.

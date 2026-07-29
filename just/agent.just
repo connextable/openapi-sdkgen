@@ -35,8 +35,9 @@ mod-verify:
 generate input output target='typescript':
     ./scripts/agent/generate {{quote(input)}} {{quote(output)}} {{quote(target)}}
 
+[positional-arguments]
 generate-check input target='typescript' *args:
-    ./scripts/agent/generate-check {{quote(input)}} {{quote(target)}} {{args}}
+    ./scripts/agent/generate-check "$@"
 
 generate-check-test:
     ./scripts/agent/generate-check-test

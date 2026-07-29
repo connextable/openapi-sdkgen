@@ -37,9 +37,14 @@ agent_run() {
 
   if [[ "${VERBOSE:-0}" == "1" ]]; then
     echo "run $label"
-    "$@"
-    echo "ok $label"
-    return
+    if "$@"; then
+      echo "ok $label"
+      return
+    else
+      local status=$?
+      echo "failed $label"
+      return "$status"
+    fi
   fi
 
   if "$@" >"$log_file" 2>&1; then

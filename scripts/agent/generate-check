@@ -27,11 +27,11 @@ snapshot_options=()
 for ((index = 0; index < ${#generator_options[@]}; index++)); do
   argument="${generator_options[index]}"
   case "$argument" in
-    --input|--input=*|--input-base|--input-base=*|--output|--output=*|--target|--target=*)
+    --input|-input|--input=*|-input=*|--input-base|-input-base|--input-base=*|-input-base=*|--output|-output|--output=*|-output=*|--target|-target|--target=*|-target=*)
       echo "generate-check owns $argument and does not allow overriding it" >&2
       exit 2
       ;;
-    --http-header-env|--tls-client-cert|--tls-client-key|--tls-ca-file)
+    --http-header-env|-http-header-env|--tls-client-cert|-tls-client-cert|--tls-client-key|-tls-client-key|--tls-ca-file|-tls-ca-file)
       if ((index + 1 >= ${#generator_options[@]})); then
         echo "$argument requires a value" >&2
         exit 2
@@ -39,7 +39,7 @@ for ((index = 0; index < ${#generator_options[@]}; index++)); do
       snapshot_options+=("$argument" "${generator_options[index + 1]}")
       ((index += 1))
       ;;
-    --http-header-env=*|--tls-client-cert=*|--tls-client-key=*|--tls-ca-file=*|--offline)
+    --http-header-env=*|-http-header-env=*|--tls-client-cert=*|-tls-client-cert=*|--tls-client-key=*|-tls-client-key=*|--tls-ca-file=*|-tls-ca-file=*|--offline|-offline|--offline=*|-offline=*)
       snapshot_options+=("$argument")
       ;;
   esac

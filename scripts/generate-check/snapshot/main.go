@@ -145,12 +145,45 @@ func countOperations(root map[string]any) int {
 		items, _ := root[field].(map[string]any)
 		for _, value := range items {
 			pathItem, _ := value.(map[string]any)
-			for method := range pathItem {
-				switch strings.ToLower(method) {
-				case "get", "put", "post", "delete", "options", "head", "patch", "trace", "query":
-					total++
+			total += countPathItemOperations(root, pathItem, make(map[string]bool))
+		}
+	}
+	return total
+}
+
+func countPathItemOperations(root, pathItem map[string]any, resolving map[string]bool) int {
+	if reference, _ := pathItem["$ref"].(string); strings.HasPrefix(reference, "#/components/pathItems/") && !resolving[reference] {
+		resolving[reference] = true
+		components, _ := root["components"].(map[string]any)
+		pathItems, _ := components["pathItems"].(map[string]any)
+		token := strings.TrimPrefix(reference, "#/components/pathItems/")
+		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+		if target, ok := pathItems[token].(map[string]any); ok {
+			merged := make(map[string]any, len(target)+len(pathItem))
+			for key, value := range target {
+				merged[key] = value
+			}
+			for key, value := range pathItem {
+				if key != "$ref" {
+					merged[key] = value
 				}
 			}
+			delete(resolving, reference)
+			return countPathItemOperations(root, merged, resolving)
+		}
+		delete(resolving, reference)
+	}
+	total := 0
+	for method := range pathItem {
+		switch strings.ToLower(method) {
+		case "get", "put", "post", "delete", "options", "head", "patch", "trace", "query":
+			total++
+		}
+	}
+	additional, _ := pathItem["additionalOperations"].(map[string]any)
+	for _, value := range additional {
+		if _, ok := value.(map[string]any); ok {
+			total++
 		}
 	}
 	return total
