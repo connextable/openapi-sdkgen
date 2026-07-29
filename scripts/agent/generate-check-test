@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/openapi-sdkgen-generate-check-test.XXXXXX")"
+test_tmp="$test_root/tmp"
+mock_bin="$test_root/bin"
+mkdir -p "$test_tmp" "$mock_bin"
+server_pid=""
+
+cleanup() {
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+  rm -rf "$test_root"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "generate-check test: $*" >&2
+  exit 1
+}
+
+assert_contains() {
+  local value="$1"
+  local expected="$2"
+  if [[ "$value" != *"$expected"* ]]; then
+    printf '%s\n' "$value" >&2
+    fail "expected output to contain: $expected"
+  fi
+}
+
+assert_clean_temporary_root() {
+  if find "$test_tmp" -maxdepth 1 -name 'openapi-sdkgen-generate-check.*' -print | grep -q .; then
+    find "$test_tmp" -maxdepth 1 -name 'openapi-sdkgen-generate-check.*' -print >&2
+    fail "generate-check temporary directory was not removed"
+  fi
+}
+
+input="$test_root/openapi.json"
+cat >"$input" <<'EOF'
+{
+  "openapi": "3.2.0",
+  "info": {"title": "Generate Check", "version": "1.0.0"},
+  "paths": {"/items": {"get": {"operationId": "list-items", "responses": {"204": {"description": "OK"}}}}},
+  "components": {"schemas": {"Item": {"type": "object", "properties": {"id": {"type": "string"}}}}}
+}
+EOF
+
+agent_run "build generate-check CLI" go build -o "$test_root/openapi-sdkgen" ./cmd/openapi-sdkgen
+agent_run "build generate-check snapshot helper" go build -o "$test_root/snapshot" ./scripts/generate-check/snapshot
+agent_run "build generate-check HTTP fixture" go build -o "$test_root/testserver" ./scripts/generate-check/testserver
+
+cat >"$mock_bin/acquire" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+input=""
+data_output=""
+base_output=""
+report_output=""
+while (($# > 0)); do
+  case "$1" in
+    --input) input="$2"; shift 2 ;;
+    --data-output) data_output="$2"; shift 2 ;;
+    --base-output) base_output="$2"; shift 2 ;;
+    --report-output) report_output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cp "$input" "$data_output"
+printf '%s' "$input" >"$base_output"
+printf '{"input":"%s","sha256":"mock","title":"Generate Check","version":"1.0.0","openapiVersion":"3.2.0","operationCount":1,"componentCount":1}\n' "$input" >"$report_output"
+if [[ "${GENERATE_CHECK_TEST_MUTATE_INPUT:-0}" == "1" ]]; then
+  printf '{"openapi":"3.2.0","info":{"title":"Changed","version":"2"},"paths":{}}\n' >"$input"
+fi
+EOF
+
+cat >"$mock_bin/generator" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"${GENERATE_CHECK_TEST_GENERATOR_ARGS:?}"
+snapshot="$(mktemp)"
+trap 'rm -f "$snapshot"' EXIT
+cat >"$snapshot"
+cp "$snapshot" "${GENERATE_CHECK_TEST_GENERATOR_STDIN:?}"
+if [[ "${GENERATE_CHECK_TEST_GENERATOR_STATUS:-0}" != "0" ]]; then
+  exit "$GENERATE_CHECK_TEST_GENERATOR_STATUS"
+fi
+output=""
+while (($# > 0)); do
+  if [[ "$1" == "--output" ]]; then output="$2"; shift 2; continue; fi
+  shift
+done
+mkdir -p "$output"
+if [[ "${GENERATE_CHECK_TEST_MISSING_SLOT:-0}" == "1" ]]; then
+  pagination=""
+else
+  pagination='readonly pagination: never;'
+fi
+cat >"$output/index.ts" <<EOF_TS
+export interface Components {
+  readonly "Item": { readonly input: unknown; readonly output: unknown }
+}
+export interface Operations {
+  readonly "list-items": {
+    readonly input: unknown
+    readonly resourceInput: unknown
+    readonly options: unknown
+    readonly output: unknown
+    readonly error: unknown
+    readonly rawResponse: unknown
+    readonly call: { readonly raw: unknown }
+    readonly resourceCall: unknown
+    $pagination
+  }
+}
+export interface Client {
+  readonly \$operations: { readonly "list-items": Operations["list-items"]["call"] }
+}
+export declare function createClient(options?: unknown): Client
+EOF_TS
+EOF
+
+cat >"$mock_bin/tsc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"${GENERATE_CHECK_TEST_TSC_ARGS:?}"
+exit "${GENERATE_CHECK_TEST_TSC_STATUS:-0}"
+EOF
+chmod 755 "$mock_bin/acquire" "$mock_bin/generator" "$mock_bin/tsc"
+
+real_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$test_root/snapshot" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$test_root/openapi-sdkgen" \
+  "$ROOT/scripts/agent/generate-check" "$input"
+)"
+assert_contains "$real_output" '"title": "Generate Check"'
+assert_contains "$real_output" "generation exit: 0"
+assert_contains "$real_output" "typecheck exit: 0"
+assert_clean_temporary_root
+
+real_server_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$test_root/snapshot" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$test_root/openapi-sdkgen" \
+  "$ROOT/scripts/agent/generate-check" "$input" typescript -- --with server
+)"
+assert_contains "$real_server_output" "generation exit: 0"
+assert_contains "$real_server_output" "typecheck exit: 0"
+assert_clean_temporary_root
+
+original="$test_root/original.json"
+mutable="$test_root/mutable.json"
+cp "$input" "$original"
+cp "$input" "$mutable"
+generator_args="$test_root/generator.args"
+generator_stdin="$test_root/generator.stdin"
+tsc_args="$test_root/tsc.args"
+forward_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$mock_bin/acquire" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$mock_bin/generator" \
+  SDKGEN_GENERATE_CHECK_TSC_BIN="$mock_bin/tsc" \
+  GENERATE_CHECK_TEST_MUTATE_INPUT=1 \
+  GENERATE_CHECK_TEST_GENERATOR_ARGS="$generator_args" \
+  GENERATE_CHECK_TEST_GENERATOR_STDIN="$generator_stdin" \
+  GENERATE_CHECK_TEST_TSC_ARGS="$tsc_args" \
+  "$ROOT/scripts/agent/generate-check" "$mutable" custom-target -- --with server --schema-extension extension.json
+)"
+assert_contains "$(cat "$generator_args")" "--target custom-target"
+assert_contains "$(cat "$generator_args")" "--with server"
+assert_contains "$(cat "$generator_args")" "--schema-extension extension.json"
+assert_contains "$(cat "$tsc_args")" "--project"
+cmp "$original" "$generator_stdin" || fail "generation did not consume the acquired immutable snapshot"
+assert_contains "$forward_output" "typecheck exit: 0"
+assert_clean_temporary_root
+
+for owned in --input --input-base --output --target; do
+  set +e
+  owned_output="$(
+    TMPDIR="$test_tmp" \
+    SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+    "$ROOT/scripts/agent/generate-check" "$input" typescript -- "$owned" unexpected 2>&1
+  )"
+  owned_status=$?
+  set -e
+  if ((owned_status != 2)); then
+    fail "$owned override exit = $owned_status, want 2"
+  fi
+  assert_contains "$owned_output" "does not allow overriding"
+  assert_clean_temporary_root
+done
+
+set +e
+generation_failure="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$mock_bin/acquire" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$mock_bin/generator" \
+  SDKGEN_GENERATE_CHECK_TSC_BIN="$mock_bin/tsc" \
+  GENERATE_CHECK_TEST_GENERATOR_STATUS=23 \
+  GENERATE_CHECK_TEST_GENERATOR_ARGS="$generator_args" \
+  GENERATE_CHECK_TEST_GENERATOR_STDIN="$generator_stdin" \
+  GENERATE_CHECK_TEST_TSC_ARGS="$tsc_args" \
+  "$ROOT/scripts/agent/generate-check" "$input" 2>&1
+)"
+generation_status=$?
+set -e
+if ((generation_status != 23)); then
+  fail "generation failure exit = $generation_status, want 23"
+fi
+assert_contains "$generation_failure" "generation exit: 23"
+assert_contains "$generation_failure" "typecheck exit: not-run"
+assert_clean_temporary_root
+
+set +e
+typecheck_failure="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$mock_bin/acquire" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$mock_bin/generator" \
+  SDKGEN_GENERATE_CHECK_TSC_BIN="$mock_bin/tsc" \
+  GENERATE_CHECK_TEST_GENERATOR_ARGS="$generator_args" \
+  GENERATE_CHECK_TEST_GENERATOR_STDIN="$generator_stdin" \
+  GENERATE_CHECK_TEST_TSC_ARGS="$tsc_args" \
+  GENERATE_CHECK_TEST_TSC_STATUS=29 \
+  "$ROOT/scripts/agent/generate-check" "$input" 2>&1
+)"
+typecheck_status=$?
+set -e
+if ((typecheck_status != 29)); then
+  fail "typecheck failure exit = $typecheck_status, want 29"
+fi
+assert_contains "$typecheck_failure" "typecheck exit: 29"
+assert_clean_temporary_root
+
+set +e
+missing_slot="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$mock_bin/acquire" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$mock_bin/generator" \
+  GENERATE_CHECK_TEST_GENERATOR_ARGS="$generator_args" \
+  GENERATE_CHECK_TEST_GENERATOR_STDIN="$generator_stdin" \
+  GENERATE_CHECK_TEST_MISSING_SLOT=1 \
+  "$ROOT/scripts/agent/generate-check" "$input" 2>&1
+)"
+missing_slot_status=$?
+set -e
+if ((missing_slot_status == 0)); then
+  fail "strict consumer probe accepted a missing pagination slot"
+fi
+assert_contains "$missing_slot" "Property 'pagination' does not exist"
+assert_clean_temporary_root
+
+server_url_file="$test_root/server.url"
+server_count_file="$test_root/server.count"
+"$test_root/testserver" --input "$original" --url-output "$server_url_file" --count-output "$server_count_file" &
+server_pid=$!
+for _ in $(seq 1 100); do
+  [[ -s "$server_url_file" ]] && break
+  sleep 0.01
+done
+[[ -s "$server_url_file" ]] || fail "local HTTP fixture did not start"
+server_url="$(cat "$server_url_file")"
+http_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$test_root/snapshot" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$mock_bin/generator" \
+  SDKGEN_GENERATE_CHECK_TSC_BIN="$mock_bin/tsc" \
+  GENERATE_CHECK_TEST_GENERATOR_ARGS="$generator_args" \
+  GENERATE_CHECK_TEST_GENERATOR_STDIN="$generator_stdin" \
+  GENERATE_CHECK_TEST_TSC_ARGS="$tsc_args" \
+  "$ROOT/scripts/agent/generate-check" "$server_url"
+)"
+if [[ "$(cat "$server_count_file")" != "1" ]]; then
+  fail "HTTP root fetch count = $(cat "$server_count_file"), want 1"
+fi
+reported_digest="$(printf '%s\n' "$http_output" | sed -n 's/.*"sha256": "\([^"]*\)".*/\1/p')"
+captured_digest="$(shasum -a 256 "$generator_stdin" | awk '{print $1}')"
+if [[ "$reported_digest" != "$captured_digest" ]]; then
+  fail "reported digest $reported_digest != generated snapshot digest $captured_digest"
+fi
+assert_clean_temporary_root
+
+grep -F 'ts_node node "$TYPESCRIPT_ROOT/node_modules/typescript/lib/tsc.js"' "$ROOT/scripts/agent/generate-check" >/dev/null ||
+  fail "generate-check does not invoke the pinned TypeScript compiler"
+
+agent_note "ok generate-check test"

@@ -18,9 +18,12 @@ const (
 	inputTimeout  = 30 * time.Second
 )
 
+var readInputFile = os.ReadFile
+
 type inputSource struct {
 	data       []byte
 	display    string
+	effective  string
 	filePath   string
 	fileBase   string
 	remoteBase *url.URL
@@ -41,9 +44,6 @@ func loadInputSource(input string, options CompileOptions) (inputSource, error) 
 		return inputSource{}, errors.New("OpenAPI input is empty")
 	}
 	if input == "-" {
-		if err := validateNonHTTPInputOptions(options); err != nil {
-			return inputSource{}, err
-		}
 		reader := options.InputReader
 		if reader == nil {
 			reader = os.Stdin
@@ -54,12 +54,30 @@ func loadInputSource(input string, options CompileOptions) (inputSource, error) 
 		}
 		source := inputSource{data: data, display: "standard input", stdin: true}
 		if options.InputBase == "" {
+			if err := validateNonHTTPInputOptions(options); err != nil {
+				return inputSource{}, err
+			}
 			return source, nil
 		}
 		base, err := parseInputBase(options.InputBase)
 		if err != nil {
 			return inputSource{}, err
 		}
+		if base.remoteBase == nil {
+			if err := validateNonHTTPInputOptions(options); err != nil {
+				return inputSource{}, err
+			}
+		} else {
+			config, err := configureHTTPInput(options)
+			if err != nil {
+				return inputSource{}, err
+			}
+			if err := validateHTTPInputTransport(base.effective, base.remoteBase, config); err != nil {
+				return inputSource{}, err
+			}
+			source.httpConfig = config
+		}
+		source.effective = base.effective
 		source.fileBase = base.fileBase
 		source.remoteBase = base.remoteBase
 		return source, nil
@@ -103,14 +121,14 @@ func loadFileInput(value string) (inputSource, error) {
 	if err != nil {
 		return inputSource{}, fmt.Errorf("resolve OpenAPI document path: %w", err)
 	}
-	data, err := os.ReadFile(path)
+	data, err := readInputFile(path)
 	if err != nil {
 		return inputSource{}, fmt.Errorf("read OpenAPI document: %w", err)
 	}
 	if len(data) == 0 {
 		return inputSource{}, fmt.Errorf("OpenAPI document %s is empty", path)
 	}
-	return inputSource{data: data, display: path, filePath: path, fileBase: filepath.Dir(path)}, nil
+	return inputSource{data: data, display: path, effective: path, filePath: path, fileBase: filepath.Dir(path)}, nil
 }
 
 func loadFileURLInput(value *url.URL) (inputSource, error) {
@@ -133,13 +151,8 @@ func loadHTTPInput(value *url.URL, offline bool, config *httpInputConfig) (input
 	if value.User != nil || value.Fragment != "" {
 		return inputSource{}, errors.New("HTTP(S) OpenAPI input must not contain credentials or a fragment")
 	}
-	if !strings.EqualFold(value.Scheme, "https") && config.privateTLS {
-		return inputSource{}, errors.New("--tls-client-cert, --tls-client-key, and --tls-ca-file require an HTTPS OpenAPI input")
-	}
-	if strings.EqualFold(value.Scheme, "http") && config.hasHeaderMappings && config.warningWriter != nil {
-		if _, err := fmt.Fprintln(config.warningWriter, "warning: --http-header-env sends credentials over HTTP; use HTTPS to protect request headers"); err != nil {
-			return inputSource{}, fmt.Errorf("write HTTP input security warning: %w", err)
-		}
+	if err := validateHTTPInputTransport(value.String(), value, config); err != nil {
+		return inputSource{}, err
 	}
 	client, err := config.newClient(value)
 	if err != nil {
@@ -167,7 +180,28 @@ func loadHTTPInput(value *url.URL, offline bool, config *httpInputConfig) (input
 		return inputSource{}, err
 	}
 	final := *response.Request.URL
-	return inputSource{data: data, display: final.String(), remoteBase: documentURLBase(&final), httpConfig: config}, nil
+	effective := sanitizedHTTPDocumentURL(&final)
+	return inputSource{data: data, display: effective, effective: effective, remoteBase: documentURLBase(&final), httpConfig: config}, nil
+}
+
+func sanitizedHTTPDocumentURL(value *url.URL) string {
+	sanitized := *value
+	sanitized.User = nil
+	sanitized.RawQuery = ""
+	sanitized.Fragment = ""
+	return sanitized.String()
+}
+
+func validateHTTPInputTransport(display string, value *url.URL, config *httpInputConfig) error {
+	if !strings.EqualFold(value.Scheme, "https") && config.privateTLS {
+		return errors.New("--tls-client-cert, --tls-client-key, and --tls-ca-file require an HTTPS OpenAPI input")
+	}
+	if strings.EqualFold(value.Scheme, "http") && config.hasHeaderMappings && config.warningWriter != nil {
+		if _, err := fmt.Fprintln(config.warningWriter, "warning: --http-header-env sends credentials over HTTP; use HTTPS to protect request headers"); err != nil {
+			return fmt.Errorf("write HTTP input security warning for %s: %w", display, err)
+		}
+	}
+	return nil
 }
 
 func parseInputBase(value string) (inputSource, error) {
@@ -184,12 +218,13 @@ func parseInputBase(value string) (inputSource, error) {
 			if parsed.RawQuery != "" || parsed.Fragment != "" || !filepath.IsAbs(filepath.FromSlash(parsed.Path)) {
 				return inputSource{}, errors.New("--input-base file URL must contain a local absolute path without query or fragment")
 			}
-			return inputSource{fileBase: filepath.Dir(filepath.FromSlash(parsed.Path))}, nil
+			effective := filepath.Clean(filepath.FromSlash(parsed.Path))
+			return inputSource{effective: effective, fileBase: filepath.Dir(effective)}, nil
 		case "http", "https":
 			if parsed.User != nil || parsed.Fragment != "" {
 				return inputSource{}, errors.New("--input-base HTTP(S) URL must not contain credentials or a fragment")
 			}
-			return inputSource{remoteBase: documentURLBase(parsed)}, nil
+			return inputSource{effective: parsed.String(), remoteBase: documentURLBase(parsed)}, nil
 		default:
 			return inputSource{}, fmt.Errorf("unsupported --input-base scheme %q", parsed.Scheme)
 		}
@@ -198,7 +233,7 @@ func parseInputBase(value string) (inputSource, error) {
 	if err != nil {
 		return inputSource{}, fmt.Errorf("resolve --input-base path: %w", err)
 	}
-	return inputSource{fileBase: filepath.Dir(base)}, nil
+	return inputSource{effective: base, fileBase: filepath.Dir(base)}, nil
 }
 
 func documentURLBase(value *url.URL) *url.URL {

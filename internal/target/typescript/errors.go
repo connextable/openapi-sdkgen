@@ -91,7 +91,7 @@ func emitErrors(document *ir.Document) ([]byte, error) {
 			}
 			categoryValues = append(categoryValues, runtimeProperty{key: category, value: value})
 		}
-		fmt.Fprintf(&output, "const serverErrorCodesByCategory = %s as { readonly [Category in ServerErrorCategory]: readonly ServerErrorCodesByCategory[Category][] }\n", runtimeObjectExpression(categoryValues))
+		fmt.Fprintf(&output, "const serverErrorCodesByCategory = %s as unknown as { readonly [Category in ServerErrorCategory]: readonly ServerErrorCodesByCategory[Category][] }\n", runtimeObjectExpression(categoryValues))
 		output.WriteString("/** Checks whether an unknown value belongs to an exact server error category. */\n")
 		output.WriteString("export function isErrorCategory<Category extends ServerErrorCategory>(error: unknown, category: Category): error is ServerErrorByCategory<Category> {\n")
 		output.WriteString("  return serverErrorCodesByCategory[category].some((code) => isErrorCode(error, code))\n")

@@ -514,7 +514,7 @@ func emitLinkReturnValue(output *bytes.Buffer, links []generatedLink) error {
 		}
 		sources = append(sources, runtimeProperty{key: source.OperationID, value: runtimeObjectExpression(groups)})
 	}
-	fmt.Fprintf(output, "    $links: %s,\n", runtimeObjectExpression(sources))
+	fmt.Fprintf(output, "    $links: %s as unknown as Client[\"$links\"],\n", runtimeObjectExpression(sources))
 	return nil
 }
 

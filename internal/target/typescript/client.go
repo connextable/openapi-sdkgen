@@ -229,7 +229,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		}
 		operationValues = append(operationValues, runtimeProperty{key: operation.OperationID, value: operationValueName(operation.OperationID)})
 	}
-	fmt.Fprintf(&output, "    $operations: %s,\n", runtimeObjectExpression(operationValues))
+	fmt.Fprintf(&output, "    $operations: %s as unknown as Client[\"$operations\"],\n", runtimeObjectExpression(operationValues))
 	if err := emitLinkReturnValue(&output, links); err != nil {
 		return nil, err
 	}

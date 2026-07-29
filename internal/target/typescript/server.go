@@ -942,15 +942,16 @@ export async function decodeInboundParameters(request: Request, definitions: rea
 async function decodeInboundParameterContent(raw: unknown, definition: InboundParameterDefinition, schemas: InboundSchemas, wireSchemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined): Promise<unknown> {
   if (isRecord(raw)) return raw
   if (typeof raw !== "string" && !Array.isArray(raw)) return raw
-  if (typeof raw === "string" && definition.location === "path") {
-    if (definition.style === "label" && raw.startsWith(".")) raw = raw.slice(1)
-    if (definition.style === "matrix" && raw.startsWith(";")) {
+  let normalized = raw as string | readonly string[]
+  if (typeof normalized === "string" && definition.location === "path") {
+    if (definition.style === "label" && normalized.startsWith(".")) normalized = normalized.slice(1)
+    if (definition.style === "matrix" && normalized.startsWith(";")) {
       const prefix = ";" + definition.name + "="
-      if (raw.startsWith(prefix)) raw = raw.slice(prefix.length)
+      if (normalized.startsWith(prefix)) normalized = normalized.slice(prefix.length)
     }
   }
   const contentType = normalizeInboundMediaType(definition.contentType ?? "")
-  const source = Array.isArray(raw) ? raw[0] : raw
+  const source = typeof normalized === "string" ? normalized : normalized[0]
   if ((contentType === "application/json" || contentType.endsWith("+json")) && source !== undefined) {
     try { return JSON.parse(source) } catch { throw new InboundRequestError(new Response("Invalid JSON parameter " + definition.name, { status: 400 })) }
   }
@@ -963,7 +964,7 @@ async function decodeInboundParameterContent(raw: unknown, definition: InboundPa
   }
   const schema = resolveInboundSchema(definition.schema, schemas)
   if (isRecord(schema["properties"])) return decodeInboundSerializedObject(source, definition, schema["properties"])
-  return decodeInboundParameterValue(raw, definition.schema)
+  return decodeInboundParameterValue(normalized, definition.schema)
 }
 
 async function decodeInboundParameterForm(source: string, schema: InboundSchema, schemas: InboundSchemas): Promise<unknown> {
@@ -1183,7 +1184,7 @@ function appendInboundCookie(target: Record<string, string | string[]>, name: st
 }
 
 function inboundCookieFirst(value: string | readonly string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value
+  return typeof value === "string" ? value : value?.[0]
 }
 
 /** Framework-neutral response produced by an inbound generated handler. */
@@ -1401,7 +1402,7 @@ async function* decodeInboundCustomStream(body: ReadableStream<Uint8Array>, cont
 
 function createInboundMediaStreamReader(body: ReadableStream<Uint8Array>, maximum: number): MediaStreamReader {
   const reader = body.getReader()
-  let pending = new Uint8Array()
+  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array()
   let done = false
   let cancelled = false
   const cancel = async (reason?: unknown): Promise<void> => {
@@ -1494,7 +1495,7 @@ async function* decodeInboundMultipartStream(body: ReadableStream<Uint8Array>, c
   const opening = encoder.encode("--" + boundary)
   const separator = encoder.encode("\r\n--" + boundary)
   const reader = body.getReader()
-  let pending = new Uint8Array()
+  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array()
   let started = false
   let closed = false
   let count = 0
@@ -1798,10 +1799,10 @@ async function decodeInboundResponseHeaderValue(value: string, definition: WireH
     if (codec?.decodeParameter === undefined) throw new TypeError("missing decodeParameter codec for response header " + definition.name)
     return codec.decodeParameter(value, { contentType })
   }
-  return decodeInboundSimpleHeader(value, definition.schema, schemas)
+  return decodeInboundSimpleHeader(value, definition.schema, schemas, definition.explode ?? false)
 }
 
-function decodeInboundSimpleHeader(value: string, schema: WireSchema, schemas: WireSchemas): unknown {
+function decodeInboundSimpleHeader(value: string, schema: WireSchema, schemas: WireSchemas, explode: boolean): unknown {
   const resolved = resolveInboundHeaderSchema(schema, schemas)
   if (resolved.types?.includes("array")) {
     const item = resolved.items ?? {}
@@ -1810,7 +1811,7 @@ function decodeInboundSimpleHeader(value: string, schema: WireSchema, schemas: W
   if (resolved.types?.includes("object") || resolved.properties !== undefined) {
     const result = Object.create(null) as Record<string, unknown>
     const tokens = value.split(",")
-    if (definition.explode) {
+    if (explode) {
       for (const token of tokens) {
         const separator = token.indexOf("=")
         if (separator < 0) continue

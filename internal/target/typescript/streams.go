@@ -124,7 +124,7 @@ func emitStreamReturnValue(output *bytes.Buffer, streams []generatedStream) erro
 			value: stablePrivateIdentifier("stream-value", stream.Operation.OperationID),
 		})
 	}
-	fmt.Fprintf(output, "    $streams: %s,\n", runtimeObjectExpression(values))
+	fmt.Fprintf(output, "    $streams: %s as unknown as Client[\"$streams\"],\n", runtimeObjectExpression(values))
 	return nil
 }
 

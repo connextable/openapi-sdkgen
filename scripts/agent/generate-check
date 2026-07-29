@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+if (($# < 1)); then
+  echo "usage: just agent generate-check INPUT [TARGET] [-- GENERATOR_OPTIONS...]" >&2
+  exit 2
+fi
+
+input="$1"
+shift
+target="typescript"
+if (($# > 0)) && [[ "$1" != "--" ]]; then
+  target="$1"
+  shift
+fi
+if (($# > 0)); then
+  if [[ "$1" != "--" ]]; then
+    echo "generate-check options must follow --" >&2
+    exit 2
+  fi
+  shift
+fi
+
+generator_options=("$@")
+snapshot_options=()
+for ((index = 0; index < ${#generator_options[@]}; index++)); do
+  argument="${generator_options[index]}"
+  case "$argument" in
+    --input|--input=*|--input-base|--input-base=*|--output|--output=*|--target|--target=*)
+      echo "generate-check owns $argument and does not allow overriding it" >&2
+      exit 2
+      ;;
+    --http-header-env|--tls-client-cert|--tls-client-key|--tls-ca-file)
+      if ((index + 1 >= ${#generator_options[@]})); then
+        echo "$argument requires a value" >&2
+        exit 2
+      fi
+      snapshot_options+=("$argument" "${generator_options[index + 1]}")
+      ((index += 1))
+      ;;
+    --http-header-env=*|--tls-client-cert=*|--tls-client-key=*|--tls-ca-file=*|--offline)
+      snapshot_options+=("$argument")
+      ;;
+  esac
+done
+
+temporary="$(mktemp -d "${TMPDIR:-/tmp}/openapi-sdkgen-generate-check.XXXXXX")"
+chmod 700 "$temporary"
+cleanup() {
+  rm -rf "$temporary"
+}
+trap cleanup EXIT
+
+snapshot="$temporary/openapi.snapshot"
+effective_base_file="$temporary/effective-base"
+report="$temporary/snapshot.json"
+generated="$temporary/generated"
+checked="$temporary/checked"
+mkdir -p "$checked"
+
+snapshot_bin="${SDKGEN_GENERATE_CHECK_ACQUIRE_BIN:-$ROOT/.tmp/bin/openapi-sdkgen-snapshot}"
+generator_bin="${SDKGEN_GENERATE_CHECK_GENERATOR_BIN:-$ROOT/.tmp/bin/openapi-sdkgen}"
+if [[ "${SDKGEN_GENERATE_CHECK_SKIP_BUILD:-0}" != "1" ]]; then
+  "$ROOT/scripts/agent/build"
+  agent_run "build generate-check snapshot helper" go build -o "$snapshot_bin" ./scripts/generate-check/snapshot
+fi
+
+agent_run "snapshot OpenAPI input" "$snapshot_bin" \
+  --input "$input" \
+  --data-output "$snapshot" \
+  --base-output "$effective_base_file" \
+  --report-output "$report" \
+  ${snapshot_options[@]+"${snapshot_options[@]}"}
+
+effective_base="$(<"$effective_base_file")"
+generation_status=0
+set +e
+agent_run "generate checked SDK" "$generator_bin" generate \
+  --input - \
+  --input-base "$effective_base" \
+  --target "$target" \
+  --output "$generated" \
+  ${generator_options[@]+"${generator_options[@]}"} <"$snapshot"
+generation_status=$?
+set -e
+
+agent_note "snapshot metadata"
+sed -n '1,200p' "$report"
+agent_note "generation exit: $generation_status"
+if ((generation_status != 0)); then
+  agent_note "typecheck exit: not-run"
+  exit "$generation_status"
+fi
+
+cp -R "$generated/." "$checked/"
+find "$checked" -type f -name '*.ts' -exec sed -i.bak '/^\/\/ @ts-nocheck$/d' {} \;
+find "$checked" -type f -name '*.bak' -delete
+
+cat >"$checked/generate-check.consumer.ts" <<'EOF'
+import { createClient, type Components, type Operations } from "./index.js"
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends
+  (<Value>() => Value extends Right ? 1 : 2) ? true : false
+type Assert<Value extends true> = Value
+
+type OperationID = keyof Operations
+type Operation = Operations[OperationID]
+type _Input = Operation["input"]
+type _Output = Operation["output"]
+type _Error = Operation["error"]
+type _Options = Operation["options"]
+type _Call = Operation["call"]
+type _Raw = Operation["call"]["raw"]
+type _RawResponse = Operation["rawResponse"]
+type _Pagination = Operation["pagination"]
+
+type ComponentName = keyof Components
+type Component = Components[ComponentName]
+type _ComponentInput = Component["input"]
+type _ComponentOutput = Component["output"]
+
+type Client = ReturnType<typeof createClient>
+type _ExactOperationCatalog = Assert<Equal<keyof Client["$operations"], OperationID>>
+
+export type GenerateCheckConsumerProbe = {
+  readonly operation: [_Input, _Output, _Error, _Options, _Call, _Raw, _RawResponse, _Pagination]
+  readonly component: [_ComponentInput, _ComponentOutput]
+  readonly catalog: _ExactOperationCatalog
+}
+EOF
+
+cat >"$checked/package.json" <<'EOF'
+{"type":"module","private":true}
+EOF
+
+cat >"$checked/tsconfig.json" <<'EOF'
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": false,
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}
+EOF
+
+typecheck_status=0
+set +e
+if [[ -n "${SDKGEN_GENERATE_CHECK_TSC_BIN:-}" ]]; then
+  agent_run "typecheck generated SDK" "$SDKGEN_GENERATE_CHECK_TSC_BIN" --project "$checked/tsconfig.json"
+else
+  agent_run "typecheck generated SDK" ts_node node "$TYPESCRIPT_ROOT/node_modules/typescript/lib/tsc.js" --project "$checked/tsconfig.json"
+fi
+typecheck_status=$?
+set -e
+agent_note "typecheck exit: $typecheck_status"
+exit "$typecheck_status"

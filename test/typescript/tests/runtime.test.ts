@@ -308,7 +308,7 @@ describe("generated runtime", () => {
         status: 200,
         contentType: "application/json",
         data: { id: "widget-1" } as Output,
-        headers: new Headers(),
+        headers: Object.create(null) as Readonly<Record<string, unknown>>,
         request: {},
         response: new Response(),
       }) as RawResponse<Output>;

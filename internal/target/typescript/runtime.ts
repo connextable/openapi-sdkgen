@@ -572,7 +572,7 @@ export interface ParameterDefinition {
 }
 
 /** Successful response including decoded data and the underlying Fetch API response. */
-export interface RawResponse<Output, HeaderValues = Headers> {
+export interface RawResponse<Output, HeaderValues = Readonly<Record<string, unknown>>> {
   /** HTTP status code. */
   readonly status: number;
   /** Normalized response media type without parameters. */
@@ -640,7 +640,7 @@ export function resolveLinkInput<Input>(response: RawResponse<unknown> | APIErro
 function normalizeLinkResponse(response: RawResponse<unknown> | APIError): RawResponse<unknown> {
   if (!isAPIError(response)) return response;
   if (response.response === undefined || response.status === undefined) throw new TypeError("Link requires an APIError with an HTTP response");
-  return { status: response.status, data: response.data, headers: response.response.headers, request: response.request, response: response.response };
+  return { status: response.status, data: response.data, headers: Object.fromEntries(response.response.headers.entries()), request: response.request, response: response.response };
 }
 
 /** Merges Link-derived defaults with explicit target input without mutating either value. */
@@ -718,7 +718,7 @@ function jsonPointerValue(value: unknown, pointer: string): unknown {
  * @template ContentType Response media-type literal.
  * @template Output Decoded response body type.
  */
-export type RawResponseFor<Status extends number, ContentType, Output, HeaderValues = Headers> = Omit<
+export type RawResponseFor<Status extends number, ContentType, Output, HeaderValues = Readonly<Record<string, unknown>>> = Omit<
   RawResponse<Output, HeaderValues>,
   "status" | "contentType"
 > &
@@ -1188,7 +1188,7 @@ function isGeneratedStreamMediaType(contentType: string): boolean {
 function createMediaStreamReader(body: ReadableStream<Uint8Array>, maxFrameBytes: number): MediaStreamReader {
   if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes <= 0) throw new TypeError("maxStreamItemBytes must be a positive safe integer");
   const reader = body.getReader();
-  let pending = new Uint8Array();
+  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array();
   let done = false;
   let released = false;
   const cancel = async (reason?: unknown): Promise<void> => {
@@ -1305,7 +1305,7 @@ async function* decodeMultipartStreamParts(
   const opening = encoder.encode(`--${boundary}`);
   const separator = encoder.encode(`\r\n--${boundary}`);
   const reader = body.getReader();
-  let pending = new Uint8Array();
+  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array();
   let started = false;
   let closed = false;
   try {
@@ -1364,7 +1364,7 @@ async function decodeMultipartStreamPart(
   const rawPartContentType = headers.get("content-type") ?? declared ?? "text/plain";
   const partContentType = normalizeMediaType(rawPartContentType);
   if (partContentType.startsWith("multipart/")) {
-    return decodeMultipartResponse(new Blob([bytes]).stream(), rawPartContentType, {
+    return decodeMultipartResponse(new Blob([ownedArrayBuffer(bytes)]).stream(), rawPartContentType, {
       contentType: rawPartContentType,
       schema: itemSchema,
       encoding: itemEncoding?.encoding,
@@ -1378,7 +1378,13 @@ async function decodeMultipartStreamPart(
   if (isBinaryMediaType(partContentType) || itemSchema.contentEncoding === "binary") return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const codec = codecs.get(normalizeMediaType(partContentType));
   if (codec?.decode === undefined) throw new TypeError(`missing decode codec for multipart item ${partContentType}`);
-  return codec.decode(new Response(bytes, { headers: { "content-type": partContentType } }), { contentType: partContentType });
+  return codec.decode(new Response(ownedArrayBuffer(bytes), { headers: { "content-type": partContentType } }), { contentType: partContentType });
+}
+
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 function parseMultipartStreamPart(part: Uint8Array): MultipartStreamPart {
