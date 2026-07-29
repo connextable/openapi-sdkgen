@@ -20,6 +20,7 @@ func TestGeneratedWebhookRouterExecutesThroughFetch(t *testing.T) {
     "operationId": "orderCreatedWebhook",
 	"parameters": [
 	  {"name":"page","in":"query","required":true,"schema":{"type":"integer"}},
+	  {"name":"order","in":"query","x-sort":{"format":"field-direction"},"schema":{"type":"array","items":{"type":"string","enum":["createdAt:asc","createdAt:desc"]}}},
 	  {"name":"filter","in":"query","style":"deepObject","explode":true,"schema":{"type":"object","required":["kind_name","count"],"properties":{"kind_name":{"type":"string"},"count":{"type":"integer"}}}},
 	  {"name":"meta","in":"header","style":"simple","explode":true,"schema":{"type":"object","required":["trace_id","enabled"],"properties":{"trace_id":{"type":"integer"},"enabled":{"type":"boolean"}}}},
 	  {"name":"payload","in":"query","content":{"application/xml":{"schema":{"type":"object","required":["event_id","choice"],"properties":{"event_id":{"type":"string","xml":{"name":"event"}},"choice":{"oneOf":[{"type":"integer"},{"type":"boolean"}]}}}}}},
@@ -50,7 +51,7 @@ func TestGeneratedWebhookRouterExecutesThroughFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts")); !strings.Contains(webhooks, `name: "payload"`) || !strings.Contains(webhooks, `contentType: "application/xml"`) {
+	if webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts")); !strings.Contains(webhooks, `name: "payload"`) || !strings.Contains(webhooks, `contentType: "application/xml"`) || !strings.Contains(webhooks, `sort: Object.fromEntries`) {
 		t.Fatalf("parameter content plan was not emitted:\n%s", webhooks)
 	}
 	directory := t.TempDir()
@@ -96,7 +97,7 @@ const router = createWebhookRouter({
 	if (securityCandidates.signature?.value === "boom") throw new Error("private authenticator detail");
 	if (method !== "POST" || path !== "/hooks/orders" || JSON.stringify(security) !== JSON.stringify([{ signature: [] }]) || (securityCandidates.signature?.value !== undefined && securityCandidates.signature.value !== "sig-1")) throw new Error("bad auth context");
 } });
-const response = await router.fetch(new Request("https://host.test/hooks/orders?page=2&filter[kind_name]=fresh&filter[count]=3&payload=%3Cpayload%3E%3Cevent%3Exml-event%3C%2Fevent%3E%3Cchoice%3E2%3C%2Fchoice%3E%3C%2Fpayload%3E", { method: "POST", headers: { "content-type": "application/json", "x-signature": "sig-1", "x-trace": "trace-1", "meta": "trace_id=4,enabled=true", "custom": "custom-event", "cookie": "session=one; tags=one; tags=two; theme=dark; event_id=a%2Fb" }, body: JSON.stringify({ id: "order-1" }) }));
+const response = await router.fetch(new Request("https://host.test/hooks/orders?page=2&order=createdAt%3Adesc&filter[kind_name]=fresh&filter[count]=3&payload=%3Cpayload%3E%3Cevent%3Exml-event%3C%2Fevent%3E%3Cchoice%3E2%3C%2Fchoice%3E%3C%2Fpayload%3E", { method: "POST", headers: { "content-type": "application/json", "x-signature": "sig-1", "x-trace": "trace-1", "meta": "trace_id=4,enabled=true", "custom": "custom-event", "cookie": "session=one; tags=one; tags=two; theme=dark; event_id=a%2Fb" }, body: JSON.stringify({ id: "order-1" }) }));
 if (response.status !== 202 || response.headers.get("x-rate") !== "2" || response.headers.get("x-list") !== "1,2" || response.headers.get("x-object") !== "event_id=outbound" || response.headers.get("x-meta") !== '{"event_id":"outbound"}' || response.headers.get("x-custom") !== "custom:custom-outbound" || JSON.stringify(await response.json()) !== JSON.stringify({ accepted: "order-1" })) throw new Error("handler response was not encoded");
 const plain = await router.fetch(new Request("https://host.test/hooks/plain", { method: "GET" }));
 if (plain.status !== 200 || plain.headers.get("content-type") !== "application/vnd.example.plain" || await plain.text() !== "custom:plain") throw new Error("custom response was not encoded");
@@ -106,7 +107,7 @@ const binary = await router.fetch(new Request("https://host.test/hooks/binary", 
 if (binary.status !== 200 || binary.headers.get("content-type") !== "application/pdf" || JSON.stringify([...new Uint8Array(await binary.arrayBuffer())]) !== "[1,2,3]") throw new Error("binary response was not encoded");
 const xml = await router.fetch(new Request("https://host.test/hooks/xml", { method: "GET" }));
 if (xml.status !== 200 || xml.headers.get("content-type") !== "application/xml" || await xml.text() !== '<receipt id="receipt-1"><message>hello &amp; goodbye</message></receipt>') throw new Error("XML response was not encoded from its schema");
-if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, filter: { kind_name: "fresh", count: 3 }, payload: { choice: 2, event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
+if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderCreatedWebhook", method: "POST", params: { path: {}, query: { page: 2, order: [{ field: "createdAt", direction: "desc" }], filter: { kind_name: "fresh", count: 3 }, payload: { choice: 2, event_id: "xml-event" } }, querystring: {}, headerParams: { meta: { trace_id: 4, enabled: true }, custom: { event_id: "custom-event" }, "X-Trace": "trace-1" }, cookieParams: { tags: ["one", "two"], prefs: { event_id: "a%2Fb", theme: "dark" }, session: "one" } } }])) throw new Error("handler context mismatch: " + JSON.stringify(seen));
 const selectorResponse = await router.fetch(new Request("https://host.test/hooks/selectors/.role,admin,enabled,true/;matrix=role,owner,enabled,false", { method: "GET" }));
 if (selectorResponse.status !== 204 || JSON.stringify(selectorParams) !== JSON.stringify({ label: { role: "admin", enabled: true }, matrix: { role: "owner", enabled: false } })) throw new Error("label/matrix path objects were not decoded");
 const denied = createWebhookRouter({ orderCreated: { POST: async () => ({ status: 202 }) } }, { routes: { orderCreated: "/hooks/orders" }, authenticate: () => new Response("no", { status: 401 }) });
@@ -149,6 +150,7 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
     "responses": {"202": {"description": "Accepted"}},
     "callbacks": {"orderStatus": {"{$request.body#/callbackURL}": {"post": {
       "operationId": "orderStatusCallback",
+      "parameters": [{"name":"order","in":"query","x-sort":{"format":"field-direction"},"schema":{"type":"array","items":{"type":"string","enum":["name:asc","name:desc"]}}}],
       "requestBody": {"content": {"application/vnd.example.callback": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}}}},
       "responses": {"204": {"description": "Accepted"}}
     }}}}
@@ -203,8 +205,8 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
 import { pathToFileURL } from "node:url";
 const codecs = await import(pathToFileURL(process.argv[1]).href);
 const seen = [];
-const callbacks = codecs.createCallbackHandlers({ callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: async ({ body, operationID, method, request }) => {
-  seen.push({ body, operationID, method, path: new URL(request.url).pathname });
+const callbacks = codecs.createCallbackHandlers({ callbacks: { createOrder: { orderStatus: { "{$request.body#/callbackURL}": { POST: async ({ body, operationID, method, request, params }) => {
+  seen.push({ body, operationID, method, path: new URL(request.url).pathname, params });
   return { status: 204 };
 } } } } } }, { codecs: { "application/vnd.example.callback": { async decodeInbound(request) { return JSON.parse(await request.text()); } } }, authenticate: ({ security }) => {
   if (JSON.stringify(security) !== JSON.stringify([{ signature: [] }])) throw new Error("callback security metadata mismatch");
@@ -242,9 +244,9 @@ try {
   if (String(error).includes("duplicate callback path parameters were accepted")) throw error;
   if (!String(error).includes("both routeCallbacks and callbacks")) throw error;
 }
-const response = await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }));
+const response = await endpoint.fetch(new Request("https://host.test/callback?order=name%3Aasc", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: JSON.stringify({ id: "order-1" }) }));
 if (response.status !== 204) throw new Error("callback response was not encoded");
-if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderStatusCallback", method: "POST", path: "/callback" }])) throw new Error("callback context mismatch");
+if (JSON.stringify(seen) !== JSON.stringify([{ body: { id: "order-1" }, operationID: "orderStatusCallback", method: "POST", path: "/callback", params: { path: {}, query: { order: [{ field: "name", direction: "asc" }] }, querystring: {}, headerParams: {}, cookieParams: {} } }])) throw new Error("callback context mismatch");
 if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "GET" }))).status !== 405) throw new Error("wrong callback method was accepted");
 if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "text/plain" }, body: "bad" }))).status !== 415) throw new Error("bad callback media type was accepted");
 if ((await endpoint.fetch(new Request("https://host.test/callback", { method: "POST", headers: { "content-type": "application/vnd.example.callback" }, body: "{}" }))).status !== 400) throw new Error("schema-invalid callback was accepted");

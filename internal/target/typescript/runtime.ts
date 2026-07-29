@@ -305,10 +305,6 @@ export interface RequestOptions {
   readonly csrfToken?: string;
   /** Caller-provided value sent through the `X-Request-Id` header. */
   readonly requestID?: string;
-  /** Idempotency key sent through the `Idempotency-Key` header. */
-  readonly idempotencyKey?: string;
-  /** Entity tag precondition sent through the `If-Match` header. */
-  readonly ifMatch?: string;
   /** Fetch API credentials mode for this request, overriding the client default. */
   readonly credentials?: RequestCredentials;
   /** Declared additional headers for named multipart form-data parts. */
@@ -575,6 +571,8 @@ export interface ParameterDefinition {
   readonly contentType?: string;
   /** Schema used for wire-name transformation before serialization. */
   readonly schema?: WireSchema;
+  /** Structured sort member keys mapped to exact OpenAPI enum wire values. */
+  readonly sort?: Readonly<Record<string, string>>;
 }
 
 /** Successful response including decoded data and the underlying Fetch API response. */
@@ -1081,7 +1079,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
       return {
         status: response.status,
         ...(contentType === undefined ? {} : { contentType }),
-        data,
+        data: body,
 		headers: headerValues,
         request,
         response,
@@ -1741,8 +1739,6 @@ function encodeRequestSynchronous(
   setHeader(headers, "Accept", options.accept);
   setHeader(headers, "X-CSRF-Token", options.csrfToken);
   setHeader(headers, "X-Request-Id", options.requestID);
-  setHeader(headers, "Idempotency-Key", options.idempotencyKey);
-  setHeader(headers, "If-Match", options.ifMatch);
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
   rejectUndefinedArrayValues(cookieValues);
   assertRequiredParameters(operation, pathValues, queryValues, querystringValues, headerParams, cookieValues);
@@ -1850,8 +1846,6 @@ async function encodeRequestAsync(
   setHeader(headers, "Accept", options.accept);
   setHeader(headers, "X-CSRF-Token", options.csrfToken);
   setHeader(headers, "X-Request-Id", options.requestID);
-  setHeader(headers, "Idempotency-Key", options.idempotencyKey);
-  setHeader(headers, "If-Match", options.ifMatch);
 
   const cookieValues = isRecord(values.cookieParams) ? values.cookieParams : {};
   rejectUndefinedArrayValues(cookieValues);
@@ -2397,6 +2391,16 @@ function encodeParameterWireValue(
   parameter: ParameterDefinition | undefined,
   value: unknown,
 ): unknown {
+  if (parameter?.sort !== undefined && Array.isArray(value)) {
+    value = value.map((entry) => {
+      if (!isRecord(entry) || typeof entry.field !== "string" || typeof entry.direction !== "string") {
+        throw new TypeError(`Invalid structured sort value for ${parameter.name}`);
+      }
+      const wire = parameter.sort?.[`${entry.field}\u0000${entry.direction}`];
+      if (wire === undefined) throw new TypeError(`Invalid structured sort value for ${parameter.name}`);
+      return wire;
+    });
+  }
   return parameter?.schema === undefined
     ? value
     : transformWireValue(value, parameter.schema, operation.inputSchemas ?? {}, "encode");

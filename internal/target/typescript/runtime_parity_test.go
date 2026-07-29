@@ -366,7 +366,7 @@ if (item.id !== "item-2" || seen.join(",") !== "/orders/latest,/links/eu%20west/
 	}
 }
 
-func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
+func TestGeneratedLinksAndStreamsUseStandardHeaderParameters(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0","info":{"title":"Required options","version":"1"},
   "paths":{
@@ -374,9 +374,14 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
       "200":{"description":"Required","links":{"follow":{"operationId":"followTarget"}}},
       "201":{"description":"Optional","links":{"follow":{"operationId":"optionalTarget"}}}
     }}},
-    "/target":{"post":{"operationId":"followTarget","x-idempotency":"required","x-concurrency":"required","responses":{"204":{"description":"OK"}}}},
+    "/target":{"post":{"operationId":"followTarget","parameters":[
+      {"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string"}},
+      {"name":"If-Match","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}},
     "/optional":{"post":{"operationId":"optionalTarget","responses":{"204":{"description":"OK"}}}},
-    "/events":{"get":{"operationId":"tailEvents","x-concurrency":"required","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
+    "/events":{"get":{"operationId":"tailEvents","parameters":[
+      {"name":"If-Match","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
   }
 }`))
 	if err != nil {
@@ -388,21 +393,22 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		`invocation: RequiredLinkInvocation<never, Routes["POST /target"]["options"]`,
-		`Routes["POST /optional"]["options"] & Routes["POST /target"]["options"]`,
-		`readonly "tailEvents": (options: Routes["GET /events"]["options"])`,
+		`invocation?: LinkInvocation<Routes["POST /target"]["input"], Routes["POST /target"]["options"]`,
+		`readonly "Idempotency-Key": string`,
+		`readonly "If-Match": string`,
+		`readonly "tailEvents": (input: Routes["GET /events"]["input"], options?: Routes["GET /events"]["options"])`,
 	} {
 		if !strings.Contains(client, expected) {
-			t.Fatalf("required option contract missing %q:\n%s", expected, client)
+			t.Fatalf("standard header contract missing %q:\n%s", expected, client)
 		}
 	}
 	probe := `import { createClient, type Routes } from "./index.js"
 declare const api: ReturnType<typeof createClient>
 declare const response: Routes["GET /source"]["rawResponse"]
-// @ts-expect-error aggregate dispatch must satisfy every possible required option contract
-api.$links.getSource.follow(response, { options: {} })
-api.$links.getSource.follow(response, { options: { idempotencyKey: "idem", ifMatch: "v1" } })
+api.$links.getSource.follow(response, { input: { headerParams: { "Idempotency-Key": "idem", "If-Match": "v1" } } })
 api.$links.getSource.follow.byStatus.status201(response)
+// @ts-expect-error removed transport convenience option
+api.$operations.followTarget({ headerParams: { "Idempotency-Key": "idem", "If-Match": "v1" } }, { idempotencyKey: "legacy" })
 `
 	output := compileTypeScriptArtifactsWithProbe(t, document, "required-links.probe.ts", probe)
 	script := `
@@ -418,12 +424,102 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async (in
   return new Response(null, { status: 204 });
 }});
 const source = await api.$operations.getSource.raw();
-await api.$links.getSource.follow(source, { options: { idempotencyKey: "idem", ifMatch: "v1" } });
-for await (const _event of api.$streams.tailEvents({ ifMatch: "v2" })) { break; }
-if (JSON.stringify(seen) !== JSON.stringify([["/source",null,null],["/target","idem","v1"],["/events",null,"v2"]])) throw new Error("required options were not forwarded: " + JSON.stringify(seen));
+await api.$links.getSource.follow(source, { input: { headerParams: { "Idempotency-Key": "idem", "If-Match": "v1" } } });
+for await (const _event of api.$streams.tailEvents({ headerParams: { "If-Match": "v2" } })) { break; }
+if (JSON.stringify(seen) !== JSON.stringify([["/source",null,null],["/target","idem","v1"],["/events",null,"v2"]])) throw new Error("declared headers were not forwarded: " + JSON.stringify(seen));
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute required link/stream options test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimeEnvelopeProjectionKeepsCompleteRawBody(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.0","info":{"title":"Envelope runtime","version":"1"},
+  "paths":{"/value":{"get":{
+    "operationId":"getValue",
+    "x-envelope":"data",
+    "responses":{"200":{"description":"OK","content":{"application/json":{"schema":{
+      "type":"object","required":["data","meta"],
+      "properties":{
+        "data":{"type":"string"},
+        "meta":{"type":"object","required":["trace"],"properties":{"trace":{"type":"string"}}}
+      }
+    }}}}}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { createClient } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+const value: Promise<string> = api.$operations.getValue()
+const raw = await api.$operations.getValue.raw()
+const trace: string = raw.data.meta.trace
+void value
+void trace
+`
+	output := compileTypeScriptArtifactsWithProbe(t, document, "envelope.probe.ts", probe)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const api = createClient({ baseURL: "https://api.example.test", fetch: async () => new Response(JSON.stringify({ data: "value", meta: { trace: "trace-1" } }), { status: 200, headers: { "content-type": "application/json" } }) });
+if (await api.$operations.getValue() !== "value") throw new Error("ordinary envelope output was not projected");
+const raw = await api.$operations.getValue.raw();
+if (raw.data.data !== "value" || raw.data.meta.trace !== "trace-1") throw new Error("raw envelope body was projected");
+`
+	if outputBytes, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute envelope runtime test: %v\n%s", err, outputBytes)
+	}
+}
+
+func TestRuntimeSortProjectionUsesParameterEnumBeforeStandardSerialization(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.0","info":{"title":"Sort runtime","version":"1"},
+  "paths":{"/items":{"get":{
+    "operationId":"listItems",
+    "x-concurrency":"required",
+    "x-idempotency":"required",
+    "parameters":[{
+      "name":"order","in":"query",
+      "x-filter":{"operator":"custom-metadata"},
+      "x-sort":{"format":"field-direction"},
+      "schema":{"type":"array","items":{"type":"string","enum":["createdAt:asc","createdAt:desc","name:asc"],"pattern":"^[A-Za-z]+:(asc|desc)$"}}
+    }],
+    "responses":{"204":{"description":"OK"}}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { createClient } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+api.$operations.listItems({ query: { order: [{ field: "createdAt", direction: "desc" }] } })
+// @ts-expect-error enum correlation rejects undeclared pairs
+api.$operations.listItems({ query: { order: [{ field: "name", direction: "desc" }] } })
+`
+	output := compileTypeScriptArtifactsWithProbe(t, document, "sort.probe.ts", probe)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let calls = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input) => {
+  calls++;
+  const values = new URL(String(input)).searchParams.getAll("order");
+  if (JSON.stringify(values) !== JSON.stringify(["createdAt:desc"])) throw new Error("sort wire value mismatch: " + JSON.stringify(values));
+  return new Response(null, { status: 204 });
+} });
+await api.$operations.listItems({ query: { order: [{ field: "createdAt", direction: "desc" }] } });
+try {
+  await api.$operations.listItems({ query: { order: [{ field: "name", direction: "desc" }] } });
+  throw new Error("invalid structured sort was accepted");
+} catch (error) {
+  if (String(error).includes("invalid structured sort was accepted")) throw error;
+}
+if (calls !== 1) throw new Error("invalid sort reached fetch");
+`
+	if outputBytes, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute sort runtime test: %v\n%s", err, outputBytes)
 	}
 }
 

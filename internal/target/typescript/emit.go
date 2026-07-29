@@ -39,18 +39,21 @@ func (Generator) Prepare(document *ir.Document, options generator.Options) (gene
 	if document == nil {
 		return generator.Plan{}, nil, fmt.Errorf("internal TypeScript target: IR document is nil")
 	}
-	plan, err := prepareSourcePlan(document, options.HasAddon(generator.AddonServer))
+	plan, diagnostics, err := prepareSourcePlan(document, options.HasAddon(generator.AddonServer))
 	if err != nil {
-		return generator.Plan{}, []diagnostic.Diagnostic{{
+		return generator.Plan{}, diagnostics, err
+	}
+	if validationErr := validatePreparedSourcePlan(plan); validationErr != nil {
+		diagnostics = append(diagnostics, diagnostic.Diagnostic{
 			Severity: diagnostic.SeverityError,
 			Code:     "SDKGEN-E500",
 			Phase:    diagnostic.PhaseTarget,
 			Target:   "typescript",
 			Message:  "The OpenAPI contract cannot be represented by the TypeScript target.",
-			Cause:    err.Error(),
-		}}, nil
+			Cause:    validationErr.Error(),
+		})
 	}
-	return generator.NewPlan("typescript", plan), nil, nil
+	return generator.NewPlan("typescript", plan), diagnostic.Sort(diagnostics), nil
 }
 
 // Emit emits a previously validated TypeScript plan.
@@ -96,8 +99,6 @@ type ManifestOperation struct {
 	OutputType         string   `json:"outputType"`
 	ErrorType          string   `json:"errorType"`
 	Envelope           string   `json:"envelope,omitempty"`
-	Concurrency        string   `json:"concurrency,omitempty"`
-	Idempotency        string   `json:"idempotency,omitempty"`
 	Pagination         string   `json:"pagination,omitempty"`
 	Auth               string   `json:"auth"`
 	Visibility         string   `json:"visibility"`
@@ -129,32 +130,47 @@ func SourceArtifacts(document *ir.Document) ([]Artifact, error) {
 }
 
 func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, error) {
-	plan, err := prepareSourcePlan(document, includeServer)
+	plan, diagnostics, err := prepareSourcePlan(document, includeServer)
 	if err != nil {
 		return nil, err
+	}
+	if validationErr := validatePreparedSourcePlan(plan); validationErr != nil {
+		return nil, validationErr
+	}
+	if diagnostic.HasErrors(diagnostics) {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(diagnostic.RenderHuman(diagnostics, nil)))
 	}
 	return emitSourcePlan(plan)
 }
 
-func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, error) {
+func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, []diagnostic.Diagnostic, error) {
 	if document == nil {
-		return nil, fmt.Errorf("IR document is nil")
+		return nil, nil, fmt.Errorf("IR document is nil")
 	}
+	prepared, diagnostics, err := prepareKnownExtensions(document)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &sourcePlan{document: prepared, includeServer: includeServer}, diagnostics, nil
+}
+
+func validatePreparedSourcePlan(plan *sourcePlan) error {
+	document := plan.document
 	if err := validateSchemaSupport(document); err != nil {
-		return nil, err
+		return err
 	}
-	if includeServer {
+	if plan.includeServer {
 		if err := validateServerInboundSchemaSupport(document); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if err := validateOpenAPISupportWithServer(document, "TypeScript", includeServer); err != nil {
-		return nil, err
+	if err := validateOpenAPISupportWithServer(document, "TypeScript", plan.includeServer); err != nil {
+		return err
 	}
 	if err := validateOperationIdentities(document); err != nil {
-		return nil, err
+		return err
 	}
-	return &sourcePlan{document: document, includeServer: includeServer}, nil
+	return nil
 }
 
 func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
@@ -333,8 +349,6 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 			OutputType:         outputExpression.render(typeRenderLocal),
 			ErrorType:          errorExpression.render(typeRenderLocal),
 			Envelope:           operation.Envelope,
-			Concurrency:        operation.Concurrency,
-			Idempotency:        operation.Idempotency,
 			Pagination:         operation.Pagination,
 			Auth:               operationAuth(operation),
 			Visibility:         visibility,
@@ -547,16 +561,6 @@ func callInput(operation ir.Operation, inputTypes []string, pathBound bool, path
 	var arguments []string
 	if len(fields) > 0 {
 		arguments = append(arguments, "{ "+strings.Join(fields, ", ")+" }")
-	}
-	var optionFields []string
-	if operation.Idempotency == "required" {
-		optionFields = append(optionFields, "idempotencyKey")
-	}
-	if operation.Concurrency == "required" {
-		optionFields = append(optionFields, "ifMatch")
-	}
-	if len(optionFields) > 0 {
-		arguments = append(arguments, "{ "+strings.Join(optionFields, ", ")+" }")
 	}
 	return "(" + strings.Join(arguments, ", ") + ")"
 }

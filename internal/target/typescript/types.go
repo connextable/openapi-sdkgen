@@ -674,11 +674,6 @@ func operationRawResponseTypeForScope(document *ir.Document, operation ir.Operat
 				} else if isTextMedia(mediaType) {
 					valueType = "string"
 				} else {
-					if operation.Envelope == "data" {
-						if dataSchema := envelopeDataSchema(document, schemaObject, make(map[string]bool)); len(dataSchema) > 0 {
-							schema = dataSchema
-						}
-					}
 					valueType, err = schemaTypeForScope(document, schema, projectionOutput, scope)
 					if err != nil {
 						return "", err
@@ -833,8 +828,43 @@ func envelopeDataSchema(document *ir.Document, schema map[string]any, seen map[s
 		return envelopeDataSchema(document, document.ComponentSchemas[name], seen)
 	}
 	properties, _ := schema["properties"].(map[string]any)
-	data, _ := properties["data"].(map[string]any)
-	return data
+	if data, ok := properties["data"].(map[string]any); ok {
+		return data
+	}
+	for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
+		variants, _ := schema[keyword].([]any)
+		if len(variants) == 0 {
+			continue
+		}
+		dataSchemas := make([]any, 0, len(variants))
+		for _, variant := range variants {
+			item, _ := variant.(map[string]any)
+			data := envelopeDataSchema(document, item, copyStringBoolMap(seen))
+			if len(data) == 0 {
+				if keyword == "allOf" {
+					continue
+				}
+				return nil
+			}
+			dataSchemas = append(dataSchemas, data)
+		}
+		if len(dataSchemas) == 1 {
+			data, _ := dataSchemas[0].(map[string]any)
+			return data
+		}
+		if len(dataSchemas) > 1 {
+			return map[string]any{keyword: dataSchemas}
+		}
+	}
+	return nil
+}
+
+func copyStringBoolMap(source map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func operationSuccessSchema(document *ir.Document, operation ir.Operation) (map[string]any, bool, error) {
@@ -932,7 +962,7 @@ func operationInputTypes(document *ir.Document, operation ir.Operation) ([]strin
 	}
 	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return nil, err
-	} else if len(parameters) > 0 || operation.Pagination != "" || len(operationSortFields(operation)) > 0 {
+	} else if len(parameters) > 0 || operation.Pagination != "" || len(operation.SortParameters) > 0 {
 		result = append(result, name+"QueryInput")
 	}
 	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {

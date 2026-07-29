@@ -349,7 +349,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 	}
 	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return err
-	} else if len(parameters) > 0 || operation.Pagination != "" || len(operationSortFields(operation)) > 0 {
+	} else if len(parameters) > 0 || operation.Pagination != "" || len(operation.SortParameters) > 0 {
 		if err := emitQueryTypes(output, document, operation, operationName, parameters); err != nil {
 			return err
 		}
@@ -471,7 +471,6 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 
 func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType, outputType, rawType string) error {
 	operationName := operationTypeName(operationRouteKey(operation))
-	requiresOptions := operation.Idempotency == "required" || operation.Concurrency == "required"
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
 		return err
@@ -489,12 +488,8 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 			emitRawCallSignature(output, inputType, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
 		}
 	}
-	emitCallSignature(output, inputType, operationName+"Options", outputType, !requiresOptions)
-	optionsOptional := ""
-	if !requiresOptions {
-		optionsOptional = "?"
-	}
-	emitRawCallSignature(output, inputType, operationName+"Options", rawType, optionsOptional == "?")
+	emitCallSignature(output, inputType, operationName+"Options", outputType, true)
+	emitRawCallSignature(output, inputType, operationName+"Options", rawType, true)
 	output.WriteString("}\n\n")
 	return nil
 }
@@ -595,7 +590,7 @@ func emitOperationParameterJSDoc(output *bytes.Buffer, indent string, parameter 
 }
 
 func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operationName string, operation ir.Operation) error {
-	parts := []string{`Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch">`}
+	parts := []string{`Omit<RequestOptions, "accept">`}
 	mediaTypes, err := operationResponseMediaTypes(document, operation)
 	if err != nil {
 		return err
@@ -607,25 +602,7 @@ func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operation
 		}
 		parts = append(parts, "{\n  /** Requested successful response media type. */\n  readonly accept?: "+strings.Join(quoted, " | ")+" | undefined\n}")
 	}
-	switch operation.Idempotency {
-	case "required":
-		parts = append(parts, "{\n  /** Required idempotency key sent through the `Idempotency-Key` header. */\n  readonly idempotencyKey: string\n}")
-	case "optional":
-		parts = append(parts, "{\n  /** Optional idempotency key sent through the `Idempotency-Key` header. */\n  readonly idempotencyKey?: string | undefined\n}")
-	}
-	switch operation.Concurrency {
-	case "required":
-		parts = append(parts, "{\n  /** Required entity tag sent through the `If-Match` header. */\n  readonly ifMatch: string\n}")
-	case "optional":
-		parts = append(parts, "{\n  /** Optional entity tag sent through the `If-Match` header. */\n  readonly ifMatch?: string | undefined\n}")
-	}
 	fmt.Fprintf(output, "/**\n * Per-request transport options for `%s` (`%s %s`).\n", operation.OperationID, operation.Method, operation.Path)
-	if operation.Idempotency == "required" {
-		output.WriteString(" * Requires an idempotency key.\n")
-	}
-	if operation.Concurrency == "required" {
-		output.WriteString(" * Requires an `If-Match` entity tag.\n")
-	}
 	if boolValue(operation.Raw, "deprecated") {
 		output.WriteString(" * @deprecated This operation is deprecated.\n")
 	}
@@ -730,10 +707,14 @@ func emitRawResponseJSDoc(output *bytes.Buffer, document *ir.Document, operation
 
 func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, operationName string, parameters []operationParameter) error {
 	var filters []operationParameter
-	_, hasSort := operation.Raw["x-sort"]
+	var sorts []operationParameter
 	for _, parameter := range parameters {
 		isPaginationControl := operation.Pagination != "" && (parameter.Name == "cursor" || parameter.Name == "offset" || parameter.Name == "limit")
-		if isPaginationControl || (hasSort && parameter.Name == "sort") {
+		if isPaginationControl {
+			continue
+		}
+		if parameter.Sort != nil {
+			sorts = append(sorts, parameter)
 			continue
 		}
 		filters = append(filters, parameter)
@@ -771,18 +752,25 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 		output.WriteString("}\n\n")
 		parts = append(parts, filterType)
 	}
-	if fields := operationSortFields(operation); len(fields) > 0 {
+	for index, parameter := range sorts {
 		sortType := operationName + "SortInput"
-		quoted := make([]string, 0, len(fields))
-		for _, field := range fields {
-			quoted = append(quoted, quoteTS(field))
+		if len(sorts) > 1 {
+			sortType += fmt.Sprintf("%d", index+1)
 		}
-		fmt.Fprintf(output, "/** Sort expression for `%s`. */\n", operation.OperationID)
-		fmt.Fprintf(output, "type %s = {\n", sortType)
-		fmt.Fprintf(output, "  /** OpenAPI field selected for sorting. */\n  readonly field: %s\n", strings.Join(quoted, " | "))
-		output.WriteString("  /** Sort direction. */\n  readonly direction: Contract.SortDirection\n")
-		output.WriteString("}\n\n")
-		parts = append(parts, "{\n  /** Ordered sort expressions applied by the server. */\n  readonly sort?: readonly "+sortType+"[] | undefined\n}")
+		members := make([]string, 0, len(parameter.Sort.Values))
+		for _, value := range parameter.Sort.Values {
+			members = append(members, "{ readonly field: "+quoteTS(value.Field)+"; readonly direction: "+quoteTS(value.Direction)+" }")
+		}
+		fmt.Fprintf(output, "/** Structured sort expression for exact query parameter `%s`. */\n", sanitizeComment(parameter.Name))
+		fmt.Fprintf(output, "type %s = %s\n\n", sortType, strings.Join(members, " | "))
+		optional := "?"
+		valueType := "readonly " + sortType + "[]"
+		if parameter.Required {
+			optional = ""
+		} else {
+			valueType += " | undefined"
+		}
+		parts = append(parts, "{\n  /** Ordered sort expressions serialized to the declared OpenAPI enum. */\n  readonly "+quoteTS(parameter.Property)+optional+": "+valueType+"\n}")
 	}
 	if len(parts) == 0 {
 		if err := emitParameterType(output, document, operation, operationName+"QueryInput", "query"); err != nil {
@@ -799,35 +787,6 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 	output.WriteString(" */\n")
 	fmt.Fprintf(output, "type %sQueryInput = %s\n\n", operationName, strings.Join(parts, " & "))
 	return nil
-}
-
-func operationSortFields(operation ir.Operation) []string {
-	value := operation.Raw["x-sort"]
-	if object, ok := value.(map[string]any); ok {
-		for _, key := range []string{"fields", "allowedFields"} {
-			if fields, exists := object[key]; exists {
-				value = fields
-				break
-			}
-		}
-	}
-	items, _ := value.([]any)
-	seen := make(map[string]bool)
-	var result []string
-	for _, item := range items {
-		field, _ := item.(string)
-		if object, ok := item.(map[string]any); ok {
-			field, _ = object["field"].(string)
-			if field == "" {
-				field, _ = object["name"].(string)
-			}
-		}
-		if field != "" && !seen[field] {
-			seen[field] = true
-			result = append(result, field)
-		}
-	}
-	return result
 }
 
 func requestBodyType(document *ir.Document, body map[string]any) (string, error) {
@@ -1468,11 +1427,7 @@ func operationInputAlias(operation ManifestOperation) string {
 
 func paginationFunctionType(operation ManifestOperation, itemType string) string {
 	operationName := operationTypeName(manifestRouteKey(operation))
-	optional := "?"
-	if operation.Idempotency == "required" || operation.Concurrency == "required" {
-		optional = ""
-	}
-	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ">, options" + optional + ": " + operationName + "Options) => AsyncIterable<" + itemType + ">"
+	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ">, options?: " + operationName + "Options) => AsyncIterable<" + itemType + ">"
 }
 
 func operationValueName(operationID string) string {
@@ -1562,6 +1517,13 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 			}
 			if parameter.ContentType != "" {
 				fields = append(fields, "contentType: "+quoteTS(parameter.ContentType))
+			}
+			if parameter.Sort != nil {
+				values := make([]runtimeProperty, 0, len(parameter.Sort.Values))
+				for _, value := range parameter.Sort.Values {
+					values = append(values, runtimeProperty{key: value.Field + "\x00" + value.Direction, value: quoteTS(value.Wire)})
+				}
+				fields = append(fields, "sort: "+runtimeObjectExpression(values))
 			}
 			items = append(items, "{ "+strings.Join(fields, ", ")+" }")
 		}

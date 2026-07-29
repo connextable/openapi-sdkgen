@@ -16,6 +16,10 @@ type Document struct {
 	// Provenance maps normalized document pointers to their originating source
 	// location. Related locations retain reference/composition sites.
 	Provenance map[string]Provenance
+	// ErrorCategories is populated only by a target preparation plan after
+	// validating recognized error-envelope schemas.
+	ErrorCategories    map[string]string
+	ParameterSortPlans map[string]SortParameterPlan
 }
 
 type SourceLocation struct {
@@ -46,6 +50,7 @@ type Server struct {
 
 type Operation struct {
 	RouteKey           string
+	Pointer            string
 	OperationID        string
 	Method             string
 	Path               string
@@ -54,10 +59,37 @@ type Operation struct {
 	Tags               []string
 	Visibility         string
 	Envelope           string
-	Concurrency        string
-	Idempotency        string
 	Pagination         string
+	Extensions         OperationExtensions
+	SortParameters     map[string]SortParameterPlan
 	PathParameterOrder []string
 	PathItemRaw        map[string]any
 	Raw                map[string]any
+}
+
+// StringExtension preserves declaration presence independently from its value
+// and JSON type. Targets validate the declaration before assigning behavior.
+type StringExtension struct {
+	Present bool
+	Valid   bool
+	Value   string
+	Raw     any
+	Pointer string
+}
+
+type OperationExtensions struct {
+	Envelope   StringExtension
+	Visibility StringExtension
+}
+
+// SortParameterPlan is a validated projection from structured SDK input to
+// exact OpenAPI enum wire values.
+type SortParameterPlan struct {
+	Values []SortValue
+}
+
+type SortValue struct {
+	Wire      string
+	Field     string
+	Direction string
 }

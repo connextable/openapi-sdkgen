@@ -74,6 +74,9 @@ func emitServerArtifacts(document *ir.Document) ([]Artifact, error) {
 func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
 	result := make([]callbackDefinition, 0)
 	for _, operation := range document.Operations {
+		if operation.Visibility == "hidden" {
+			continue
+		}
 		callbacks, _ := operation.Raw["callbacks"].(map[string]any)
 		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operationRouteKey(operation), operation.OperationID, "")
 		if err != nil {
@@ -123,7 +126,7 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 				if operationID == "" {
 					operationID = name
 				}
-				operationPath := appendOpenAPIPointer(appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression), method)
+				operationPath := appendOpenAPIPointer(appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression), item.key)
 				parameters, paramsType, err := inboundParameterDefinitions(document, resolvedPathItem, operation, operationPath, true)
 				if err != nil {
 					return nil, err
@@ -549,7 +552,7 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 		for _, itemOperation := range operations {
 			method := itemOperation.method
 			operation := itemOperation.operation
-			operationPath := openAPIPointer("webhooks", name, method)
+			operationPath := openAPIPointer("webhooks", name, itemOperation.key)
 			parameters, paramsType, err := inboundParameterDefinitions(document, resolvedItem, operation, operationPath, true)
 			if err != nil {
 				return nil, err
@@ -732,7 +735,7 @@ func isInboundRuntimeMediaType(mediaType string, schema map[string]any) bool {
 }
 
 func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[string]any, path string, allowPath bool) (string, string, error) {
-	parameters, err := operationParameters(document, ir.Operation{PathItemRaw: pathItem, Raw: operation})
+	parameters, err := operationParameters(document, ir.Operation{Pointer: path, PathItemRaw: pathItem, Raw: operation})
 	if err != nil {
 		return "", "", fmt.Errorf("%s/parameters: %w", path, err)
 	}
@@ -756,10 +759,24 @@ func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[
 		if parameter.ContentType != "" {
 			entry += ", contentType: " + quoteTS(parameter.ContentType)
 		}
+		if parameter.Sort != nil {
+			values := make([]runtimeProperty, 0, len(parameter.Sort.Values))
+			for _, value := range parameter.Sort.Values {
+				values = append(values, runtimeProperty{key: value.Field + "\x00" + value.Direction, value: quoteTS(value.Wire)})
+			}
+			entry += ", sort: " + runtimeObjectExpression(values)
+		}
 		entries = append(entries, entry+" }")
 		valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 		if err != nil {
 			return "", "", fmt.Errorf("%s/parameters/%s: render input type: %w", path, parameter.Name, err)
+		}
+		if parameter.Sort != nil {
+			members := make([]string, 0, len(parameter.Sort.Values))
+			for _, value := range parameter.Sort.Values {
+				members = append(members, "{ readonly field: "+quoteTS(value.Field)+"; readonly direction: "+quoteTS(value.Direction)+" }")
+			}
+			valueType = "readonly (" + strings.Join(members, " | ") + ")[]"
 		}
 		location := parameter.Location
 		if location == "header" {
@@ -1010,6 +1027,7 @@ export interface InboundParameterDefinition {
   readonly schema: InboundSchema
   /** Full generated input schema: validates wire names then maps them to TS names. */
   readonly wireSchema: WireSchema
+  readonly sort?: Readonly<Record<string, string>>
 }
 
 /** Decodes declared inbound parameters before host authentication and handler execution. */
@@ -1036,12 +1054,22 @@ export async function decodeInboundParameters(request: Request, definitions: rea
     try {
       validateWireValue(value, definition.wireSchema, wireSchemas, "decode")
       const section = definition.location === "header" ? result.headerParams : definition.location === "cookie" ? result.cookieParams : result[definition.location]
-      defineOwnDataProperty(section, definition.property, decodeWireValue(value, definition.wireSchema, wireSchemas))
+      defineOwnDataProperty(section, definition.property, decodeInboundSortValue(decodeWireValue(value, definition.wireSchema, wireSchemas), definition))
     } catch (error) {
       throw new InboundRequestError(new Response("Invalid parameter " + definition.name + ": " + (error instanceof Error ? error.message : "invalid value"), { status: 400 }))
     }
   }
   return result
+}
+
+function decodeInboundSortValue(value: unknown, definition: InboundParameterDefinition): unknown {
+  if (definition.sort === undefined || !Array.isArray(value)) return value
+  return value.map((wire) => {
+    const match = Object.entries(definition.sort ?? {}).find((entry) => entry[1] === wire)
+    if (match === undefined) throw new TypeError("invalid declared sort wire value")
+    const separator = match[0].indexOf("\u0000")
+    return { field: match[0].slice(0, separator), direction: match[0].slice(separator + 1) }
+  })
 }
 
 async function decodeInboundParameterContent(raw: unknown, definition: InboundParameterDefinition, schemas: InboundSchemas, wireSchemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined): Promise<unknown> {

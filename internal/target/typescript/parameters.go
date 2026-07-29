@@ -1,7 +1,10 @@
 package typescript
 
 import (
+	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 )
@@ -19,15 +22,31 @@ type operationParameter struct {
 	AllowReserved bool
 	ContentType   string
 	Schema        any
+	Raw           map[string]any
+	Pointer       string
+	Sort          *ir.SortParameterPlan
 }
 
 func operationParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
 	merged := make(map[string]operationParameter)
 	order := make([]string, 0)
-	for _, source := range []any{operation.PathItemRaw["parameters"], operation.Raw["parameters"]} {
-		values, _ := source.([]any)
-		for _, value := range values {
+	sources := []struct {
+		value   any
+		pointer string
+	}{
+		{value: operation.PathItemRaw["parameters"], pointer: operationPathItemPointer(operation) + "/parameters"},
+		{value: operation.Raw["parameters"], pointer: operation.Pointer + "/parameters"},
+	}
+	for _, source := range sources {
+		values, _ := source.value.([]any)
+		for index, value := range values {
 			raw, _ := value.(map[string]any)
+			pointer := source.pointer + "/" + strconv.Itoa(index)
+			if reference, _ := raw["$ref"].(string); reference != "" {
+				if resolvedPointer := localReferencePointer(reference); resolvedPointer != "" {
+					pointer = resolvedPointer
+				}
+			}
 			var err error
 			raw, err = resolveComponentObject(document, raw, "parameters")
 			if err != nil {
@@ -69,9 +88,18 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 				order = append(order, key)
 			}
 			description, _ := raw["description"].(string)
+			var sortPlan *ir.SortParameterPlan
+			if value, exists := operation.SortParameters[key]; exists {
+				copied := value
+				sortPlan = &copied
+			} else if value, exists := document.ParameterSortPlans[pointer]; exists {
+				copied := value
+				sortPlan = &copied
+			}
 			merged[key] = operationParameter{
 				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operationRouteKey(operation)+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
 				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
+				Raw: raw, Pointer: pointer, Sort: sortPlan,
 			}
 		}
 	}
@@ -86,6 +114,27 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 		return pathParameterIndex(operation.PathParameterOrder, result[i].Name) < pathParameterIndex(operation.PathParameterOrder, result[j].Name)
 	})
 	return result, nil
+}
+
+func operationPathItemPointer(operation ir.Operation) string {
+	if before, _, found := strings.Cut(operation.Pointer, "/additionalOperations/"); found {
+		return before
+	}
+	if index := strings.LastIndex(operation.Pointer, "/"); index >= 0 {
+		return operation.Pointer[:index]
+	}
+	return operation.Pointer
+}
+
+func localReferencePointer(reference string) string {
+	if !strings.HasPrefix(reference, "#") {
+		return ""
+	}
+	decoded, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	if err != nil || !strings.HasPrefix(decoded, "/") {
+		return ""
+	}
+	return "#" + decoded
 }
 
 func defaultParameterStyle(location string) string {

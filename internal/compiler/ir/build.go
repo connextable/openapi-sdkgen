@@ -64,7 +64,7 @@ func Build(document *openapidoc.Document) (*Document, error) {
 			if method == "query" && versionLine != openapidoc.Version32 {
 				return nil, fmt.Errorf("OpenAPI 3.2 feature at %s: query method is not available in OpenAPI %s.x", jsonPointer("paths", path, method), versionLine)
 			}
-			result.Operations = append(result.Operations, buildOperation(path, strings.ToUpper(method), pathItem, operation))
+			result.Operations = append(result.Operations, buildOperation(path, strings.ToUpper(method), jsonPointer("paths", path, method), pathItem, operation))
 		}
 		additional, _ := pathItem["additionalOperations"].(map[string]any)
 		if len(additional) > 0 && versionLine != openapidoc.Version32 {
@@ -75,7 +75,7 @@ func Build(document *openapidoc.Document) (*Document, error) {
 			if !ok {
 				return nil, fmt.Errorf("additional operation %q %q must be an object", method, path)
 			}
-			result.Operations = append(result.Operations, buildOperation(path, method, pathItem, operation))
+			result.Operations = append(result.Operations, buildOperation(path, method, jsonPointer("paths", path, "additionalOperations", method), pathItem, operation))
 		}
 	}
 	sort.SliceStable(result.Operations, func(i, j int) bool {
@@ -259,23 +259,38 @@ func jsonPointerToken(token string) (string, error) {
 	return output.String(), nil
 }
 
-func buildOperation(path, method string, pathItemRaw, raw map[string]any) Operation {
+func buildOperation(path, method, pointer string, pathItemRaw, raw map[string]any) Operation {
 	return Operation{
-		RouteKey:           method + " " + path,
-		OperationID:        stringValue(raw, "operationId"),
-		Method:             method,
-		Path:               path,
-		Summary:            stringValue(raw, "summary"),
-		Description:        stringValue(raw, "description"),
-		Tags:               stringSlice(raw["tags"]),
-		Visibility:         stringValue(raw, "x-sdk-visibility"),
-		Envelope:           stringValue(raw, "x-envelope"),
-		Concurrency:        stringValue(raw, "x-concurrency"),
-		Idempotency:        stringValue(raw, "x-idempotency"),
-		Pagination:         stringValue(raw, "x-pagination"),
+		RouteKey:    method + " " + path,
+		Pointer:     "#" + pointer,
+		OperationID: stringValue(raw, "operationId"),
+		Method:      method,
+		Path:        path,
+		Summary:     stringValue(raw, "summary"),
+		Description: stringValue(raw, "description"),
+		Tags:        stringSlice(raw["tags"]),
+		Visibility:  stringValue(raw, "x-sdk-visibility"),
+		Envelope:    stringValue(raw, "x-envelope"),
+		Pagination:  stringValue(raw, "x-pagination"),
+		Extensions: OperationExtensions{
+			Envelope:   readStringExtension(raw, "x-envelope", "#"+pointer+"/x-envelope"),
+			Visibility: readStringExtension(raw, "x-sdk-visibility", "#"+pointer+"/x-sdk-visibility"),
+		},
 		PathParameterOrder: templateParameters(path),
 		PathItemRaw:        pathItemRaw,
 		Raw:                raw,
+	}
+}
+
+func readStringExtension(raw map[string]any, name, pointer string) StringExtension {
+	value, present := raw[name]
+	text, valid := value.(string)
+	return StringExtension{
+		Present: present,
+		Valid:   present && valid,
+		Value:   text,
+		Raw:     value,
+		Pointer: pointer,
 	}
 }
 

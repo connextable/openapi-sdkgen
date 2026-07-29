@@ -85,9 +85,6 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 		inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
 		optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
 		optionMarker := "?"
-		if operationRequiresOptions(stream.Operation) {
-			optionMarker = ""
-		}
 		if len(inputs) == 0 {
 			fmt.Fprintf(output, "    readonly %s: (options%s: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), optionMarker, optionsType, stream.ItemType)
 		} else {
@@ -122,10 +119,6 @@ func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []gen
 		}
 	}
 	return nil
-}
-
-func operationRequiresOptions(operation ir.Operation) bool {
-	return operation.Idempotency == "required" || operation.Concurrency == "required"
 }
 
 func emitStreamReturnValue(output *bytes.Buffer, streams []generatedStream) error {
@@ -169,6 +162,10 @@ func streamFunctionType(document *ir.Document, stream generatedStream) (string, 
 		return "(options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
 	}
 	return "(input: " + operationSlotType(operationRouteKey(stream.Operation), "input") + ", options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
+}
+
+func operationRequiresOptions(ir.Operation) bool {
+	return false
 }
 
 func isStreamMediaType(mediaType string) bool {

@@ -162,7 +162,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		`Type: ` + "`Contract.ComponentOutput<\"Product\">`.",
 		"Operation ID: `createProduct`.",
 		"HTTP: `POST /products`.",
-		"* ```ts\n * await api.products.create({ body }, { idempotencyKey })\n * ```",
+		"* ```ts\n * await api.products.create({ headerParams, body })\n * ```",
 		"Sends the request and returns the decoded response body.",
 		"@returns Decoded response body as",
 		"Sends the request and returns the decoded body with HTTP response metadata.",
@@ -172,8 +172,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Product identifier.",
 		"Opaque continuation cursor.",
 		"Case-insensitive product search.",
-		"Sort expression for `listProducts`.",
-		"Ordered sort expressions applied by the server.",
+		"Structured sort expression for exact query parameter `sort`.",
+		"Ordered sort expressions serialized to the declared OpenAPI enum.",
 		"Status- and media-aware raw response for `createProduct`",
 		"`201 application/json` — Created",
 		"Creates a generated API client.",
@@ -195,8 +195,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<Contract.ComponentOutput<"Product">`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch"> & {`) || !strings.Contains(clientSource, "Required idempotency key") || !strings.Contains(clientSource, "readonly idempotencyKey: string") {
-		t.Fatalf("required idempotency option missing:\n%s", clientSource)
+	if !strings.Contains(clientSource, `readonly "Idempotency-Key": string`) || strings.Contains(clientSource, "readonly idempotencyKey") || strings.Contains(clientSource, "readonly ifMatch") {
+		t.Fatalf("standard idempotency header contract is wrong:\n%s", clientSource)
 	}
 	if !strings.Contains(clientSource, `readonly "createProduct": Routes["POST /products"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
@@ -224,7 +224,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if len(manifest.Operations) != 5 || manifest.Operations[0].OperationID != "hiddenAudit" || manifest.Operations[1].OperationID != "listProducts" || manifest.Operations[2].OperationID != "createProduct" || manifest.Operations[3].OperationID != "getProduct" || manifest.Operations[4].OperationID != "listSorted" {
 		t.Fatalf("manifest operations = %#v", manifest.Operations)
 	}
-	if manifest.Operations[2].CallExpression != "api.products.create({ body }, { idempotencyKey })" || manifest.Operations[2].OutputType != `ComponentOutput<"Product">` {
+	if manifest.Operations[2].CallExpression != "api.products.create({ headerParams, body })" || manifest.Operations[2].OutputType != `ComponentOutput<"Product">` {
 		t.Fatalf("create manifest = %#v", manifest.Operations[2])
 	}
 	if manifest.Operations[2].Description != "Creates one catalog product from the supplied body." {
@@ -260,7 +260,6 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
             "content": {"application/json": {"schema": {"type": "array", "items": {"type": "string"}}}}
           }
         },
-        "x-envelope": "none",
         "x-pagination": "cursor"
       }
     }
@@ -618,9 +617,6 @@ const emitterFixture = `{
       "get": {
         "operationId": "hiddenAudit",
 		"responses": {"200": {"description": "OK", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HiddenOnly"}}}}},
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
         "x-sdk-visibility": "hidden"
 }
 
@@ -628,8 +624,11 @@ const emitterFixture = `{
     "/sorted": {
       "get": {
         "operationId": "listSorted",
+        "parameters": [
+          {"name": "sort", "in": "query", "schema": {"type": "array", "items": {"type": "string", "enum": ["updatedAt:asc", "updatedAt:desc", "id:asc", "id:desc"]}}, "x-sort": {"format": "field-direction"}}
+        ],
         "responses": {"204": {"description": "OK"}},
-        "x-sort": {"fields": ["updatedAt", "id"]}
+        "security": []
       }
     },
     "/products": {
@@ -640,7 +639,8 @@ const emitterFixture = `{
         "parameters": [
           {"name": "cursor", "in": "query", "description": "Opaque continuation cursor.", "schema": {"type": "string"}},
           {"name": "limit", "in": "query", "schema": {"type": "integer"}},
-          {"name": "search", "in": "query", "description": "Case-insensitive product search.", "schema": {"type": "string"}}
+          {"name": "search", "in": "query", "description": "Case-insensitive product search.", "schema": {"type": "string"}},
+          {"name": "sort", "in": "query", "schema": {"type": "array", "items": {"type": "string", "enum": ["name:asc", "name:desc", "createdAt:asc", "createdAt:desc"]}}, "x-sort": {"format": "field-direction"}}
         ],
         "responses": {
           "200": {
@@ -648,18 +648,16 @@ const emitterFixture = `{
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductPage"}}}
           }
         },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "unsupported",
-        "x-pagination": "cursor",
-        "x-sort": ["name", "createdAt"],
-        "x-sdk-visibility": "public"
+        "x-pagination": "cursor"
       },
       "post": {
         "operationId": "createProduct",
 		"security": [],
         "summary": "Create a product",
         "description": "Creates one catalog product from the supplied body.",
+        "parameters": [
+          {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string"}}
+        ],
         "requestBody": {
           "required": true,
           "description": "Product values accepted during creation.",
@@ -674,11 +672,7 @@ const emitterFixture = `{
             "description": "Invalid",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ValidationFailedError"}}}
           }
-        },
-        "x-envelope": "none",
-        "x-concurrency": "none",
-        "x-idempotency": "required",
-        "x-sdk-visibility": "public"
+        }
       }
     },
 	"/products/{productID}": {
@@ -695,11 +689,7 @@ const emitterFixture = `{
 					"description": "OK",
 					"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Product"}}}
 				}
-			},
-			"x-envelope": "none",
-			"x-concurrency": "none",
-			"x-idempotency": "unsupported",
-			"x-sdk-visibility": "public"
+			}
 		}
 	}
   },
@@ -763,16 +753,16 @@ const nestedResourceFixture = `{
   "servers": [{"url": "/v1"}],
   "paths": {
     "/auth/login": {
-      "post": {"operationId": "login", "responses": {"200": {"description": "OK"}}, "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"}
+      "post": {"operationId": "login", "responses": {"200": {"description": "OK"}}}
     },
     "/auth/sessions": {
-      "delete": {"operationId": "revokeSessions", "responses": {"204": {"description": "No Content"}}, "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"}
+      "delete": {"operationId": "revokeSessions", "responses": {"204": {"description": "No Content"}}}
     },
     "/auth/sessions/{sessionId}": {
-      "delete": {"operationId": "revokeSession", "parameters": [{"name": "sessionId", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"204": {"description": "No Content"}}, "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"}
+      "delete": {"operationId": "revokeSession", "parameters": [{"name": "sessionId", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"204": {"description": "No Content"}}}
     },
     "/auth/signup/verification-code": {
-      "post": {"operationId": "requestCode", "responses": {"202": {"description": "Accepted"}}, "x-envelope": "none", "x-concurrency": "none", "x-idempotency": "unsupported", "x-sdk-visibility": "public"}
+      "post": {"operationId": "requestCode", "responses": {"202": {"description": "Accepted"}}}
     }
   }
 }`

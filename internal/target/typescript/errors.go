@@ -124,7 +124,7 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	reachable := reachableComponentSchemas(document)
+	reachable := reachableErrorComponentSchemas(document)
 	byCode := make(map[string][]errorContract)
 	bySchema := make(map[string][]errorContract)
 	for _, schemaName := range names {
@@ -144,7 +144,7 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 			}
 			detailsType = value
 		}
-		category, _ := schema["x-error-category"].(string)
+		category := document.ErrorCategories[schemaName]
 		description, _ := schema["description"].(string)
 		for _, code := range codes {
 			contract := errorContract{Code: code, Category: category, Description: description, Details: detailsType, SchemaName: schemaName}
@@ -209,6 +209,47 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 	return result, bySchema, nil
 }
 
+func reachableErrorComponentSchemas(document *ir.Document) map[string]bool {
+	result := make(map[string]bool)
+	var visitSchema func(map[string]any)
+	visitSchema = func(schema map[string]any) {
+		for _, name := range schemaReferences(schema) {
+			if result[name] {
+				continue
+			}
+			result[name] = true
+			visitSchema(document.ComponentSchemas[name])
+		}
+	}
+	for _, operation := range document.Operations {
+		if operation.Visibility == "hidden" {
+			continue
+		}
+		responses, _ := operation.Raw["responses"].(map[string]any)
+		for status, value := range responses {
+			if strings.HasPrefix(status, "2") {
+				continue
+			}
+			response, _ := value.(map[string]any)
+			resolved, err := resolveComponentObject(document, response, "responses")
+			if err != nil {
+				continue
+			}
+			content, _ := resolved["content"].(map[string]any)
+			for _, mediaValue := range content {
+				media, _ := mediaValue.(map[string]any)
+				media, err = resolveMediaTypeObject(document, media)
+				if err != nil {
+					continue
+				}
+				schema, _ := media["schema"].(map[string]any)
+				visitSchema(schema)
+			}
+		}
+	}
+	return result
+}
+
 func containsErrorContract(contracts []errorContract, candidate errorContract) bool {
 	for _, contract := range contracts {
 		if contract.Code == candidate.Code && contract.Details == candidate.Details && contract.Category == candidate.Category {
@@ -258,32 +299,13 @@ func sortedStringKeys(values map[string]bool) []string {
 }
 
 func schemaErrorCodes(document *ir.Document, schema map[string]any) ([]string, map[string]any) {
-	if reference, _ := schema["$ref"].(string); reference != "" {
-		name, err := componentSchemaReferenceName(reference)
-		if err != nil {
-			return nil, nil
-		}
-		return schemaErrorCodes(document, document.ComponentSchemas[name])
-	}
-	properties, _ := schema["properties"].(map[string]any)
-	errorSchema, _ := properties["error"].(map[string]any)
-	if len(errorSchema) == 0 {
+	codes, errorSchema, recognized := recognizedErrorEnvelope(document, schema)
+	if !recognized {
 		return nil, nil
 	}
-	if reference, _ := errorSchema["$ref"].(string); reference != "" {
-		name, err := componentSchemaReferenceName(reference)
-		if err != nil {
-			return nil, nil
-		}
-		errorSchema = document.ComponentSchemas[name]
-	}
 	errorProperties, _ := errorSchema["properties"].(map[string]any)
-	codeSchema, _ := errorProperties["code"].(map[string]any)
 	detailsSchema, _ := errorProperties["details"].(map[string]any)
-	if code, _ := codeSchema["const"].(string); code != "" {
-		return []string{code}, detailsSchema
-	}
-	return schemaEnum(codeSchema), detailsSchema
+	return codes, detailsSchema
 }
 
 func isErrorSchema(document *ir.Document, schema map[string]any) bool {

@@ -52,6 +52,12 @@ func TestBuildExtractsOperationsDeterministically(t *testing.T) {
 	if got := model.Operations[1].PathParameterOrder; !reflect.DeepEqual(got, []string{"itemId"}) {
 		t.Fatalf("path parameters = %v", got)
 	}
+	getItem := model.Operations[1]
+	if getItem.Pointer != "#/paths/~1items~1{itemId}/get" ||
+		!getItem.Extensions.Envelope.Present || !getItem.Extensions.Envelope.Valid || getItem.Extensions.Envelope.Value != "data" ||
+		!getItem.Extensions.Visibility.Present || !getItem.Extensions.Visibility.Valid || getItem.Extensions.Visibility.Value != "public" {
+		t.Fatalf("typed operation extensions = %#v", getItem)
+	}
 	if _, ok := model.ComponentSchemas["Item"]; !ok {
 		t.Fatal("component schema not preserved")
 	}
