@@ -2,7 +2,7 @@ import {
   createClient,
   TransportErrorCode,
   isAPIError,
-  isValidationFailedError,
+  isErrorCategory,
 } from "./generated/widget-sdk/index.js";
 
 const baseURL = process.env.WIDGET_API_BASE_URL ?? "http://127.0.0.1:18788/v1";
@@ -55,7 +55,7 @@ const validation = await api.widgets
     body: { name: "" },
   })
   .catch((error: unknown) => error);
-if (!isValidationFailedError(validation)) throw validation;
+if (!isErrorCategory(validation, "validation")) throw validation;
 if (validation.details?.field !== "name") {
   throw new Error(`unexpected validation error: ${JSON.stringify(validation)}`);
 }

@@ -49,6 +49,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	}
 	output.WriteString("  type RequestOptions,\n")
 	output.WriteString("  type RawResponseFor,\n")
+	output.WriteString("  type TransportError,\n")
 	output.WriteString("  type WireSchemas,\n")
 	output.WriteString("} from \"./runtime.js\"\n")
 	output.WriteString("import type * as Contract from \"./types.js\"\n\n")
@@ -98,7 +99,6 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		operationName := operationTypeName(operation.OperationID)
 		emitOperationCatalogJSDoc(&output, "  ", operation)
 		fmt.Fprintf(&output, "  readonly %s: {\n", property)
 		fmt.Fprintf(&output, "    /** Complete generated input type. */\n")
@@ -106,7 +106,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		fmt.Fprintf(&output, "    /** Decoded successful output type. */\n")
 		fmt.Fprintf(&output, "    readonly output: %s\n", operation.renderOutput(typeRenderContract))
 		fmt.Fprintf(&output, "    /** Generated server and transport error union. */\n")
-		fmt.Fprintf(&output, "    readonly error: Errors.%sError\n", operationName)
+		fmt.Fprintf(&output, "    readonly error: %s\n", operation.renderError(typeRenderContract))
 		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n\n")

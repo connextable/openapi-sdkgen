@@ -202,15 +202,11 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`export type ServerErrorCode = "validation_failed"`,
-		`export type ValidationFailedError = APIError<"validation_failed", ServerErrorDetailsByCode["validation_failed"]>`,
-		"export function isValidationFailedError",
-		"export function isValidationError",
-		"export type CreateProductServerError = ValidationFailedError",
-		"export type CreateProductError = CreateProductServerError | TransportError",
+		`export type ServerError<Code extends ServerErrorCode, Details = ServerErrorDetailsByCode[Code]> = APIError<Code, Details>`,
+		`readonly "validation": "validation_failed"`,
+		"export type ServerErrorByCategory",
+		"export function isErrorCategory",
 		"The request failed validation.",
-		"Checks whether an unknown value is a {@link ValidationFailedError}.",
-		"Server errors in the `validation` category.",
-		"Server-declared errors for `createProduct` (`POST /products`).",
 	} {
 		if !strings.Contains(errorsSource, expected) {
 			t.Errorf("errors missing %q\n%s", expected, errorsSource)

@@ -5,8 +5,8 @@ import {
   createClient,
   getRequestID,
   isAPIError,
-  isValidationError,
-  isValidationFailedError,
+  isErrorCategory,
+  isErrorCode,
 } from "../fixtures/generated/client/index.js";
 import type { UploadWidgetBodyInput } from "../fixtures/generated/client/index.js";
 import { openapi } from "../fixtures/generated/client/metadata.js";
@@ -115,10 +115,10 @@ describe("generated TypeScript source", () => {
     const error = await api.widgets
       .create({ query: {}, headerParams: { xTraceID: "trace-2" }, body: { name: "invalid" } })
       .catch((cause: unknown) => cause);
-    expect(isValidationFailedError(error)).toBe(true);
-    expect(isValidationError(error)).toBe(true);
+    expect(isErrorCode(error, "validation_failed")).toBe(true);
+    expect(isErrorCategory(error, "validation")).toBe(true);
     expect(getRequestID(error)).toBe("request-error");
-    if (!isValidationFailedError(error)) throw new Error("expected validation error");
+    if (!isErrorCategory(error, "validation")) throw new Error("expected validation error");
     expect(error.details).toEqual({ field: "name" });
   });
 

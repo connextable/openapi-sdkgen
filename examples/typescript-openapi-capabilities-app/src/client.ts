@@ -2,7 +2,7 @@ import { request as httpRequest } from "node:http";
 
 import {
   createClient,
-  isValidationFailedError,
+  isErrorCategory,
 } from "./generated/capabilities-sdk/index.js";
 import { openapi } from "./generated/capabilities-sdk/metadata.js";
 
@@ -65,7 +65,7 @@ assert(created.data.id === "item-3" && !("secret" in created.data), "item projec
 const invalid = await api.items
   .create({ body: { name: "server-rejected", status: "draft", callbackURL: `${callbackBaseURL}/callbacks/delivery` } })
   .catch((error: unknown) => error);
-assert(isValidationFailedError(invalid), "typed validation error was not preserved");
+assert(isErrorCategory(invalid, "validation"), "typed validation error was not preserved");
 assert(invalid.details?.name === "must not be empty", "validation details changed");
 
 // Each generated request-body codec travels over the same ordinary client API.
