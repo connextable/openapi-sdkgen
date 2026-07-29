@@ -626,9 +626,13 @@ func TestServerAddOnEmitsInboundParameterDefinitions(t *testing.T) {
 func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0","info":{"title":"Server catalog","version":"1"},
-  "paths":{"/source":{"post":{"operationId":"createSource","responses":{"204":{"description":"OK"}},"callbacks":{
-    "copied":{"{$request.body#/callback}":{"$ref":"#/components/pathItems/CopyCallback"}}
-  }}}},
+  "paths":{
+    "/source":{"post":{"operationId":"createSource","responses":{"204":{"description":"OK"}},"callbacks":{
+      "copied":{"{$request.body#/callback}":{"$ref":"#/components/pathItems/CopyCallback"}}
+    }}},
+    "/shared-hook":{"additionalOperations":{"Purge":{"operationId":"purgeShared","responses":{"204":{"description":"OK"}}}}},
+    "/shared-callback":{"additionalOperations":{"Copy":{"operationId":"copyShared","responses":{"204":{"description":"OK"}}}}}
+  },
   "webhooks":{
     "first":{"post":{"operationId":"firstHook","responses":{"204":{"description":"OK"}}}},
     "second":{"post":{"operationId":"secondHook","parameters":[
@@ -640,16 +644,18 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
     ],"responses":{"204":{"description":"OK"}}}},
     "purged":{"$ref":"#/components/pathItems/PurgeHook"},
     "validated":{"post":{"operationId":"validatedHook","requestBody":{"required":true,"content":{"application/json":{"schema":{
-      "type":"object","required":["choice","constant","items"],"properties":{
+      "type":"object","required":["choice","order","constant","zero","items"],"properties":{
         "choice":{"enum":[{"a":1,"b":2}]},
+        "order":{"enum":[[1,2]]},
         "constant":{"const":{"x":1,"y":2}},
-        "items":{"type":"array","uniqueItems":true,"items":{"type":"object"}}
+        "zero":{"const":0},
+        "items":{"type":"array","uniqueItems":true}
       }
     }}}},"responses":{"204":{"description":"OK"}}}}
   },
   "components":{"pathItems":{
-    "PurgeHook":{"additionalOperations":{"PURGE":{"operationId":"purgeHook","responses":{"204":{"description":"OK"}}}}},
-    "CopyCallback":{"additionalOperations":{"COPY":{"operationId":"copyCallback","responses":{"204":{"description":"OK"}}}}}
+    "PurgeHook":{"$ref":"#/paths/~1shared-hook"},
+    "CopyCallback":{"$ref":"#/paths/~1shared-callback"}
   }}
 }`))
 	if err != nil {
@@ -670,7 +676,7 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
 	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
 	for _, expected := range []string{
-		`readonly "PURGE": { readonly context:`,
+		`readonly "Purge": { readonly context:`,
 		`readonly input:`,
 		`readonly output:`,
 		`readonly response:`,
@@ -682,7 +688,7 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
 			t.Fatalf("webhook catalog missing %q:\n%s", expected, webhooks)
 		}
 	}
-	for _, expected := range []string{`readonly "COPY": { readonly context:`, `readonly handler:`, `readonly endpoint:`} {
+	for _, expected := range []string{`readonly "Copy": { readonly context:`, `readonly handler:`, `readonly endpoint:`} {
 		if !strings.Contains(callbacks, expected) {
 			t.Fatalf("callback catalog missing %q:\n%s", expected, callbacks)
 		}
@@ -737,18 +743,21 @@ const callbackModule = await import(pathToFileURL(process.argv[2]).href);
 let second = 0, purge = 0, valid = 0;
 const router = webhookModule.createWebhookRouter({
   second: { POST: async () => { second++; return { status: 204 }; } },
-  purged: { PURGE: async () => { purge++; return { status: 204 }; } },
+  purged: { Purge: async () => { purge++; return { status: 204 }; } },
   validated: { POST: async () => { valid++; return { status: 204 }; } },
 }, { routes: { first: "/same/{id}", second: "/same/{id}", purged: "/purged", validated: "/validated" } });
 const same = await router.fetch(new Request("https://host.test/same/value?id=7", { method: "POST", headers: { id: "true", cookie: "id=cookie" } }));
 if (same.status !== 204 || second !== 1) throw new Error("unhandled webhook shadowed a handled route");
-if ((await router.fetch(new Request("https://host.test/purged", { method: "PURGE" }))).status !== 204 || purge !== 1) throw new Error("referenced additional webhook did not dispatch");
-const accepted = { choice: { b: 2, a: 1 }, constant: { y: 2, x: 1 }, items: [{ a: 1, b: 2 }] };
-if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(accepted) }))).status !== 204 || valid !== 1) throw new Error("reordered JSON object was rejected");
-const duplicate = { ...accepted, items: [{ a: 1, b: 2 }, { b: 2, a: 1 }] };
-if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(duplicate) }))).status !== 400 || valid !== 1) throw new Error("reordered uniqueItems duplicate was accepted");
-const endpoints = callbackModule.createCallbackHandlers({ callbacks: { createSource: { copied: { "{$request.body#/callback}": { COPY: async () => ({ status: 204 }) } } } } });
-if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].COPY.fetch(new Request("https://host.test/callback", { method: "COPY" }))).status !== 204) throw new Error("referenced additional callback did not dispatch");
+if ((await router.fetch(new Request("https://host.test/purged", { method: "Purge" }))).status !== 204 || purge !== 1) throw new Error("referenced mixed-case additional webhook did not dispatch");
+const accepted = '{"choice":{"b":2,"a":1},"order":[1,2],"constant":{"y":2,"x":1},"zero":-0,"items":[{"a":1,"b":2}]}';
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: accepted }))).status !== 204 || valid !== 1) throw new Error("valid structural JSON equality was rejected");
+const changedChoice = { choice: { a: 1, b: 3 }, order: [1, 2], constant: { x: 1, y: 2 }, zero: 0, items: [] };
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(changedChoice) }))).status !== 400 || valid !== 1) throw new Error("changed object enum value was accepted");
+const reorderedArray = { choice: { a: 1, b: 2 }, order: [2, 1], constant: { x: 1, y: 2 }, zero: 0, items: [] };
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reorderedArray) }))).status !== 400 || valid !== 1) throw new Error("reordered array enum value was accepted");
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: '{"choice":{"a":1,"b":2},"order":[1,2],"constant":{"x":1,"y":2},"zero":0,"items":[0,-0]}' }))).status !== 400 || valid !== 1) throw new Error("signed-zero uniqueItems duplicate was accepted");
+const endpoints = callbackModule.createCallbackHandlers({ callbacks: { createSource: { copied: { "{$request.body#/callback}": { Copy: async () => ({ status: 204 }) } } } } });
+if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].Copy.fetch(new Request("https://host.test/callback", { method: "Copy" }))).status !== 204) throw new Error("referenced mixed-case additional callback did not dispatch");
 `
 	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js"), filepath.Join(outputDirectory, "server", "callbacks.js"))
 	if output, err := command.CombinedOutput(); err != nil {

@@ -52,7 +52,7 @@ func Build(document *openapidoc.Document) (*Document, error) {
 		if !ok {
 			return nil, fmt.Errorf("path item %q must be an object", path)
 		}
-		pathItem, err := resolvePathItem(document.Raw, pathItem, make(map[string]bool))
+		pathItem, err := ResolvePathItem(document.Raw, pathItem)
 		if err != nil {
 			return nil, fmt.Errorf("path item %q: %w", path, err)
 		}
@@ -148,6 +148,12 @@ func jsonPointer(parts ...string) string {
 		encoded = append(encoded, strings.ReplaceAll(strings.ReplaceAll(part, "~", "~0"), "/", "~1"))
 	}
 	return "/" + strings.Join(encoded, "/")
+}
+
+// ResolvePathItem resolves a local OpenAPI Path Item reference and applies
+// sibling overrides. Path Item references may target any local JSON Pointer.
+func ResolvePathItem(document, pathItem map[string]any) (map[string]any, error) {
+	return resolvePathItem(document, pathItem, make(map[string]bool))
 }
 
 func resolvePathItem(document, pathItem map[string]any, resolving map[string]bool) (map[string]any, error) {

@@ -3068,6 +3068,7 @@ function valueMatchesType(value: unknown, type: string): boolean {
 }
 
 function wireValueEquals(left: unknown, right: unknown): boolean {
+  if (typeof left === "number" && typeof right === "number") return left === right;
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((item, index) => wireValueEquals(item, right[index]));

@@ -948,6 +948,7 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 		node.operations[terminal] = item
 	}
 	resolveResourceNodeCollisions(root)
+	pruneEmptyResourceNodes(root)
 	return root, nil
 }
 
@@ -965,18 +966,10 @@ func validateTemplatedResourcePaths(document *ir.Document) error {
 	}
 	sort.Strings(sourcePaths)
 	for _, path := range sourcePaths {
-		parts := resourcePathParts(path)
-		templated := false
-		for index, part := range parts {
-			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-				parts[index] = "{}"
-				templated = true
-			}
-		}
-		if !templated {
+		shape := regexp.MustCompile(`\{[^{}]+\}`).ReplaceAllString(path, "{}")
+		if shape == path {
 			continue
 		}
-		shape := "/" + strings.Join(parts, "/")
 		if previous, exists := paths[shape]; exists && previous != path {
 			return fmt.Errorf("OpenAPI paths %q and %q have identical templated shape %q; path parameter names do not distinguish paths", previous, path, shape)
 		}
@@ -990,6 +983,9 @@ func validateOperationIdentities(document *ir.Document) error {
 	for _, operation := range document.Operations {
 		location := operation.Method + " " + operation.Path
 		if operation.OperationID == "" {
+			if operation.Visibility == "hidden" {
+				continue
+			}
 			return fmt.Errorf("OpenAPI operation %s is missing operationId required by the TypeScript target", location)
 		}
 		if previous, exists := seen[operation.OperationID]; exists {
@@ -998,6 +994,23 @@ func validateOperationIdentities(document *ir.Document) error {
 		seen[operation.OperationID] = location
 	}
 	return nil
+}
+
+func pruneEmptyResourceNodes(node *resourceNode) {
+	if node.parameterChild != nil {
+		pruneEmptyResourceNodes(node.parameterChild)
+		if resourceNodeEmpty(node.parameterChild) {
+			node.parameterChild = nil
+			node.parameterSignature = ""
+		}
+	}
+	for name, child := range node.children {
+		pruneEmptyResourceNodes(child)
+		if resourceNodeEmpty(child) {
+			delete(node.children, name)
+			delete(node.childSources, name)
+		}
+	}
 }
 
 func resourceParameterSignature(document *ir.Document, parameter operationParameter) (string, error) {

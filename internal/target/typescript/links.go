@@ -339,7 +339,7 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		}
 		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(group.SourceOperation.OperationID, "rawResponse")+" | APIError, "+linkInvocationParameter(input, operationSlotType(link.TargetOperation.OperationID, "options"), sourceInput, operationRequiresOptions(link.TargetOperation))+") => Promise<"+output+">")
 	}
-	return "{ (response: " + operationSlotType(group.SourceOperation.OperationID, "rawResponse") + " | APIError, " + linkInvocationParameter(sortedStringSet(targetInputs), sortedStringSet(targetOptions), sourceInput, requiresOptions) + "): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
+	return "{ (response: " + operationSlotType(group.SourceOperation.OperationID, "rawResponse") + " | APIError, " + linkInvocationParameter(sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, requiresOptions) + "): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
 }
 
 func linkInvocationParameter(input, options, sourceInput string, required bool) string {
@@ -371,6 +371,15 @@ func sortedStringSet(values map[string]bool) string {
 	}
 	sort.Strings(items)
 	return strings.Join(items, " | ")
+}
+
+func sortedStringIntersection(values map[string]bool) string {
+	items := make([]string, 0, len(values))
+	for value := range values {
+		items = append(items, value)
+	}
+	sort.Strings(items)
+	return strings.Join(items, " & ")
 }
 
 func linkStatusProperty(status string) (string, error) {
@@ -474,7 +483,7 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		invocationType = "RequiredLinkInvocation"
 		invocationDefault = ""
 	}
-	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %s | APIError, invocation: %s<%s, %s, %s>%s): Promise<%s> => {\n", variable, contract, operationSlotType(group.SourceOperation.OperationID, "rawResponse"), invocationType, sortedStringSet(targetInputs), sortedStringSet(targetOptions), sourceInput, invocationDefault, sortedStringSet(targetOutputs))
+	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %s | APIError, invocation: %s<%s, %s, %s>%s): Promise<%s> => {\n", variable, contract, operationSlotType(group.SourceOperation.OperationID, "rawResponse"), invocationType, sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, invocationDefault, sortedStringSet(targetOutputs))
 	for _, link := range group.Links {
 		if link.Status == "default" {
 			continue

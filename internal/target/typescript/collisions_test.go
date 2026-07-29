@@ -45,6 +45,22 @@ func TestSourceArtifactsRejectsMissingAndDuplicateExactOperationIDs(t *testing.T
 	}
 }
 
+func TestSourceArtifactsAllowsMissingOperationIDOnlyForHiddenOperations(t *testing.T) {
+	if _, err := SourceArtifacts(&ir.Document{Operations: []ir.Operation{
+		{Method: "GET", Path: "/hidden", Visibility: "hidden"},
+		{OperationID: "visible", Method: "GET", Path: "/visible", Visibility: "public"},
+	}}); err != nil {
+		t.Fatalf("hidden operation without operationId failed: %v", err)
+	}
+	_, err := SourceArtifacts(&ir.Document{Operations: []ir.Operation{
+		{OperationID: "same", Method: "GET", Path: "/hidden", Visibility: "hidden"},
+		{OperationID: "same", Method: "GET", Path: "/visible", Visibility: "public"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("duplicate hidden operationId error = %v", err)
+	}
+}
+
 func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *testing.T) {
 	for name, schema := range map[string]map[string]map[string]any{
 		"normalized": {
@@ -255,6 +271,45 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 	}
 }
 
+func TestBuildResourceTreePrunesEmptyBranchesAfterParameterCollision(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		pathOperation("getProfile", "GET", "/users/{id}/profile", "id", map[string]any{"type": "string"}),
+		pathOperation("getSettings", "GET", "/users/{userID}/settings", "userID", map[string]any{"type": "integer"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := tree.children["users"]; exists {
+		t.Fatalf("empty users resource was retained: %#v", tree.children["users"])
+	}
+	for _, operation := range manifest.Operations {
+		if operation.ResourceSegments != nil {
+			t.Fatalf("operation %q retained resource segments %#v", operation.OperationID, operation.ResourceSegments)
+		}
+	}
+}
+
+func TestTemplatedResourcePathValidationPreservesRawPathShape(t *testing.T) {
+	if err := validateTemplatedResourcePaths(&ir.Document{Raw: map[string]any{"paths": map[string]any{
+		"/users/{id}":    map[string]any{},
+		"/users/{name}/": map[string]any{},
+	}}}); err != nil {
+		t.Fatalf("trailing-slash-distinct paths were rejected: %v", err)
+	}
+	err := validateTemplatedResourcePaths(&ir.Document{Raw: map[string]any{"paths": map[string]any{
+		"/files/{id}.json":   map[string]any{},
+		"/files/{name}.json": map[string]any{},
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "identical templated shape") {
+		t.Fatalf("embedded-template collision error = %v", err)
+	}
+}
+
 func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{
 		{OperationID: "listUsers", Method: "GET", Path: "/users"},
@@ -330,8 +385,8 @@ func TestBuildResourceTreeOmitsTwoOperationsRequiringOneTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := tree.children["users"].operations["list"]; exists {
-		t.Fatal("one colliding operation terminal was selected as a winner")
+	if _, exists := tree.children["users"]; exists {
+		t.Fatal("colliding operation terminal retained an empty resource")
 	}
 }
 
@@ -427,7 +482,7 @@ func TestBuildResourceTreeOmitsIncompatibleSharedParameterPosition(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tree, err := buildResourceTree(document, manifest); err != nil || tree.children["users"].parameterChild != nil {
+	if tree, err := buildResourceTree(document, manifest); err != nil || tree.children["users"] != nil {
 		t.Fatalf("incompatible parameter branch = %#v, %v", tree, err)
 	}
 	for id, call := range manifestCalls(manifest) {

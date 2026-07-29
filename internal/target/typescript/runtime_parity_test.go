@@ -77,6 +77,36 @@ catch (error) {
 	}
 }
 
+func TestRuntimeUsesJSONNumericEqualityForSignedZero(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.0","info":{"title":"Signed zero","version":"1"},
+  "paths":{"/values":{"post":{"operationId":"setValues","requestBody":{"required":true,"content":{"application/json":{"schema":{
+    "type":"object","required":["constant","choice","items"],"properties":{
+      "constant":{"const":0},
+      "choice":{"enum":[0]},
+      "items":{"type":"array","uniqueItems":true,"items":{"type":"number"}}
+    }
+  }}}},"responses":{"204":{"description":"OK"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let calls = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { calls++; return new Response(null, { status: 204 }); } });
+await api.$operations.setValues({ body: { constant: -0, choice: -0, items: [0, 1] } });
+try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: [0, -0] } }); throw new Error("signed-zero uniqueItems duplicate was accepted"); }
+catch (error) { if (!String(error).includes("unique items") && !String(error.cause).includes("unique items")) throw error; }
+if (calls !== 1) throw new Error("signed-zero validation reached fetch unexpectedly: " + calls);
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute signed-zero JSON equality test: %v\n%s", err, output)
+	}
+}
+
 func TestRuntimeAppliesFormatOnlyWhenFormatAssertionVocabularyIsRequired(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.1", "info":{"title":"Formats","version":"1"},
@@ -334,8 +364,12 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0","info":{"title":"Required options","version":"1"},
   "paths":{
-    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"operationId":"followTarget"}}}}}},
+    "/source":{"get":{"operationId":"getSource","responses":{
+      "200":{"description":"Required","links":{"follow":{"operationId":"followTarget"}}},
+      "201":{"description":"Optional","links":{"follow":{"operationId":"optionalTarget"}}}
+    }}},
     "/target":{"post":{"operationId":"followTarget","x-idempotency":"required","x-concurrency":"required","responses":{"204":{"description":"OK"}}}},
+    "/optional":{"post":{"operationId":"optionalTarget","responses":{"204":{"description":"OK"}}}},
     "/events":{"get":{"operationId":"tailEvents","x-concurrency":"required","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
   }
 }`))
@@ -349,11 +383,38 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
 		`invocation: RequiredLinkInvocation<never, Operations["followTarget"]["options"]`,
+		`Operations["followTarget"]["options"] & Operations["optionalTarget"]["options"]`,
 		`readonly "tailEvents": (options: Operations["tailEvents"]["options"])`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("required option contract missing %q:\n%s", expected, client)
 		}
+	}
+	typecheckDirectory := t.TempDir()
+	writeTargetArtifacts(t, typecheckDirectory, artifacts)
+	probe := `import { createClient, type Operations } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+declare const response: Operations["getSource"]["rawResponse"]
+// @ts-expect-error aggregate dispatch must satisfy every possible required option contract
+api.$links.getSource.follow(response, { options: {} })
+api.$links.getSource.follow(response, { options: { idempotencyKey: "idem", ifMatch: "v1" } })
+api.$links.getSource.follow.byStatus.status201(response)
+`
+	if err := os.WriteFile(filepath.Join(typecheckDirectory, "required-links.probe.ts"), []byte(probe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typecheckDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typecheckDirectory, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Skipf("TypeScript compiler unavailable for required link test: %v", err)
+	}
+	if output, err := exec.Command("node", tsc, "--project", filepath.Join(typecheckDirectory, "tsconfig.json")).CombinedOutput(); err != nil {
+		t.Fatalf("compile required link contracts: %v\n%s", err, output)
 	}
 	output := compileTypeScriptArtifacts(t, document)
 	script := `
@@ -706,6 +767,46 @@ if (fetched) throw new Error("fetch ran without a required parameter codec");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript custom-parameter-codec runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedClientKeepsSameParameterNameAcrossAllLocations(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0","info":{"title":"Repeated parameter names","version":"1"},
+  "paths":{"/items/{id}":{"get":{"operationId":"getItem","parameters":[
+    {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+    {"name":"id","in":"query","required":true,"schema":{"type":"integer"}},
+    {"name":"id","in":"querystring","required":true,"content":{"text/plain":{"schema":{"type":"string"}}}},
+    {"name":"id","in":"header","required":true,"schema":{"type":"boolean"}},
+    {"name":"id","in":"cookie","required":true,"schema":{"type":"string"}}
+  ],"responses":{"204":{"description":"OK"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const api = createClient({ baseURL: "https://api.example.test", transport: { capabilities: { cookieJar: true }, fetch: async (input, init) => {
+  const url = new URL(String(input));
+  const headers = new Headers(init.headers);
+  if (url.pathname !== "/items/path-id") throw new Error("path parameter collapsed: " + url.pathname);
+  if (url.search !== "?id=2&raw%3Dvalue") throw new Error("query parameters collapsed: " + url.search);
+  if (headers.get("id") !== "true") throw new Error("header parameter collapsed");
+  if (headers.get("cookie") !== "id=cookie-id") throw new Error("cookie parameter collapsed");
+  return new Response(null, { status: 204 });
+} } });
+await api.$operations.getItem({
+  path: { id: "path-id" },
+  query: { id: 2 },
+  querystring: { id: "raw=value" },
+  headerParams: { id: true },
+  cookieParams: { id: "cookie-id" },
+});
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute repeated parameter-name runtime test: %v\n%s", err, output)
 	}
 }
 

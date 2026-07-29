@@ -116,7 +116,7 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 				return nil, err
 			}
 			for _, item := range operations {
-				method := item.key
+				method := item.method
 				operation := item.operation
 				operationID, _ := operation["operationId"].(string)
 				if operationID == "" {
@@ -139,10 +139,10 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 				if security == nil {
 					security = document.Raw["security"]
 				}
-				identity := sourceOperationID + "\x00" + componentName + "\x00" + name + "\x00" + expression + "\x00" + strings.ToUpper(method)
+				identity := sourceOperationID + "\x00" + componentName + "\x00" + name + "\x00" + expression + "\x00" + method
 				result = append(result, callbackDefinition{
 					name: appendOpenAPIPointer(path, name), sourceOperationID: sourceOperationID, componentName: componentName, callbackName: name,
-					typeName: stablePrivateIdentifier("callback-type", identity), expression: expression, operationID: operationID, method: strings.ToUpper(method),
+					typeName: stablePrivateIdentifier("callback-type", identity), expression: expression, operationID: operationID, method: method,
 					bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType,
 					responseType: responseType, responsePlan: responsePlan, security: security,
 				})
@@ -507,7 +507,7 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 			return nil, err
 		}
 		for _, itemOperation := range operations {
-			method := itemOperation.key
+			method := itemOperation.method
 			operation := itemOperation.operation
 			operationPath := openAPIPointer("webhooks", name, method)
 			parameters, paramsType, err := inboundParameterDefinitions(document, resolvedItem, operation, operationPath, true)
@@ -530,7 +530,7 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 			if security == nil {
 				security = document.Raw["security"]
 			}
-			methodName := strings.ToUpper(method)
+			methodName := method
 			result = append(result, webhookDefinition{
 				name: name, property: name, typeName: stablePrivateIdentifier("webhook-type", name+"\x00"+methodName), operationID: operationID,
 				method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType, responseType: responseType, responsePlan: responsePlan, security: security,
@@ -555,7 +555,7 @@ type serverPathItemOperation struct {
 }
 
 func serverPathItemOperations(document *ir.Document, pathItem map[string]any, path string) ([]serverPathItemOperation, map[string]any, error) {
-	resolved, err := resolveComponentObject(document, pathItem, "pathItems")
+	resolved, err := ir.ResolvePathItem(document.Raw, pathItem)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -571,7 +571,7 @@ func serverPathItemOperations(document *ir.Document, pathItem map[string]any, pa
 		if !ok {
 			return nil, nil, fmt.Errorf("%s/additionalOperations/%s must be an Operation Object", path, method)
 		}
-		result = append(result, serverPathItemOperation{key: method, method: strings.ToUpper(method), operation: operation})
+		result = append(result, serverPathItemOperation{key: method, method: method, operation: operation})
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].method < result[j].method })
 	return result, resolved, nil
@@ -1792,6 +1792,7 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
 }
 
 function inboundJSONEquals(left: unknown, right: unknown): boolean {
+  if (typeof left === "number" && typeof right === "number") return left === right
   if (Object.is(left, right)) return true
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((item, index) => inboundJSONEquals(item, right[index]))
