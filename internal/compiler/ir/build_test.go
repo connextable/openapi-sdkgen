@@ -305,14 +305,20 @@ func TestResolvePathItemDecodesURIFragmentBeforeJSONPointer(t *testing.T) {
 	document := map[string]any{
 		"paths": map[string]any{
 			"/shared%20hook": map[string]any{"get": map[string]any{"operationId": "shared"}},
+			"":               map[string]any{"post": map[string]any{"operationId": "empty"}},
 		},
 	}
-	resolved, err := ResolvePathItem(document, map[string]any{"$ref": "#/paths/~1shared%2520hook"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := resolved["get"].(map[string]any); !ok {
-		t.Fatalf("resolved path item = %#v", resolved)
+	for reference, method := range map[string]string{
+		"#%2Fpaths%2F~1shared%2520hook": "get",
+		"#/paths/":                      "post",
+	} {
+		resolved, err := ResolvePathItem(document, map[string]any{"$ref": reference})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := resolved[method].(map[string]any); !ok {
+			t.Fatalf("resolved %s path item = %#v", reference, resolved)
+		}
 	}
 }
 

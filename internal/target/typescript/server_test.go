@@ -644,12 +644,22 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
     ],"responses":{"204":{"description":"OK"}}}},
     "purged":{"$ref":"#/components/pathItems/PurgeHook"},
     "validated":{"post":{"operationId":"validatedHook","requestBody":{"required":true,"content":{"application/json":{"schema":{
-      "type":"object","required":["choice","order","constant","zero","items"],"properties":{
+      "type":"object","required":["choice","order","constant","zero","items","glyph","decimal","integerUnion","choiceUnion","exactlyOne","notBad","conditional","containsOne","dependent","noItems"],"properties":{
         "choice":{"enum":[{"a":1,"b":2}]},
         "order":{"enum":[[1,2]]},
         "constant":{"const":{"x":1,"y":2}},
         "zero":{"const":0},
-        "items":{"type":"array","uniqueItems":true}
+        "items":{"type":"array","uniqueItems":true},
+        "glyph":{"type":"string","maxLength":1},
+        "decimal":{"type":"number","multipleOf":0.1},
+        "integerUnion":{"type":["integer","null"]},
+        "choiceUnion":{"anyOf":[{"const":"x"},{"const":"y"}]},
+        "exactlyOne":{"oneOf":[{"const":1},{"const":2}]},
+        "notBad":{"not":{"const":"bad"}},
+        "conditional":{"if":{"const":1},"then":{"minimum":2}},
+        "containsOne":{"type":"array","contains":{"const":1}},
+        "dependent":{"type":"object","dependentRequired":{"a":["b"]}},
+        "noItems":{"type":"array","items":false}
       }
     }}}},"responses":{"204":{"description":"OK"}}}}
   },
@@ -749,13 +759,30 @@ const router = webhookModule.createWebhookRouter({
 const same = await router.fetch(new Request("https://host.test/same/value?id=7", { method: "POST", headers: { id: "true", cookie: "id=cookie" } }));
 if (same.status !== 204 || second !== 1) throw new Error("unhandled webhook shadowed a handled route");
 if ((await router.fetch(new Request("https://host.test/purged", { method: "Purge" }))).status !== 204 || purge !== 1) throw new Error("referenced mixed-case additional webhook did not dispatch");
-const accepted = '{"choice":{"b":2,"a":1},"order":[1,2],"constant":{"y":2,"x":1},"zero":-0,"items":[{"a":1,"b":2}]}';
+const accepted = '{"choice":{"b":2,"a":1},"order":[1,2],"constant":{"y":2,"x":1},"zero":-0,"items":[{"a":1,"b":2}],"glyph":"😀","decimal":0.3,"integerUnion":2,"choiceUnion":"x","exactlyOne":1,"notBad":"good","conditional":3,"containsOne":[2,1],"dependent":{"a":1,"b":2},"noItems":[]}';
 if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: accepted }))).status !== 204 || valid !== 1) throw new Error("valid structural JSON equality was rejected");
-const changedChoice = { choice: { a: 1, b: 3 }, order: [1, 2], constant: { x: 1, y: 2 }, zero: 0, items: [] };
+const baseline = JSON.parse(accepted);
+const changedChoice = { ...baseline, choice: { a: 1, b: 3 } };
 if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(changedChoice) }))).status !== 400 || valid !== 1) throw new Error("changed object enum value was accepted");
-const reorderedArray = { choice: { a: 1, b: 2 }, order: [2, 1], constant: { x: 1, y: 2 }, zero: 0, items: [] };
+const reorderedArray = { ...baseline, order: [2, 1] };
 if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reorderedArray) }))).status !== 400 || valid !== 1) throw new Error("reordered array enum value was accepted");
-if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: '{"choice":{"a":1,"b":2},"order":[1,2],"constant":{"x":1,"y":2},"zero":0,"items":[0,-0]}' }))).status !== 400 || valid !== 1) throw new Error("signed-zero uniqueItems duplicate was accepted");
+const signedZeroDuplicate = JSON.stringify({ ...baseline, items: [] }).replace('"items":[]', '"items":[0,-0]');
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: signedZeroDuplicate }))).status !== 400 || valid !== 1) throw new Error("signed-zero uniqueItems duplicate was accepted");
+for (const [name, patch] of [
+  ["unicode length", { glyph: "😀😀" }],
+  ["decimal multipleOf", { decimal: 0.31 }],
+  ["integer union", { integerUnion: 1.5 }],
+  ["anyOf", { choiceUnion: "z" }],
+  ["oneOf", { exactlyOne: 3 }],
+  ["not", { notBad: "bad" }],
+  ["conditional", { conditional: 1 }],
+  ["contains", { containsOne: [2] }],
+  ["dependentRequired", { dependent: { a: 1 } }],
+  ["nested false schema", { noItems: [1] }],
+]) {
+  const response = await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...baseline, ...patch }) }));
+  if (response.status !== 400 || valid !== 1) throw new Error(name + " constraint was ignored");
+}
 const endpoints = callbackModule.createCallbackHandlers({ callbacks: { createSource: { copied: { "{$request.body#/callback}": { Copy: async () => ({ status: 204 }) } } } } });
 if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].Copy.fetch(new Request("https://host.test/callback", { method: "Copy" }))).status !== 204) throw new Error("referenced mixed-case additional callback did not dispatch");
 `

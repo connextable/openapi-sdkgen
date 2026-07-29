@@ -455,7 +455,12 @@ func callInput(operation ir.Operation, inputTypes []string, pathBound bool, path
 				continue
 			}
 			values := make([]string, 0, len(pathParameters))
+			seen := make(map[string]bool, len(pathParameters))
 			for _, parameter := range pathParameters {
+				if seen[parameter] {
+					continue
+				}
+				seen[parameter] = true
 				binding := pathBindings[parameter]
 				if binding == "" {
 					binding = stablePrivateIdentifier("example-path-parameter", parameter)

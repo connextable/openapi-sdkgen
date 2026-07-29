@@ -161,7 +161,14 @@ func resolvePathItem(document, pathItem map[string]any, resolving map[string]boo
 	if reference == "" {
 		return pathItem, nil
 	}
-	if !strings.HasPrefix(reference, "#/") {
+	if !strings.HasPrefix(reference, "#") {
+		return nil, fmt.Errorf("external path item reference %q is not supported", reference)
+	}
+	pointer, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid path item reference %q: invalid URI fragment escape", reference)
+	}
+	if !strings.HasPrefix(pointer, "/") {
 		return nil, fmt.Errorf("external path item reference %q is not supported", reference)
 	}
 	if resolving[reference] {
@@ -217,7 +224,7 @@ func localPathItemReference(document map[string]any, reference string) (map[stri
 }
 
 func jsonPointerToken(token string) (string, error) {
-	if token == "" || strings.Contains(token, "/") {
+	if strings.Contains(token, "/") {
 		return "", fmt.Errorf("must target one object")
 	}
 	var output strings.Builder

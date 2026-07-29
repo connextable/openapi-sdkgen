@@ -2713,6 +2713,7 @@ export function validateWireValue(
   direction: "encode" | "decode",
   dynamicScope: DynamicScope = [],
 ): void {
+  assertFiniteJSONNumbers(value);
   const scope = extendDynamicScope(dynamicScope, schema);
   if (schema.boolean === false) throw new TypeError("schema is false");
   if (value === undefined) return;
@@ -3068,6 +3069,20 @@ function valueMatchesType(value: unknown, type: string): boolean {
     case "object": return isRecord(value);
     default: return true;
   }
+}
+
+function assertFiniteJSONNumbers(value: unknown, seen = new WeakSet<object>()): void {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("must be a finite JSON number");
+    return;
+  }
+  if (typeof value !== "object" || value === null || seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) assertFiniteJSONNumbers(item, seen);
+    return;
+  }
+  for (const item of Object.values(value)) assertFiniteJSONNumbers(item, seen);
 }
 
 function wireValueEquals(left: unknown, right: unknown): boolean {

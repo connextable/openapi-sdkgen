@@ -1747,14 +1747,28 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
     const target = name === undefined ? undefined : schemas[name]
     return target === undefined ? path + " references an unresolved schema" : validateInboundValue(value, target, schemas, path)
   }
-  if (value === null && (schema["nullable"] === true || schemaAcceptsType(schema["type"], "null"))) return undefined
+  const nullableNull = value === null && (schema["nullable"] === true || schemaAcceptsType(schema["type"], "null"))
   if (value instanceof Blob && schemaAcceptsType(schema["type"], "string") && (schema["format"] === "binary" || schema["contentEncoding"] === "binary")) return undefined
-  if (!schemaAcceptsValue(value, schema["type"])) return path + " has an invalid type"
+  if (!nullableNull && !schemaAcceptsValue(value, schema["type"])) return path + " has an invalid type"
   if (Object.hasOwn(schema, "const") && !inboundJSONEquals(value, schema["const"])) return path + " must equal its declared constant"
   if (Array.isArray(schema["enum"]) && !schema["enum"].some((item) => inboundJSONEquals(item, value))) return path + " is not an allowed value"
+  if (Array.isArray(schema["allOf"])) for (const part of schema["allOf"]) { const nested = normalizeInboundSchema(part); if (nested !== undefined) { const error = validateInboundValue(value, nested, schemas, path); if (error !== undefined) return error } }
+  if (Array.isArray(schema["anyOf"]) && !schema["anyOf"].some((part) => { const nested = normalizeInboundSchema(part); return nested !== undefined && validateInboundValue(value, nested, schemas, path) === undefined })) return path + " must match at least one anyOf schema"
+  if (Array.isArray(schema["oneOf"])) {
+    const matches = schema["oneOf"].filter((part) => { const nested = normalizeInboundSchema(part); return nested !== undefined && validateInboundValue(value, nested, schemas, path) === undefined }).length
+    if (matches !== 1) return path + " must match exactly one oneOf schema"
+  }
+  const notSchema = normalizeInboundSchema(schema["not"])
+  if (notSchema !== undefined && validateInboundValue(value, notSchema, schemas, path) === undefined) return path + " must not match its negated schema"
+  const condition = normalizeInboundSchema(schema["if"])
+  if (condition !== undefined) {
+    const branch = normalizeInboundSchema(validateInboundValue(value, condition, schemas, path) === undefined ? schema["then"] : schema["else"])
+    if (branch !== undefined) { const error = validateInboundValue(value, branch, schemas, path); if (error !== undefined) return error }
+  }
   if (typeof value === "string") {
-    if (typeof schema["minLength"] === "number" && value.length < schema["minLength"]) return path + " is shorter than minLength"
-    if (typeof schema["maxLength"] === "number" && value.length > schema["maxLength"]) return path + " is longer than maxLength"
+    const length = [...value].length
+    if (typeof schema["minLength"] === "number" && length < schema["minLength"]) return path + " is shorter than minLength"
+    if (typeof schema["maxLength"] === "number" && length > schema["maxLength"]) return path + " is longer than maxLength"
     if (typeof schema["pattern"] === "string" && !new RegExp(schema["pattern"]).test(value)) return path + " does not match pattern"
   }
   if (typeof value === "number") {
@@ -1764,18 +1778,25 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
     if (schema["exclusiveMaximum"] === true && typeof schema["maximum"] === "number" && value >= schema["maximum"]) return path + " is not below exclusiveMaximum"
     if (typeof schema["exclusiveMinimum"] === "number" && value <= schema["exclusiveMinimum"]) return path + " is not above exclusiveMinimum"
     if (typeof schema["exclusiveMaximum"] === "number" && value >= schema["exclusiveMaximum"]) return path + " is not below exclusiveMaximum"
-    if (typeof schema["multipleOf"] === "number" && value / schema["multipleOf"] % 1 !== 0) return path + " is not a multipleOf value"
-    if (schema["type"] === "integer" && !Number.isInteger(value)) return path + " must be an integer"
+    if (typeof schema["multipleOf"] === "number" && !inboundIsMultipleOf(value, schema["multipleOf"])) return path + " is not a multipleOf value"
   }
   if (Array.isArray(value)) {
     if (typeof schema["minItems"] === "number" && value.length < schema["minItems"]) return path + " has too few items"
     if (typeof schema["maxItems"] === "number" && value.length > schema["maxItems"]) return path + " has too many items"
     if (schema["uniqueItems"] === true && value.some((item, index) => value.slice(0, index).some((previous) => inboundJSONEquals(previous, item)))) return path + " has duplicate items"
+    const contains = normalizeInboundSchema(schema["contains"])
+    if (contains !== undefined) {
+      const matches = value.filter((item) => validateInboundValue(item, contains, schemas, path) === undefined).length
+      const minimum = typeof schema["minContains"] === "number" ? schema["minContains"] : 1
+      if (matches < minimum) return path + " has too few matching contains items"
+      if (typeof schema["maxContains"] === "number" && matches > schema["maxContains"]) return path + " has too many matching contains items"
+    }
     const prefixItems = Array.isArray(schema["prefixItems"]) ? schema["prefixItems"] : []
     for (let index = 0; index < prefixItems.length && index < value.length; index++) {
-      if (isInboundSchema(prefixItems[index])) { const error = validateInboundValue(value[index], prefixItems[index], schemas, path + "[" + index + "]"); if (error !== undefined) return error }
+      const nested = normalizeInboundSchema(prefixItems[index]); if (nested !== undefined) { const error = validateInboundValue(value[index], nested, schemas, path + "[" + index + "]"); if (error !== undefined) return error }
     }
-    if (isInboundSchema(schema["items"])) for (let index = prefixItems.length; index < value.length; index++) { const error = validateInboundValue(value[index], schema["items"], schemas, path + "[" + index + "]"); if (error !== undefined) return error }
+    const items = normalizeInboundSchema(schema["items"])
+    if (items !== undefined) for (let index = prefixItems.length; index < value.length; index++) { const error = validateInboundValue(value[index], items, schemas, path + "[" + index + "]"); if (error !== undefined) return error }
   }
   if (isRecord(value)) {
 	if (typeof schema["minProperties"] === "number" && Object.keys(value).length < schema["minProperties"]) return path + " has too few properties"
@@ -1783,12 +1804,36 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
     const required = Array.isArray(schema["required"]) ? schema["required"] : []
     for (const key of required) if (typeof key === "string" && !Object.hasOwn(value, key)) return path + "." + key + " is required"
     const properties = isRecord(schema["properties"]) ? schema["properties"] : {}
-    for (const [key, propertySchema] of Object.entries(properties)) if (Object.hasOwn(value, key) && isInboundSchema(propertySchema)) { const error = validateInboundValue(value[key], propertySchema, schemas, path + "." + key); if (error !== undefined) return error }
-    if (isInboundSchema(schema["additionalProperties"])) for (const [key, item] of Object.entries(value)) if (!Object.hasOwn(properties, key)) { const error = validateInboundValue(item, schema["additionalProperties"], schemas, path + "." + key); if (error !== undefined) return error }
+    for (const [key, propertySchema] of Object.entries(properties)) if (Object.hasOwn(value, key)) { const nested = normalizeInboundSchema(propertySchema); if (nested !== undefined) { const error = validateInboundValue(value[key], nested, schemas, path + "." + key); if (error !== undefined) return error } }
+    const additionalProperties = normalizeInboundSchema(schema["additionalProperties"])
+    if (additionalProperties !== undefined) for (const [key, item] of Object.entries(value)) if (!Object.hasOwn(properties, key)) { const error = validateInboundValue(item, additionalProperties, schemas, path + "." + key); if (error !== undefined) return error }
     if (schema["additionalProperties"] === false) for (const key of Object.keys(value)) if (!Object.hasOwn(properties, key)) return path + "." + key + " is not allowed"
+    const dependentRequired = isRecord(schema["dependentRequired"]) ? schema["dependentRequired"] : {}
+    for (const [key, dependencies] of Object.entries(dependentRequired)) if (Object.hasOwn(value, key) && Array.isArray(dependencies)) for (const dependency of dependencies) if (typeof dependency === "string" && !Object.hasOwn(value, dependency)) return path + "." + dependency + " is required by " + key
+    const dependentSchemas = isRecord(schema["dependentSchemas"]) ? schema["dependentSchemas"] : {}
+    for (const [key, dependentSchema] of Object.entries(dependentSchemas)) if (Object.hasOwn(value, key)) { const nested = normalizeInboundSchema(dependentSchema); if (nested !== undefined) { const error = validateInboundValue(value, nested, schemas, path); if (error !== undefined) return error } }
+    const dependencies = isRecord(schema["dependencies"]) ? schema["dependencies"] : {}
+    for (const [key, dependency] of Object.entries(dependencies)) if (Object.hasOwn(value, key)) {
+      if (Array.isArray(dependency)) {
+        for (const required of dependency) if (typeof required === "string" && !Object.hasOwn(value, required)) return path + "." + required + " is required by " + key
+      } else {
+        const nested = normalizeInboundSchema(dependency); if (nested !== undefined) { const error = validateInboundValue(value, nested, schemas, path); if (error !== undefined) return error }
+      }
+    }
   }
-  if (Array.isArray(schema["allOf"])) for (const part of schema["allOf"]) if (isInboundSchema(part)) { const error = validateInboundValue(value, part, schemas, path); if (error !== undefined) return error }
   return undefined
+}
+
+function normalizeInboundSchema(value: unknown): InboundSchema | undefined {
+  if (value === true) return {}
+  if (value === false) return { "x-sdkgen-boolean-schema": false }
+  return isInboundSchema(value) ? value : undefined
+}
+
+function inboundIsMultipleOf(value: number, divisor: number): boolean {
+  if (!Number.isFinite(divisor) || divisor <= 0) return false
+  const quotient = value / divisor
+  return Math.abs(quotient - Math.round(quotient)) <= Number.EPSILON * Math.max(1, Math.abs(quotient))
 }
 
 function inboundJSONEquals(left: unknown, right: unknown): boolean {
@@ -1808,7 +1853,7 @@ function inboundJSONEquals(left: unknown, right: unknown): boolean {
 function schemaAcceptsValue(value: unknown, type: unknown): boolean {
   if (type === undefined) return true
   const types = Array.isArray(type) ? type : [type]
-  return types.some((item) => item === "null" ? value === null : item === "string" ? typeof value === "string" : item === "number" ? typeof value === "number" : item === "integer" ? typeof value === "number" : item === "boolean" ? typeof value === "boolean" : item === "array" ? Array.isArray(value) : item === "object" ? isRecord(value) : false)
+  return types.some((item) => item === "null" ? value === null : item === "string" ? typeof value === "string" : item === "number" ? typeof value === "number" && Number.isFinite(value) : item === "integer" ? typeof value === "number" && Number.isInteger(value) : item === "boolean" ? typeof value === "boolean" : item === "array" ? Array.isArray(value) : item === "object" ? isRecord(value) : false)
 }
 
 function schemaAcceptsType(type: unknown, wanted: string): boolean { return Array.isArray(type) ? type.includes(wanted) : type === wanted }

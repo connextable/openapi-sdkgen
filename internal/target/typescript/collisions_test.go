@@ -350,6 +350,9 @@ func TestRepeatedPathParameterFallsBackToExactOperationCatalog(t *testing.T) {
 	if !strings.HasPrefix(calls["getAlias"], `api.$operations["getAlias"]`) || calls["listUsers"] != "api.users.list()" {
 		t.Fatalf("calls = %#v", calls)
 	}
+	if strings.Count(calls["getAlias"], `"id":`) != 1 {
+		t.Fatalf("repeated parameter call contains duplicate input keys: %q", calls["getAlias"])
+	}
 	artifacts, err := SourceArtifacts(document)
 	if err != nil {
 		t.Fatal(err)

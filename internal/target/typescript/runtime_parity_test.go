@@ -81,10 +81,11 @@ func TestRuntimeUsesJSONNumericEqualityForSignedZero(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.0","info":{"title":"Signed zero","version":"1"},
   "paths":{"/values":{"post":{"operationId":"setValues","requestBody":{"required":true,"content":{"application/json":{"schema":{
-    "type":"object","required":["constant","choice","items"],"properties":{
+    "type":"object","required":["constant","choice","items","loose"],"properties":{
       "constant":{"const":0},
       "choice":{"enum":[0]},
-      "items":{"type":"array","uniqueItems":true,"items":{"type":"number"}}
+      "items":{"type":"array","uniqueItems":true,"items":{"type":"number"}},
+      "loose":{"type":"array","uniqueItems":true}
     }
   }}}},"responses":{"204":{"description":"OK"}}}}}
 }`))
@@ -97,12 +98,14 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let calls = 0;
 const api = createClient({ baseURL: "https://api.example.test", fetch: async () => { calls++; return new Response(null, { status: 204 }); } });
-await api.$operations.setValues({ body: { constant: -0, choice: -0, items: [0, 1] } });
-try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: [0, -0] } }); throw new Error("signed-zero uniqueItems duplicate was accepted"); }
+await api.$operations.setValues({ body: { constant: -0, choice: -0, items: [0, 1], loose: [1, null] } });
+try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: [0, -0], loose: [] } }); throw new Error("signed-zero uniqueItems duplicate was accepted"); }
 catch (error) { if (!String(error).includes("unique items") && !String(error.cause).includes("unique items")) throw error; }
 const sparse = Array(2); sparse[1] = null;
-try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: sparse } }); throw new Error("sparse array was accepted"); }
+try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: sparse, loose: [] } }); throw new Error("sparse array was accepted"); }
 catch (error) { if (!String(error).includes("sparse items") && !String(error.cause).includes("sparse items") && !String(error.cause).includes("cannot contain undefined")) throw error; }
+try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: [], loose: [NaN, null] } }); throw new Error("non-finite JSON number was accepted"); }
+catch (error) { if (!String(error).includes("finite JSON number") && !String(error.cause).includes("finite JSON number")) throw error; }
 if (calls !== 1) throw new Error("signed-zero validation reached fetch unexpectedly: " + calls);
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -571,7 +574,16 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 		plain("getLegacy", "GET", "/foo_bar"),
 		plain("getDuplicateOne", "GET", "/dupe"),
 		plain("getDuplicateTwo", "GET", "/dupe"),
+		plain("listPeople", "GET", "/people"),
+		parameterized("getListedPerson", "/people/list/{id}", "id", map[string]any{"type": "string"}),
+		plain("getRoot", "GET", "/"),
+		plain("getGet", "GET", "/get"),
 		parameterized("getTenant", "/{tenant}", "tenant", map[string]any{"type": "string"}),
+		func() ir.Operation {
+			operation := parameterized("getAlias", "/repeat/{id}/aliases/{id}", "id", map[string]any{"type": "string"})
+			operation.PathParameterOrder = []string{"id", "id"}
+			return operation
+		}(),
 		parameterized("getProfile", "/teams/{id}/profile", "id", map[string]any{"type": "string"}),
 		parameterized("getSettings", "/teams/{teamID}/settings", "teamID", map[string]any{"type": "integer"}),
 		listWidgets,
@@ -584,7 +596,7 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, operationID := range []string{
-		"getModern", "getLegacy", "getDuplicateOne", "getDuplicateTwo", "getTenant",
+		"getModern", "getLegacy", "getDuplicateOne", "getDuplicateTwo", "listPeople", "getTenant", "getAlias",
 		"getProfile", "getSettings", "getPaginate", "getRaw",
 	} {
 		start := strings.Index(client, `readonly `+quoteTS(operationID)+`: {`)
@@ -599,7 +611,16 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 			t.Fatalf("operation %q retained ambiguous resource call:\n%s", operationID, entry)
 		}
 	}
-	output := compileTypeScriptArtifacts(t, document)
+	probe := `import { createClient } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+api.$operations.listPeople()
+api.people.list("person").get()
+api.get()
+api.getValue.get()
+// @ts-expect-error the colliding list operation shortcut is suppressed in favor of the parameter binder
+api.people.list()
+`
+	output := compileTypeScriptArtifactsWithProbe(t, document, "resource-collisions.probe.ts", probe)
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
@@ -612,12 +633,17 @@ await api.$operations.getModern();
 await api.$operations.getLegacy();
 await api.$operations.getDuplicateOne();
 await api.$operations.getDuplicateTwo();
+await api.$operations.listPeople();
+await api.people.list("person").get();
+await api.get();
+await api.getValue.get();
 await api.$operations.getTenant({ path: { tenant: "acme" } });
+await api.$operations.getAlias({ path: { id: "same" } });
 await api.$operations.getProfile({ path: { id: "team" } });
 await api.$operations.getSettings({ path: { teamID: 7 } });
 await api.$operations.getPaginate();
 await api.$operations.getRaw();
-const expected = ["/foo-bar","/foo_bar","/dupe","/dupe","/acme","/teams/team/profile","/teams/7/settings","/widgets/paginate","/widgets/list/raw"];
+const expected = ["/foo-bar","/foo_bar","/dupe","/dupe","/people","/people/list/person","/","/get","/acme","/repeat/same/aliases/same","/teams/team/profile","/teams/7/settings","/widgets/paginate","/widgets/list/raw"];
 if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error("resource fallback dispatch mismatch: " + JSON.stringify(paths));
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -893,8 +919,16 @@ api.$operations.getItem({
   headerParams: { id: true },
   cookieParams: { id: "cookie-id" },
 })
-// @ts-expect-error every repeated id retains its location-specific type
-api.$operations.getItem({ path: { id: 1 }, query: { id: "2" }, querystring: { id: 3 }, headerParams: { id: "true" }, cookieParams: { id: false } })
+// @ts-expect-error path id remains a string
+api.$operations.getItem({ path: { id: 1 }, query: { id: 2 }, querystring: { id: "raw" }, headerParams: { id: true }, cookieParams: { id: "cookie" } })
+// @ts-expect-error query id remains a number
+api.$operations.getItem({ path: { id: "path" }, query: { id: "2" }, querystring: { id: "raw" }, headerParams: { id: true }, cookieParams: { id: "cookie" } })
+// @ts-expect-error querystring id remains a string
+api.$operations.getItem({ path: { id: "path" }, query: { id: 2 }, querystring: { id: 3 }, headerParams: { id: true }, cookieParams: { id: "cookie" } })
+// @ts-expect-error header id remains a boolean
+api.$operations.getItem({ path: { id: "path" }, query: { id: 2 }, querystring: { id: "raw" }, headerParams: { id: "true" }, cookieParams: { id: "cookie" } })
+// @ts-expect-error cookie id remains a string
+api.$operations.getItem({ path: { id: "path" }, query: { id: 2 }, querystring: { id: "raw" }, headerParams: { id: true }, cookieParams: { id: false } })
 `
 	output := compileTypeScriptArtifactsWithProbe(t, document, "repeated-parameters.probe.ts", probe)
 	script := `
