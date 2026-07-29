@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestCompileResultSeparatesExpectedDiagnosticsFromInternalErrors(t *testing.T) {
@@ -42,6 +43,64 @@ func TestCompileInputResultCollectsTransportWarningWithoutWriting(t *testing.T) 
 	}
 }
 
+func TestCompileResultAccumulatesIndependentUnresolvedLocalReferences(t *testing.T) {
+	result, err := CompileResult([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "References", "version": "1"},
+  "paths": {
+    "/one": {"get": {"responses": {"200": {
+      "description": "One",
+      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MissingOne"}}}
+    }}}},
+    "/two": {"get": {"responses": {"200": {
+      "description": "Two",
+      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MissingTwo"}}}
+    }}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Document != nil || len(result.Diagnostics) != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	for _, value := range result.Diagnostics {
+		if value.Code != "SDKGEN-E120" || value.Phase != diagnostic.PhaseReferences {
+			t.Fatalf("diagnostic = %#v", value)
+		}
+	}
+	report := diagnostic.RenderHuman(result.Diagnostics, result.SkippedPhases)
+	for _, expected := range []string{"MissingOne", "MissingTwo", "Phase: references", "- normalize:", "- openapi:", "- ir:"} {
+		if !strings.Contains(report, expected) {
+			t.Fatalf("report missing %q:\n%s", expected, report)
+		}
+	}
+}
+
+func TestReferenceScanIgnoresLiteralAndVendorPayloadRefKeys(t *testing.T) {
+	var value any
+	err := yaml.Unmarshal([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Literal references", "version": "1"},
+  "paths": {},
+  "components": {
+    "schemas": {
+      "Payload": {
+        "type": "object",
+        "default": {"$ref": "#/not/a/schema"},
+        "x-vendor-data": {"$ref": "#/also/not/a/schema"}
+      }
+    }
+  }
+}`), &value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values := unresolvedLocalReferenceDiagnostics(value, "fixture"); len(values) != 0 {
+		t.Fatalf("literal reference diagnostics = %#v", values)
+	}
+}
+
 func TestCompilerDiagnosticCauseRedactsURLSecrets(t *testing.T) {
 	value := sanitizeDiagnosticCause("fetch https://user:secret@example.test/openapi.json?token=alpha#fragment failed")
 	for _, secret := range []string{"user", "secret", "alpha", "fragment"} {
@@ -51,5 +110,12 @@ func TestCompilerDiagnosticCauseRedactsURLSecrets(t *testing.T) {
 	}
 	if !strings.Contains(value, "https://example.test/openapi.json") {
 		t.Fatalf("cause = %s", value)
+	}
+}
+
+func TestCompilerDiagnosticCauseIsSingleLineAndBounded(t *testing.T) {
+	value := sanitizeDiagnosticCause(strings.Repeat("detail\n", 400))
+	if strings.Contains(value, "\n") || len([]rune(value)) > 1001 || !strings.HasSuffix(value, "…") {
+		t.Fatalf("cause = %q", value)
 	}
 }

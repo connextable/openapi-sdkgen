@@ -12,16 +12,8 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
-func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
+func emitClient(document *ir.Document, manifest Manifest, links []generatedLink, streams []generatedStream) ([]byte, error) {
 	tree, err := buildResourceTree(document, manifest)
-	if err != nil {
-		return nil, err
-	}
-	links, err := generatedLinks(document, manifest)
-	if err != nil {
-		return nil, err
-	}
-	streams, err := generatedStreams(document, manifest)
 	if err != nil {
 		return nil, err
 	}

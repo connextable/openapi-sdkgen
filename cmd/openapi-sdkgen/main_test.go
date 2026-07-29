@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
@@ -32,9 +36,13 @@ func TestGenerateReadsStandardInput(t *testing.T) {
 func TestGenerateDoesNotPublishOutputWhenInputFails(t *testing.T) {
 	directory := t.TempDir()
 	output := filepath.Join(directory, "generated-client")
+	previousError := standardError
+	var diagnostics bytes.Buffer
+	standardError = &diagnostics
+	t.Cleanup(func() { standardError = previousError })
 	err := run([]string{"generate", "--input", "git://example.test/openapi.yaml", "--target", "typescript", "--output", output})
-	if err == nil || !strings.Contains(err.Error(), "unsupported OpenAPI input scheme") {
-		t.Fatalf("generate error = %v", err)
+	if err == nil || !strings.Contains(diagnostics.String(), "unsupported OpenAPI input scheme") {
+		t.Fatalf("generate error = %v, diagnostics = %q", err, diagnostics.String())
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatalf("failed input published output: %v", err)
@@ -46,9 +54,13 @@ func TestGenerateDoesNotPublishOutputWhenHTTPInputFails(t *testing.T) {
 	defer server.Close()
 	directory := t.TempDir()
 	output := filepath.Join(directory, "generated-client")
+	previousError := standardError
+	var diagnostics bytes.Buffer
+	standardError = &diagnostics
+	t.Cleanup(func() { standardError = previousError })
 	err := run([]string{"generate", "--input", server.URL + "/openapi.json", "--target", "typescript", "--output", output})
-	if err == nil || !strings.Contains(err.Error(), "unexpected HTTP status") {
-		t.Fatalf("generate error = %v", err)
+	if err == nil || !strings.Contains(diagnostics.String(), "unexpected HTTP status") {
+		t.Fatalf("generate error = %v, diagnostics = %q", err, diagnostics.String())
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatalf("failed HTTP input published output: %v", err)
@@ -159,9 +171,13 @@ func TestGenerateDoesNotPublishOutputWhenInputIsMalformed(t *testing.T) {
 	previous := standardInput
 	standardInput = strings.NewReader("not: [valid")
 	t.Cleanup(func() { standardInput = previous })
+	previousError := standardError
+	var diagnostics bytes.Buffer
+	standardError = &diagnostics
+	t.Cleanup(func() { standardError = previousError })
 	err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
-	if err == nil || !strings.Contains(err.Error(), "SDKGEN-E110") {
-		t.Fatalf("generate error = %v", err)
+	if err == nil || !strings.Contains(diagnostics.String(), "SDKGEN-E110") {
+		t.Fatalf("generate error = %v, diagnostics = %q", err, diagnostics.String())
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatalf("malformed input published output: %v", err)
@@ -183,9 +199,13 @@ func TestGenerateDoesNotPublishOutputWhenStandardInputIsEmptyOrOversized(t *test
 			directory := t.TempDir()
 			output := filepath.Join(directory, "generated-client")
 			standardInput = test.reader
+			previousError := standardError
+			var diagnostics bytes.Buffer
+			standardError = &diagnostics
+			t.Cleanup(func() { standardError = previousError })
 			err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("generate error = %v", err)
+			if err == nil || !strings.Contains(diagnostics.String(), test.want) {
+				t.Fatalf("generate error = %v, diagnostics = %q", err, diagnostics.String())
 			}
 			if _, err := os.Stat(output); !os.IsNotExist(err) {
 				t.Fatalf("failed stdin input published output: %v", err)
@@ -232,6 +252,258 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(output, forbidden)); !os.IsNotExist(err) {
 			t.Fatalf("source output unexpectedly contains %s: %v", forbidden, err)
 		}
+	}
+}
+
+func TestGenerateReportsPreflightOnceAndClassifiesInternalFailures(t *testing.T) {
+	warning := diagnostic.Diagnostic{
+		Severity: diagnostic.SeverityWarning,
+		Code:     "SDKGEN-W900",
+		Phase:    diagnostic.PhaseTarget,
+		Message:  "test warning",
+	}
+	blocking := diagnostic.Diagnostic{
+		Severity: diagnostic.SeverityError,
+		Code:     "SDKGEN-E900",
+		Phase:    diagnostic.PhaseTarget,
+		Message:  "test error",
+	}
+	for _, test := range []struct {
+		name        string
+		diagnostics []diagnostic.Diagnostic
+		prepareErr  error
+		emitErr     error
+		publishErr  error
+		wantErr     string
+		wantPublish bool
+		wantReports int
+	}{
+		{name: "clean", wantPublish: true},
+		{name: "warnings", diagnostics: []diagnostic.Diagnostic{warning}, wantPublish: true, wantReports: 1},
+		{name: "author errors", diagnostics: []diagnostic.Diagnostic{warning, blocking}, wantErr: errReportedDiagnostics.Error(), wantReports: 1},
+		{name: "prepare failure", diagnostics: []diagnostic.Diagnostic{warning}, prepareErr: fmt.Errorf("prepare boom"), wantErr: "internal typescript preparation failure", wantReports: 1},
+		{name: "emit failure", diagnostics: []diagnostic.Diagnostic{warning}, emitErr: fmt.Errorf("emit boom"), wantErr: "internal typescript emission failure", wantReports: 1},
+		{name: "publish failure", diagnostics: []diagnostic.Diagnostic{warning}, publishErr: fmt.Errorf("publish boom"), wantErr: "internal output publication failure", wantPublish: true, wantReports: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var published bool
+			runtime := generationRuntime{
+				compile: func(string, compiler.CompileOptions) (compiler.Result, error) {
+					return compiler.Result{Document: &ir.Document{}}, nil
+				},
+				prepare: func(generator.Target, compiler.Result, generator.Options) (generator.Preparation, error) {
+					return generator.Preparation{
+						Plan:        generator.NewPlan("test", struct{}{}),
+						Diagnostics: test.diagnostics,
+					}, test.prepareErr
+				},
+				emit: func(generator.Target, generator.Plan) ([]generator.Artifact, error) {
+					return []generator.Artifact{{Path: "index.ts", Data: []byte("export {}\n")}}, test.emitErr
+				},
+				publish: func(string, []generator.Artifact) error {
+					published = true
+					return test.publishErr
+				},
+			}
+			previousError := standardError
+			var report bytes.Buffer
+			standardError = &report
+			t.Cleanup(func() { standardError = previousError })
+			err := generateWithRuntime([]string{
+				"--input", "unused.json",
+				"--target", "typescript",
+				"--output", filepath.Join(t.TempDir(), "generated"),
+			}, runtime)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("error = %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v", err)
+			}
+			if published != test.wantPublish {
+				t.Fatalf("published = %v", published)
+			}
+			if reports := strings.Count(report.String(), "OpenAPI SDK generation:"); reports != test.wantReports {
+				t.Fatalf("reports = %d:\n%s", reports, report.String())
+			}
+			for _, value := range test.diagnostics {
+				if !strings.Contains(report.String(), value.Code) {
+					t.Fatalf("report missing %s:\n%s", value.Code, report.String())
+				}
+			}
+		})
+	}
+}
+
+func TestGeneratePreflightFailurePreservesExistingOutput(t *testing.T) {
+	directory := t.TempDir()
+	output := filepath.Join(directory, "generated")
+	if err := os.MkdirAll(output, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(output, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousInput := standardInput
+	previousError := standardError
+	standardInput = strings.NewReader("")
+	var report bytes.Buffer
+	standardError = &report
+	t.Cleanup(func() {
+		standardInput = previousInput
+		standardError = previousError
+	})
+	err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
+	if !errors.Is(err, errReportedDiagnostics) {
+		t.Fatalf("error = %v", err)
+	}
+	if value, err := os.ReadFile(sentinel); err != nil || string(value) != "keep" {
+		t.Fatalf("sentinel = %q, %v", value, err)
+	}
+}
+
+func TestGeneratePrintsRealTargetWarningAndPublishes(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	output := filepath.Join(directory, "generated")
+	if err := os.WriteFile(input, []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Warning", "version": "1"},
+  "paths": {
+    "/warning": {
+      "get": {
+        "responses": {
+          "204": {"description": "OK"},
+          "400": {
+            "description": "Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Redundant"}}}
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Redundant": {
+        "type": "object",
+        "x-error-category": "authentication",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "category"],
+            "properties": {
+              "code": {"const": "authentication_required"},
+              "category": {"const": "authentication"}
+            }
+          }
+        }
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousError := standardError
+	var report bytes.Buffer
+	standardError = &report
+	t.Cleanup(func() { standardError = previousError })
+	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(report.String(), "OpenAPI SDK generation:") != 1 ||
+		!strings.Contains(report.String(), "0 error(s), 1 warning(s)") ||
+		!strings.Contains(report.String(), "SDKGEN-W641") {
+		t.Fatalf("warning report =\n%s", report.String())
+	}
+	if _, err := os.Stat(filepath.Join(output, "index.ts")); err != nil {
+		t.Fatalf("warning-only generation did not publish: %v", err)
+	}
+}
+
+func TestGenerateReportsAllIndependentTargetErrorsWithoutPublishing(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	output := filepath.Join(directory, "generated")
+	if err := os.WriteFile(input, []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Errors", "version": "1"},
+  "paths": {
+    "/errors": {
+      "get": {
+        "operationId": "getErrors",
+        "x-envelope": "none",
+        "x-pagination": "unknown",
+        "x-sort": {"format": "field-direction"},
+        "responses": {"204": {"description": "OK"}}
+      }
+    }
+  },
+  "webhooks": {"event": {}}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousError := standardError
+	var report bytes.Buffer
+	standardError = &report
+	t.Cleanup(func() { standardError = previousError })
+	err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output})
+	if !errors.Is(err, errReportedDiagnostics) {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Count(report.String(), "OpenAPI SDK generation:") != 1 {
+		t.Fatalf("diagnostic report duplicated:\n%s", report.String())
+	}
+	for _, code := range []string{"SDKGEN-E505", "SDKGEN-E600", "SDKGEN-E611", "SDKGEN-E650"} {
+		if !strings.Contains(report.String(), code) {
+			t.Fatalf("report missing %s:\n%s", code, report.String())
+		}
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("failed preflight published output: %v", err)
+	}
+}
+
+func TestGenerateReportsIndependentReferenceErrorsAndSkippedPhases(t *testing.T) {
+	directory := t.TempDir()
+	input := filepath.Join(directory, "openapi.json")
+	output := filepath.Join(directory, "generated")
+	if err := os.WriteFile(input, []byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "References", "version": "1"},
+  "paths": {
+    "/one": {"get": {"responses": {"200": {
+      "description": "One",
+      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MissingOne"}}}
+    }}}},
+    "/two": {"get": {"responses": {"200": {
+      "description": "Two",
+      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MissingTwo"}}}
+    }}}}
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousError := standardError
+	var report bytes.Buffer
+	standardError = &report
+	t.Cleanup(func() { standardError = previousError })
+	err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output})
+	if !errors.Is(err, errReportedDiagnostics) {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Count(report.String(), "SDKGEN-E120") != 2 {
+		t.Fatalf("reference diagnostics =\n%s", report.String())
+	}
+	for _, expected := range []string{"MissingOne", "MissingTwo", "Skipped phases:", "- normalize:", "- openapi:", "- ir:"} {
+		if !strings.Contains(report.String(), expected) {
+			t.Fatalf("report missing %q:\n%s", expected, report.String())
+		}
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("failed reference preflight published output: %v", err)
 	}
 }
 
@@ -364,9 +636,17 @@ func TestRunRejectsInvalidArgumentsWithoutCreatingOutput(t *testing.T) {
 		{name: "missing input", args: []string{"generate", "--input", filepath.Join(directory, "missing.json"), "--target", "typescript", "--output", output}, want: "SDKGEN-E100"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			previousError := standardError
+			var diagnostics bytes.Buffer
+			standardError = &diagnostics
+			t.Cleanup(func() { standardError = previousError })
 			err := run(test.args)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v", err)
+			report := diagnostics.String()
+			if err != nil {
+				report = err.Error() + "\n" + report
+			}
+			if err == nil || !strings.Contains(report, test.want) {
+				t.Fatalf("error = %v, diagnostics = %q", err, diagnostics.String())
 			}
 			if _, err := os.Stat(output); !os.IsNotExist(err) {
 				t.Fatalf("unexpected output stat error = %v", err)

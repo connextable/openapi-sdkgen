@@ -20,6 +20,14 @@ func validateOpenAPISupportForTarget(document *ir.Document, target string) error
 }
 
 func validateOpenAPISupportWithServer(document *ir.Document, target string, includeServer bool) error {
+	unsupported := unsupportedOpenAPIFeatures(document, includeServer)
+	if len(unsupported) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s target does not yet implement these OpenAPI features:\n- %s", target, strings.Join(unsupported, "\n- "))
+}
+
+func unsupportedOpenAPIFeatures(document *ir.Document, includeServer bool) []string {
 	var unsupported []string
 	root := document.Raw
 	rootUnsupported := unsupportedRootFeatures(document, root)
@@ -39,7 +47,7 @@ func validateOpenAPISupportWithServer(document *ir.Document, target string, incl
 		return nil
 	}
 	sort.Strings(unsupported)
-	return fmt.Errorf("%s target does not yet implement these OpenAPI features:\n- %s", target, strings.Join(unsupported, "\n- "))
+	return deduplicateSortedStrings(unsupported)
 }
 
 func withoutServerAddonFeatures(features []string) []string {

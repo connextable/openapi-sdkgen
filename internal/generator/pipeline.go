@@ -28,13 +28,24 @@ func PrepareCompilation(target Target, compiled compiler.Result, options Options
 		if compiled.Document == nil && !diagnostic.HasErrors(compiled.Diagnostics) {
 			return Preparation{}, fmt.Errorf("internal generation pipeline: compiler returned neither a document nor an error diagnostic")
 		}
+		result.SkippedPhases = append(result.SkippedPhases,
+			diagnostic.SkippedPhase{Phase: diagnostic.PhaseTarget, Reason: "compiler preflight did not produce a safe document"},
+			diagnostic.SkippedPhase{Phase: diagnostic.PhaseEmit, Reason: "compiler preflight did not produce a safe document"},
+			diagnostic.SkippedPhase{Phase: diagnostic.PhasePublish, Reason: "compiler preflight did not produce a safe document"},
+		)
 		return result, nil
 	}
 	plan, targetDiagnostics, err := target.Prepare(compiled.Document, options)
+	result.Diagnostics = diagnostic.Sort(append(result.Diagnostics, targetDiagnostics...))
 	if err != nil {
-		return Preparation{}, err
+		return result, err
 	}
 	result.Plan = plan
-	result.Diagnostics = diagnostic.Sort(append(result.Diagnostics, targetDiagnostics...))
+	if diagnostic.HasErrors(targetDiagnostics) {
+		result.SkippedPhases = append(result.SkippedPhases,
+			diagnostic.SkippedPhase{Phase: diagnostic.PhaseEmit, Reason: "target preflight reported errors"},
+			diagnostic.SkippedPhase{Phase: diagnostic.PhasePublish, Reason: "target preflight reported errors"},
+		)
+	}
 	return result, nil
 }

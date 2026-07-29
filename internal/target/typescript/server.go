@@ -52,11 +52,15 @@ func emitServerArtifacts(document *ir.Document) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	webhookSource, err := emitWebhooks(document, webhooks)
+	callbacks, err := collectCallbacks(document)
 	if err != nil {
 		return nil, err
 	}
-	callbacks, err := collectCallbacks(document)
+	return emitPreparedServerArtifacts(document, webhooks, callbacks)
+}
+
+func emitPreparedServerArtifacts(document *ir.Document, webhooks []webhookDefinition, callbacks []callbackDefinition) ([]Artifact, error) {
+	webhookSource, err := emitWebhooks(document, webhooks)
 	if err != nil {
 		return nil, err
 	}

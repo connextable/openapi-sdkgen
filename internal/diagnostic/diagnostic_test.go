@@ -41,6 +41,9 @@ func TestCollectorSortCountsAndRender(t *testing.T) {
 	report := RenderHuman(values, []SkippedPhase{{Phase: PhaseIR, Reason: "OpenAPI model unavailable"}})
 	for _, want := range []string{
 		"OpenAPI SDK generation: 1 error(s), 1 warning(s)",
+		"Phase: openapi",
+		"Phase: target",
+		"Source: contract.yaml",
 		"error [SDKGEN-E001] paths must be an object",
 		"hint: replace paths with an object",
 		"warning [SDKGEN-W002] redundant declaration",

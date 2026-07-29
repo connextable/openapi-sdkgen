@@ -18,15 +18,28 @@ func validateSchemaSupport(document *ir.Document) error {
 }
 
 func validateServerInboundSchemaSupport(document *ir.Document) error {
-	unsupported := unsupportedSchemasInOpenAPIValue(document.Raw["webhooks"], openAPIPointer("webhooks"))
+	unsupported := unsupportedServerInboundSchemas(document)
 	if len(unsupported) == 0 {
 		return nil
 	}
-	sort.Strings(unsupported)
 	return fmt.Errorf("TypeScript server add-on does not yet implement these OpenAPI Schema Object features:\n- %s", strings.Join(unsupported, "\n- "))
 }
 
 func validateSchemaSupportForTarget(document *ir.Document, target string) error {
+	unsupported := unsupportedSchemasForTarget(document)
+	if len(unsupported) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s target does not yet implement these OpenAPI Schema Object features:\n- %s", target, strings.Join(unsupported, "\n- "))
+}
+
+func unsupportedServerInboundSchemas(document *ir.Document) []string {
+	unsupported := unsupportedSchemasInOpenAPIValue(document.Raw["webhooks"], openAPIPointer("webhooks"))
+	sort.Strings(unsupported)
+	return deduplicateSortedStrings(unsupported)
+}
+
+func unsupportedSchemasForTarget(document *ir.Document) []string {
 	var unsupported []string
 	for _, name := range sortedSchemaNames(document.ComponentSchemas) {
 		unsupported = append(unsupported, unsupportedSchemaFeatures(document.ComponentSchemas[name], openAPIPointer("components", "schemas", name))...)
@@ -57,7 +70,19 @@ func validateSchemaSupportForTarget(document *ir.Document, target string) error 
 		return nil
 	}
 	sort.Strings(unsupported)
-	return fmt.Errorf("%s target does not yet implement these OpenAPI Schema Object features:\n- %s", target, strings.Join(unsupported, "\n- "))
+	return deduplicateSortedStrings(unsupported)
+}
+
+func deduplicateSortedStrings(values []string) []string {
+	write := 0
+	for _, value := range values {
+		if write != 0 && values[write-1] == value {
+			continue
+		}
+		values[write] = value
+		write++
+	}
+	return values[:write]
 }
 
 func sortedSchemaNames(schemas map[string]map[string]any) []string {

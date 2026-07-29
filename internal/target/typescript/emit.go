@@ -32,6 +32,11 @@ func (Generator) SupportsAddon(addon generator.Addon) bool {
 type sourcePlan struct {
 	document      *ir.Document
 	includeServer bool
+	manifest      *Manifest
+	links         []generatedLink
+	streams       []generatedStream
+	webhooks      []webhookDefinition
+	callbacks     []callbackDefinition
 }
 
 // Prepare validates author input for the TypeScript target.
@@ -42,16 +47,6 @@ func (Generator) Prepare(document *ir.Document, options generator.Options) (gene
 	plan, diagnostics, err := prepareSourcePlan(document, options.HasAddon(generator.AddonServer))
 	if err != nil {
 		return generator.Plan{}, diagnostics, err
-	}
-	if validationErr := validatePreparedSourcePlan(plan); validationErr != nil {
-		diagnostics = append(diagnostics, diagnostic.Diagnostic{
-			Severity: diagnostic.SeverityError,
-			Code:     "SDKGEN-E500",
-			Phase:    diagnostic.PhaseTarget,
-			Target:   "typescript",
-			Message:  "The OpenAPI contract cannot be represented by the TypeScript target.",
-			Cause:    validationErr.Error(),
-		})
 	}
 	return generator.NewPlan("typescript", plan), diagnostic.Sort(diagnostics), nil
 }
@@ -135,9 +130,6 @@ func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, err
 	if err != nil {
 		return nil, err
 	}
-	if validationErr := validatePreparedSourcePlan(plan); validationErr != nil {
-		return nil, validationErr
-	}
 	if diagnostic.HasErrors(diagnostics) {
 		return nil, fmt.Errorf("%s", strings.TrimSpace(diagnostic.RenderHuman(diagnostics, nil)))
 	}
@@ -152,35 +144,53 @@ func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return &sourcePlan{document: prepared, includeServer: includeServer}, diagnostics, nil
-}
-
-func validatePreparedSourcePlan(plan *sourcePlan) error {
-	document := plan.document
-	if err := validateSchemaSupport(document); err != nil {
-		return err
-	}
-	if plan.includeServer {
-		if err := validateServerInboundSchemaSupport(document); err != nil {
-			return err
+	plan := &sourcePlan{document: prepared, includeServer: includeServer}
+	targetDiagnostics := prepareTargetDiagnostics(plan)
+	diagnostics = append(diagnostics, targetDiagnostics...)
+	if !diagnostic.HasErrors(diagnostics) {
+		manifest, manifestErr := buildManifest(prepared)
+		if manifestErr != nil {
+			diagnostics = append(diagnostics, loweringPreparationDiagnostic(prepared, manifestErr))
+		} else {
+			plan.manifest = &manifest
+			links, linksErr := generatedLinks(prepared, manifest)
+			if linksErr != nil {
+				diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response links", "SDKGEN-E509", linksErr))
+			} else {
+				plan.links = links
+			}
+			streams, streamsErr := generatedStreams(prepared, manifest)
+			if streamsErr != nil {
+				diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response streams", "SDKGEN-E510", streamsErr))
+			} else {
+				plan.streams = streams
+			}
 		}
 	}
-	if err := validateOpenAPISupportWithServer(document, "TypeScript", plan.includeServer); err != nil {
-		return err
+	if includeServer {
+		webhooks, webhookErr := collectWebhooks(prepared)
+		if webhookErr != nil {
+			diagnostics = append(diagnostics, serverPreparationDiagnostic(prepared, "webhook contracts", webhookErr))
+		} else {
+			plan.webhooks = webhooks
+		}
+		callbacks, callbackErr := collectCallbacks(prepared)
+		if callbackErr != nil {
+			diagnostics = append(diagnostics, serverPreparationDiagnostic(prepared, "callback contracts", callbackErr))
+		} else {
+			plan.callbacks = callbacks
+		}
 	}
-	if err := validateOperationIdentities(document); err != nil {
-		return err
-	}
-	return nil
+	return plan, diagnostic.Sort(diagnostics), nil
 }
 
 func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	document := plan.document
 	includeServer := plan.includeServer
-	manifest, err := buildManifest(document)
-	if err != nil {
-		return nil, err
+	if plan.manifest == nil {
+		return nil, fmt.Errorf("internal TypeScript target: prepared plan has no manifest")
 	}
+	manifest := *plan.manifest
 	typesSource, err := emitTypes(document)
 	if err != nil {
 		return nil, err
@@ -193,7 +203,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientSource, err := emitClient(document, manifest)
+	clientSource, err := emitClient(document, manifest, plan.links, plan.streams)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +227,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		{Path: "generated/runtime.ts", Data: generatedSource(runtimeTemplate)},
 	}
 	if includeServer {
-		serverArtifacts, err := emitServerArtifacts(document)
+		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {
 			return nil, err
 		}

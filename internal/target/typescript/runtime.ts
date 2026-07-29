@@ -1133,8 +1133,8 @@ export function createRequest(options: ClientOptions): RequestFunction {
       return {
         status: response.status,
         ...(contentType === undefined ? {} : { contentType }),
-        data: body,
-		headers: headerValues,
+        data: body as Output,
+        headers: headerValues,
         request,
         response,
       };

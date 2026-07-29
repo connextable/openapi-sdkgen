@@ -169,7 +169,22 @@ func RenderHuman(values []Diagnostic, skipped []SkippedPhase) string {
 	counts := Count(values)
 	var output strings.Builder
 	fmt.Fprintf(&output, "OpenAPI SDK generation: %d error(s), %d warning(s)\n", counts.Errors, counts.Warnings)
+	var currentPhase Phase
+	currentSource := "\x00"
 	for _, value := range values {
+		if value.Phase != currentPhase {
+			currentPhase = value.Phase
+			currentSource = "\x00"
+			fmt.Fprintf(&output, "\nPhase: %s\n", value.Phase)
+		}
+		if value.Location.Source != currentSource {
+			currentSource = value.Location.Source
+			source := currentSource
+			if source == "" {
+				source = "(no source)"
+			}
+			fmt.Fprintf(&output, "Source: %s\n", source)
+		}
 		fmt.Fprintf(&output, "\n%s [%s] %s", value.Severity, value.Code, value.Message)
 		if value.Location.Source != "" || value.Location.Pointer != "" {
 			fmt.Fprintf(&output, "\n  at: %s%s", value.Location.Source, value.Location.Pointer)

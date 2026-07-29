@@ -22,9 +22,29 @@ const usage = "usage: openapi-sdkgen generate --input <path|file-url|http-url|->
 var standardInput io.Reader = os.Stdin
 var standardError io.Writer = os.Stderr
 
+var errReportedDiagnostics = errors.New("generation blocked by reported diagnostics")
+
+type generationRuntime struct {
+	compile func(string, compiler.CompileOptions) (compiler.Result, error)
+	prepare func(generator.Target, compiler.Result, generator.Options) (generator.Preparation, error)
+	emit    func(generator.Target, generator.Plan) ([]generator.Artifact, error)
+	publish func(string, []generator.Artifact) error
+}
+
+var defaultGenerationRuntime = generationRuntime{
+	compile: compiler.CompileInputResultWithOptions,
+	prepare: generator.PrepareCompilation,
+	emit: func(target generator.Target, plan generator.Plan) ([]generator.Artifact, error) {
+		return target.Emit(plan)
+	},
+	publish: writeArtifacts,
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintf(standardError, "openapi-sdkgen: %v\n", err)
+		if !errors.Is(err, errReportedDiagnostics) {
+			fmt.Fprintf(standardError, "openapi-sdkgen: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -41,6 +61,10 @@ func run(args []string) error {
 }
 
 func generate(args []string) error {
+	return generateWithRuntime(args, defaultGenerationRuntime)
+}
+
+func generateWithRuntime(args []string, runtime generationRuntime) error {
 	flags := flag.NewFlagSet("generate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	input := flags.String("input", "", "OpenAPI document path, file URL, HTTP(S) URL, or - for stdin")
@@ -90,7 +114,7 @@ func generate(args []string) error {
 	if err := generator.ValidateTargetOptions(target, options); err != nil {
 		return err
 	}
-	compiled, err := compiler.CompileInputResultWithOptions(*input, compiler.CompileOptions{
+	compiled, err := runtime.compile(*input, compiler.CompileOptions{
 		InputBase:                *inputBase,
 		InputReader:              standardInput,
 		RemoteRefAllowlist:       remoteRefs,
@@ -104,23 +128,33 @@ func generate(args []string) error {
 		TLSCAFile:                *tlsCAFile,
 	})
 	if err != nil {
+		writeDiagnostics(compiled.Diagnostics, compiled.SkippedPhases)
 		return fmt.Errorf("internal compiler failure for %s: %w", *input, err)
 	}
-	prepared, err := generator.PrepareCompilation(target, compiled, options)
+	prepared, err := runtime.prepare(target, compiled, options)
 	if err != nil {
+		writeDiagnostics(prepared.Diagnostics, prepared.SkippedPhases)
 		return fmt.Errorf("internal %s preparation failure: %w", target.Name(), err)
 	}
+	writeDiagnostics(prepared.Diagnostics, prepared.SkippedPhases)
 	if diagnostic.HasErrors(prepared.Diagnostics) {
-		return errors.New(strings.TrimSpace(diagnostic.RenderHuman(prepared.Diagnostics, prepared.SkippedPhases)))
+		return errReportedDiagnostics
 	}
-	artifacts, err := target.Emit(prepared.Plan)
+	artifacts, err := runtime.emit(target, prepared.Plan)
 	if err != nil {
 		return fmt.Errorf("internal %s emission failure: %w", target.Name(), err)
 	}
-	if err := writeArtifacts(*output, artifacts); err != nil {
-		return err
+	if err := runtime.publish(*output, artifacts); err != nil {
+		return fmt.Errorf("internal output publication failure: %w", err)
 	}
 	return nil
+}
+
+func writeDiagnostics(values []diagnostic.Diagnostic, skipped []diagnostic.SkippedPhase) {
+	if len(values) == 0 && len(skipped) == 0 {
+		return
+	}
+	fmt.Fprint(standardError, diagnostic.RenderHuman(values, skipped))
 }
 
 type repeatedStrings []string

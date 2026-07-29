@@ -31,6 +31,13 @@ func CompileResult(data []byte) (Result, error) {
 	if collector.HasErrors() {
 		return reservedSourceScanResult(collector), nil
 	}
+	var decoded any
+	if err := yaml.Unmarshal(data, &decoded); err == nil {
+		collector.Extend(unresolvedLocalReferenceDiagnostics(decoded, "in-memory OpenAPI document"))
+	}
+	if collector.HasErrors() {
+		return referenceSourceScanResult(collector), nil
+	}
 	document, err := compile(data, false)
 	return resultFromCompile(document, err, "in-memory OpenAPI document", collector), nil
 }
@@ -67,6 +74,10 @@ func CompileInputResultWithOptions(input string, options CompileOptions) (Result
 	if collector.HasErrors() {
 		return reservedSourceScanResult(collector), nil
 	}
+	collector.Extend(unresolvedLocalReferenceDiagnostics(decoded, source.display))
+	if collector.HasErrors() {
+		return referenceSourceScanResult(collector), nil
+	}
 	document, err := compileInput(source, false, options)
 	return resultFromCompile(document, err, source.display, collector), nil
 }
@@ -77,6 +88,18 @@ func reservedSourceScanResult(collector *diagnostic.Collector) Result {
 		Diagnostics: displayDiagnosticSources(collector.Diagnostics()),
 		SkippedPhases: []diagnostic.SkippedPhase{
 			{Phase: diagnostic.PhaseReferences, Reason: reason},
+			{Phase: diagnostic.PhaseNormalize, Reason: reason},
+			{Phase: diagnostic.PhaseOpenAPI, Reason: reason},
+			{Phase: diagnostic.PhaseIR, Reason: reason},
+		},
+	}
+}
+
+func referenceSourceScanResult(collector *diagnostic.Collector) Result {
+	reason := "reference resolution reported errors"
+	return Result{
+		Diagnostics: displayDiagnosticSources(collector.Diagnostics()),
+		SkippedPhases: []diagnostic.SkippedPhase{
 			{Phase: diagnostic.PhaseNormalize, Reason: reason},
 			{Phase: diagnostic.PhaseOpenAPI, Reason: reason},
 			{Phase: diagnostic.PhaseIR, Reason: reason},
@@ -177,7 +200,14 @@ func skippedAfter(phase diagnostic.Phase) []diagnostic.SkippedPhase {
 var diagnosticURLPattern = regexp.MustCompile(`https?://[^\s"'<>]+`)
 
 func sanitizeDiagnosticCause(message string) string {
-	return diagnosticURLPattern.ReplaceAllStringFunc(message, safeInputDisplay)
+	message = diagnosticURLPattern.ReplaceAllStringFunc(message, safeInputDisplay)
+	message = strings.Join(strings.Fields(message), " ")
+	const limit = 1000
+	runes := []rune(message)
+	if len(runes) > limit {
+		message = string(runes[:limit]) + "…"
+	}
+	return message
 }
 
 func safeInputDisplay(value string) string {
