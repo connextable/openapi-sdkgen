@@ -52,14 +52,46 @@ func TestPrepareAccumulatesIndependentTargetSupportDiagnostics(t *testing.T) {
 func TestPrepareReplacesBaseInboundHintWithServerSemanticDiagnostics(t *testing.T) {
 	document := &ir.Document{
 		Raw: map[string]any{
-			"webhooks": map[string]any{"bad": "not-a-path-item"},
+			"webhooks": map[string]any{
+				"bad-a": "not-a-path-item",
+				"bad-b": "not-a-path-item",
+				"multi": map[string]any{
+					"get": map[string]any{"parameters": []any{
+						map[string]any{"$ref": "#/components/parameters/MissingGet"},
+					}, "requestBody": map[string]any{"$ref": "#/components/requestBodies/MissingGet"},
+						"responses": map[string]any{"200": map[string]any{"$ref": "#/components/responses/MissingGet"}}},
+					"post": map[string]any{"parameters": []any{
+						map[string]any{"$ref": "#/components/parameters/MissingPost"},
+					}},
+					"additionalOperations": map[string]any{
+						"BAD-A": "not-an-operation",
+						"BAD-B": 42,
+					},
+				},
+			},
 		},
 		Operations: []ir.Operation{{
 			OperationID: "source",
 			Method:      "POST",
 			Path:        "/source",
 			Raw: map[string]any{
-				"callbacks": map[string]any{"bad": "not-a-callback"},
+				"callbacks": map[string]any{
+					"bad-a": "not-a-callback",
+					"bad-b": "not-a-callback",
+					"multi": map[string]any{
+						"{$request.body#/a}": map[string]any{
+							"get": map[string]any{"parameters": []any{
+								map[string]any{"$ref": "#/components/parameters/MissingCallbackGet"},
+							}, "requestBody": map[string]any{"$ref": "#/components/requestBodies/MissingCallbackGet"},
+								"responses": map[string]any{"200": map[string]any{"$ref": "#/components/responses/MissingCallbackGet"}}},
+						},
+						"{$request.body#/b}": map[string]any{
+							"post": map[string]any{"parameters": []any{
+								map[string]any{"$ref": "#/components/parameters/MissingCallbackPost"},
+							}},
+						},
+					},
+				},
 			},
 		}},
 	}
@@ -85,7 +117,7 @@ func TestPrepareReplacesBaseInboundHintWithServerSemanticDiagnostics(t *testing.
 		t.Fatal(err)
 	}
 	serverReport := diagnostic.RenderHuman(serverValues, nil)
-	if strings.Contains(serverReport, "SDKGEN-E505") || strings.Count(serverReport, "SDKGEN-E506") < 2 {
+	if strings.Contains(serverReport, "SDKGEN-E505") || strings.Count(serverReport, "SDKGEN-E506") < 14 {
 		t.Fatalf("server inbound diagnostics =\n%s", serverReport)
 	}
 }

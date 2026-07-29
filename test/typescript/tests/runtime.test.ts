@@ -189,6 +189,56 @@ describe("generated runtime", () => {
     expect(result).toEqual({ displayName: "response" });
   });
 
+  it("allows undeclared standard headers but protects declared header parameters", async () => {
+    const seen: Headers[] = [];
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        seen.push(new Headers(init?.headers));
+        return new Response(null, { status: 204 });
+      },
+    });
+    await request(operation({ path: "/headers" }), undefined, {
+      headers: { "Idempotency-Key": "raw-idem", "If-Match": "raw-version" },
+    });
+    expect(seen[0]?.get("idempotency-key")).toBe("raw-idem");
+    expect(seen[0]?.get("if-match")).toBe("raw-version");
+
+    const declared = operation({
+      path: "/headers",
+      headerNames: ["Idempotency-Key", "If-Match"],
+      parameters: [
+        {
+          location: "header",
+          name: "Idempotency-Key",
+          property: "idempotency",
+          style: "simple",
+          explode: false,
+        },
+        {
+          location: "header",
+          name: "If-Match",
+          property: "version",
+          style: "simple",
+          explode: false,
+        },
+      ],
+    });
+    await request(declared, { headerParams: {} }, { headers: { "Idempotency-Key": "raw" } }).then(
+      () => {
+        throw new Error("declared raw header was accepted");
+      },
+      (error: unknown) => {
+        expect(String((error as { cause?: unknown }).cause)).toContain("must use its typed option");
+      },
+    );
+    await request(declared, {
+      headerParams: { idempotency: "typed-idem", version: "typed-version" },
+    });
+    expect(seen[1]?.get("idempotency-key")).toBe("typed-idem");
+    expect(seen[1]?.get("if-match")).toBe("typed-version");
+  });
+
   it("encodes form, multipart, text, and binary bodies", async () => {
     const requests: RequestInit[] = [];
     const request = createRequest({

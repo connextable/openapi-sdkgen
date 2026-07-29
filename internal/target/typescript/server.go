@@ -76,53 +76,71 @@ func emitPreparedServerArtifacts(document *ir.Document, webhooks []webhookDefini
 }
 
 func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
+	result, failures := collectCallbacksDiagnostics(document)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
+	return result, nil
+}
+
+func collectCallbacksDiagnostics(document *ir.Document) ([]callbackDefinition, []error) {
 	result := make([]callbackDefinition, 0)
+	var failures []error
 	for _, operation := range document.Operations {
 		if operation.Visibility == "hidden" {
 			continue
 		}
 		callbacks, _ := operation.Raw["callbacks"].(map[string]any)
-		definitions, err := collectCallbackMap(document, callbacks, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operationRouteKey(operation), operation.OperationID, "")
-		if err != nil {
-			return nil, err
+		for _, callbackName := range sortedAnyKeys(callbacks) {
+			value := map[string]any{callbackName: callbacks[callbackName]}
+			definitions, callbackFailures := collectCallbackMapDiagnostics(document, value, openAPIPointer("paths", operation.Path, strings.ToLower(operation.Method), "callbacks"), operationRouteKey(operation), operation.OperationID, "")
+			failures = append(failures, callbackFailures...)
+			result = append(result, definitions...)
 		}
-		result = append(result, definitions...)
 	}
 	components, _ := document.Raw["components"].(map[string]any)
 	componentCallbacks, _ := components["callbacks"].(map[string]any)
 	for _, componentName := range sortedAnyKeys(componentCallbacks) {
 		value := map[string]any{componentName: componentCallbacks[componentName]}
-		definitions, err := collectCallbackMap(document, value, openAPIPointer("components", "callbacks"), "", "", componentName)
-		if err != nil {
-			return nil, err
-		}
+		definitions, callbackFailures := collectCallbackMapDiagnostics(document, value, openAPIPointer("components", "callbacks"), "", "", componentName)
+		failures = append(failures, callbackFailures...)
 		result = append(result, definitions...)
 	}
 	sort.Slice(result, func(i, j int) bool { return callbackIdentity(result[i]) < callbackIdentity(result[j]) })
-	return result, nil
+	return result, failures
 }
 
 func collectCallbackMap(document *ir.Document, values map[string]any, path, sourceRouteKey, sourceOperationID, componentName string) ([]callbackDefinition, error) {
+	result, failures := collectCallbackMapDiagnostics(document, values, path, sourceRouteKey, sourceOperationID, componentName)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
+	return result, nil
+}
+
+func collectCallbackMapDiagnostics(document *ir.Document, values map[string]any, path, sourceRouteKey, sourceOperationID, componentName string) ([]callbackDefinition, []error) {
 	names := sortedAnyKeys(values)
 	result := make([]callbackDefinition, 0, len(names))
+	var failures []error
 	for _, name := range names {
 		callback, ok := values[name].(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("%s must be a Callback Object", appendOpenAPIPointer(path, name))
+			failures = append(failures, fmt.Errorf("%s must be a Callback Object", appendOpenAPIPointer(path, name)))
+			continue
 		}
 		resolved, err := resolveComponentObject(document, callback, "callbacks")
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", appendOpenAPIPointer(path, name), err)
+			failures = append(failures, fmt.Errorf("%s: %w", appendOpenAPIPointer(path, name), err))
+			continue
 		}
 		for _, expression := range sortedAnyKeys(resolved) {
 			pathItem, ok := resolved[expression].(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("%s must be a Callback Path Item Object", appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression))
+				failures = append(failures, fmt.Errorf("%s must be a Callback Path Item Object", appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression)))
+				continue
 			}
-			operations, resolvedPathItem, err := serverPathItemOperations(document, pathItem, appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression))
-			if err != nil {
-				return nil, err
-			}
+			operations, resolvedPathItem, pathFailures := serverPathItemOperationsDiagnostics(document, pathItem, appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression))
+			failures = append(failures, pathFailures...)
 			for _, item := range operations {
 				method := item.method
 				operation := item.operation
@@ -131,17 +149,16 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 					operationID = name
 				}
 				operationPath := appendOpenAPIPointer(appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression), item.key)
-				parameters, paramsType, err := inboundParameterDefinitions(document, resolvedPathItem, operation, operationPath, true)
-				if err != nil {
-					return nil, err
+				parameters, paramsType, parameterErr := inboundParameterDefinitions(document, resolvedPathItem, operation, operationPath, true)
+				body, bodyErr := inboundBodyType(document, operation, operationPath)
+				responseType, responsePlan, responseErr := inboundResponseDefinition(document, operation, operationPath)
+				for _, operationErr := range []error{parameterErr, bodyErr, responseErr} {
+					if operationErr != nil {
+						failures = append(failures, operationErr)
+					}
 				}
-				body, err := inboundBodyType(document, operation, operationPath)
-				if err != nil {
-					return nil, err
-				}
-				responseType, responsePlan, err := inboundResponseDefinition(document, operation, operationPath)
-				if err != nil {
-					return nil, err
+				if parameterErr != nil || bodyErr != nil || responseErr != nil {
+					continue
 				}
 				security := operation["security"]
 				if security == nil {
@@ -157,7 +174,7 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 			}
 		}
 	}
-	return result, nil
+	return result, failures
 }
 
 func callbackIdentity(callback callbackDefinition) string {
@@ -541,48 +558,27 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 }
 
 func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
+	result, failures := collectWebhooksDiagnostics(document)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
+	return result, nil
+}
+
+func collectWebhooksDiagnostics(document *ir.Document) ([]webhookDefinition, []error) {
 	values, _ := document.Raw["webhooks"].(map[string]any)
 	names := sortedAnyKeys(values)
 	result := make([]webhookDefinition, 0, len(names))
+	var failures []error
 	for _, name := range names {
 		item, ok := values[name].(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("%s must be a Path Item Object", openAPIPointer("webhooks", name))
+			failures = append(failures, fmt.Errorf("%s must be a Path Item Object", openAPIPointer("webhooks", name)))
+			continue
 		}
-		operations, resolvedItem, err := serverPathItemOperations(document, item, openAPIPointer("webhooks", name))
-		if err != nil {
-			return nil, err
-		}
-		for _, itemOperation := range operations {
-			method := itemOperation.method
-			operation := itemOperation.operation
-			operationPath := openAPIPointer("webhooks", name, itemOperation.key)
-			parameters, paramsType, err := inboundParameterDefinitions(document, resolvedItem, operation, operationPath, true)
-			if err != nil {
-				return nil, err
-			}
-			operationID, _ := operation["operationId"].(string)
-			if operationID == "" {
-				operationID = name
-			}
-			body, err := inboundBodyType(document, operation, operationPath)
-			if err != nil {
-				return nil, err
-			}
-			responseType, responsePlan, err := inboundResponseDefinition(document, operation, operationPath)
-			if err != nil {
-				return nil, err
-			}
-			security := operation["security"]
-			if security == nil {
-				security = document.Raw["security"]
-			}
-			methodName := method
-			result = append(result, webhookDefinition{
-				name: name, property: name, typeName: stablePrivateIdentifier("webhook-type", name+"\x00"+methodName), operationID: operationID,
-				method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType, responseType: responseType, responsePlan: responsePlan, security: security,
-			})
-		}
+		definitions, webhookFailures := collectWebhookDiagnostics(document, name, item)
+		failures = append(failures, webhookFailures...)
+		result = append(result, definitions...)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].name == result[j].name {
@@ -590,7 +586,50 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 		}
 		return result[i].name < result[j].name
 	})
+	return result, failures
+}
+
+func collectWebhook(document *ir.Document, name string, item map[string]any) ([]webhookDefinition, error) {
+	result, failures := collectWebhookDiagnostics(document, name, item)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
 	return result, nil
+}
+
+func collectWebhookDiagnostics(document *ir.Document, name string, item map[string]any) ([]webhookDefinition, []error) {
+	operations, resolvedItem, failures := serverPathItemOperationsDiagnostics(document, item, openAPIPointer("webhooks", name))
+	result := make([]webhookDefinition, 0, len(operations))
+	for _, itemOperation := range operations {
+		method := itemOperation.method
+		operation := itemOperation.operation
+		operationPath := openAPIPointer("webhooks", name, itemOperation.key)
+		parameters, paramsType, parameterErr := inboundParameterDefinitions(document, resolvedItem, operation, operationPath, true)
+		operationID, _ := operation["operationId"].(string)
+		if operationID == "" {
+			operationID = name
+		}
+		body, bodyErr := inboundBodyType(document, operation, operationPath)
+		responseType, responsePlan, responseErr := inboundResponseDefinition(document, operation, operationPath)
+		for _, operationErr := range []error{parameterErr, bodyErr, responseErr} {
+			if operationErr != nil {
+				failures = append(failures, operationErr)
+			}
+		}
+		if parameterErr != nil || bodyErr != nil || responseErr != nil {
+			continue
+		}
+		security := operation["security"]
+		if security == nil {
+			security = document.Raw["security"]
+		}
+		methodName := method
+		result = append(result, webhookDefinition{
+			name: name, property: name, typeName: stablePrivateIdentifier("webhook-type", name+"\x00"+methodName), operationID: operationID,
+			method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType, responseType: responseType, responsePlan: responsePlan, security: security,
+		})
+	}
+	return result, failures
 }
 
 var serverHTTPMethods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace", "query"}
@@ -602,11 +641,20 @@ type serverPathItemOperation struct {
 }
 
 func serverPathItemOperations(document *ir.Document, pathItem map[string]any, path string) ([]serverPathItemOperation, map[string]any, error) {
+	result, resolved, failures := serverPathItemOperationsDiagnostics(document, pathItem, path)
+	if len(failures) != 0 {
+		return nil, nil, failures[0]
+	}
+	return result, resolved, nil
+}
+
+func serverPathItemOperationsDiagnostics(document *ir.Document, pathItem map[string]any, path string) ([]serverPathItemOperation, map[string]any, []error) {
 	resolved, err := ir.ResolvePathItem(document.Raw, pathItem)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, []error{fmt.Errorf("%s: %w", path, err)}
 	}
 	result := make([]serverPathItemOperation, 0)
+	var failures []error
 	for _, method := range serverHTTPMethods {
 		if operation, ok := resolved[method].(map[string]any); ok {
 			result = append(result, serverPathItemOperation{key: method, method: strings.ToUpper(method), operation: operation})
@@ -616,12 +664,13 @@ func serverPathItemOperations(document *ir.Document, pathItem map[string]any, pa
 	for _, method := range sortedAnyKeys(additional) {
 		operation, ok := additional[method].(map[string]any)
 		if !ok {
-			return nil, nil, fmt.Errorf("%s/additionalOperations/%s must be an Operation Object", path, method)
+			failures = append(failures, fmt.Errorf("%s/additionalOperations/%s must be an Operation Object", path, method))
+			continue
 		}
 		result = append(result, serverPathItemOperation{key: method, method: method, operation: operation})
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].method < result[j].method })
-	return result, resolved, nil
+	return result, resolved, failures
 }
 
 type inboundBodyDefinition struct {

@@ -32,7 +32,6 @@ func Read(data []byte) (*Document, error) {
 		return nil, errors.New("OpenAPI document is empty")
 	}
 	var raw map[string]any
-	yamlSource := false
 	trimmed := bytes.TrimSpace(data)
 	if bytes.HasPrefix(trimmed, []byte("{")) {
 		decoder := json.NewDecoder(bytes.NewReader(data))
@@ -44,13 +43,11 @@ func Read(data []byte) (*Document, error) {
 			if yamlErr := decodeOpenAPIYAML(data, &raw); yamlErr != nil {
 				return nil, fmt.Errorf("decode OpenAPI JSON: %w", err)
 			}
-			yamlSource = true
 			goto decoded
 		}
 		var trailing any
 		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 			if yamlErr := decodeOpenAPIYAML(data, &raw); yamlErr == nil {
-				yamlSource = true
 				goto decoded
 			}
 			if err == nil {
@@ -62,7 +59,6 @@ func Read(data []byte) (*Document, error) {
 		if err := decodeOpenAPIYAML(data, &raw); err != nil {
 			return nil, fmt.Errorf("decode OpenAPI YAML: %w", err)
 		}
-		yamlSource = true
 	}
 
 decoded:
@@ -75,12 +71,9 @@ decoded:
 		return nil, err
 	}
 
-	parseData := data
-	if yamlSource {
-		parseData, err = json.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("normalize OpenAPI YAML: %w", err)
-		}
+	parseData, err := json.Marshal(maskOpaqueReferenceKeywords(raw, false))
+	if err != nil {
+		return nil, fmt.Errorf("normalize OpenAPI input: %w", err)
 	}
 	document, err := libopenapi.NewDocument(parseData)
 	if err != nil {
@@ -90,6 +83,41 @@ decoded:
 		return nil, fmt.Errorf("build OpenAPI 3 model: %w", err)
 	}
 	return &Document{Raw: raw, Version: versionLine}, nil
+}
+
+func maskOpaqueReferenceKeywords(value any, opaque bool) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, child := range typed {
+			if opaque && key == "$ref" {
+				continue
+			}
+			childOpaque := opaque || len(key) >= 2 && key[:2] == "x-" || openAPIReferenceLiteralKey(key, child)
+			result[key] = maskOpaqueReferenceKeywords(child, childOpaque)
+		}
+		return result
+	case []any:
+		result := make([]any, len(typed))
+		for index, child := range typed {
+			result[index] = maskOpaqueReferenceKeywords(child, opaque)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func openAPIReferenceLiteralKey(key string, value any) bool {
+	switch key {
+	case "const", "dataValue", "default", "enum", "example", "serializedValue", "value":
+		return true
+	case "examples":
+		_, literal := value.([]any)
+		return literal
+	default:
+		return false
+	}
 }
 
 func decodeOpenAPIYAML(data []byte, raw *map[string]any) error {

@@ -10,6 +10,7 @@
         "operationId": "getErrors",
         "x-envelope": "none",
         "x-pagination": "unknown",
+        "x-sdk-visibility": "public",
         "x-sort": {
           "format": "field-direction"
         },

@@ -60,8 +60,10 @@ Independent findings are accumulated instead of stopping at the first one.
 
 Warnings do not prevent generation. Any error prevents publication: a missing
 output directory remains missing, and an existing output directory remains
-byte-for-byte unchanged. Unexpected internal failures use the same report
-without exposing credentials or unbounded cause text.
+byte-for-byte unchanged. An unexpected internal failure prints any findings
+already collected once, then exits with a short phase-specific internal-failure
+label. Private input, extension-process output, credentials, and unbounded cause
+text are not included.
 
 ## CI
 

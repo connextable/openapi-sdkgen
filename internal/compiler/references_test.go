@@ -762,6 +762,29 @@ esac
 	}
 }
 
+func TestSchemaExtensionFailuresDoNotExposeProcessOutput(t *testing.T) {
+	directory := t.TempDir()
+	executable := filepath.Join(directory, "extension")
+	const sentinel = "extension-process-secret"
+	script := `#!/bin/sh
+read request
+case "$request" in
+  *'"method":"describe"'*) printf '%s\n' '` + sentinel + `' >&2; exit 1 ;;
+  *'"method":"lower"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"error":{"message":"` + sentinel + `"}}' ;;
+esac
+`
+	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	extension := schemaExtension{path: executable}
+	if err := extension.describe(); err == nil || strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("describe error = %v", err)
+	}
+	if _, err := extension.lower("https://example.test/vocab", "", map[string]any{}); err == nil || strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("lower error = %v", err)
+	}
+}
+
 func httpHandler(body string) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

@@ -24,6 +24,18 @@ var standardError io.Writer = os.Stderr
 
 var errReportedDiagnostics = errors.New("generation blocked by reported diagnostics")
 
+type internalGenerationError struct {
+	label string
+	cause error
+}
+
+func (value *internalGenerationError) Error() string { return value.label }
+func (value *internalGenerationError) Unwrap() error { return value.cause }
+
+func internalFailure(label string, cause error) error {
+	return &internalGenerationError{label: label, cause: cause}
+}
+
 type generationRuntime struct {
 	compile func(string, compiler.CompileOptions) (compiler.Result, error)
 	prepare func(generator.Target, compiler.Result, generator.Options) (generator.Preparation, error)
@@ -129,12 +141,12 @@ func generateWithRuntime(args []string, runtime generationRuntime) error {
 	})
 	if err != nil {
 		writeDiagnostics(compiled.Diagnostics, compiled.SkippedPhases)
-		return fmt.Errorf("internal compiler failure for %s: %w", *input, err)
+		return internalFailure("internal compiler failure", err)
 	}
 	prepared, err := runtime.prepare(target, compiled, options)
 	if err != nil {
 		writeDiagnostics(prepared.Diagnostics, prepared.SkippedPhases)
-		return fmt.Errorf("internal %s preparation failure: %w", target.Name(), err)
+		return internalFailure(fmt.Sprintf("internal %s preparation failure", target.Name()), err)
 	}
 	writeDiagnostics(prepared.Diagnostics, prepared.SkippedPhases)
 	if diagnostic.HasErrors(prepared.Diagnostics) {
@@ -142,10 +154,10 @@ func generateWithRuntime(args []string, runtime generationRuntime) error {
 	}
 	artifacts, err := runtime.emit(target, prepared.Plan)
 	if err != nil {
-		return fmt.Errorf("internal %s emission failure: %w", target.Name(), err)
+		return internalFailure(fmt.Sprintf("internal %s emission failure", target.Name()), err)
 	}
 	if err := runtime.publish(*output, artifacts); err != nil {
-		return fmt.Errorf("internal output publication failure: %w", err)
+		return internalFailure("internal output publication failure", err)
 	}
 	return nil
 }

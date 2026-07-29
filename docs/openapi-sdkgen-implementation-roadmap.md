@@ -532,16 +532,16 @@ Remote mode uses repeatable `--allow-remote-ref <origin>` allowlists,
 `<input>.openapi-sdkgen.lock`; allowing a remote origin never creates or updates
 it implicitly. The same lockfile records trusted schema-extension executable
 digests.
-The optional remote-reference mode must require HTTPS, explicit origin
-allowlists, bounded redirects and response sizes, timeouts, a content-addressed
-cache, integrity recording in a lockfile, and an offline/reproducible mode.
+Remote-reference mode requires HTTPS, explicit origin allowlists, bounded
+redirects and response sizes, timeouts, a content-addressed cache, integrity
+recording in a lockfile, and an offline/reproducible mode.
 Each redirect hop resolves and pins DNS before connection, rejects loopback,
 private, link-local, and otherwise non-public addresses, and is revalidated on
-redirect to prevent DNS rebinding. Remote fetches are unauthenticated. A missing
-or mismatched lockfile digest fails closed unless an explicit lock-update mode
-is selected. No compiler invocation may make an implicit network request. Until
-this mode exists, contained local-file references remain the supported
-external-reference model.
+redirect to prevent DNS rebinding. Protected root-document credentials may be
+forwarded only to same-origin references; allowlisted cross-origin references
+remain credential-free. A missing or mismatched lockfile digest fails closed
+unless an explicit lock-update mode is selected. No compiler invocation makes
+an implicit network request.
 
 ## Extension Boundary
 

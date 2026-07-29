@@ -34,7 +34,7 @@ func scanUnresolvedLocalReferences(root, value any, path []string, source string
 			}
 		}
 		for name, child := range typed {
-			if name == "$ref" || strings.HasPrefix(name, "x-") || referenceScanLiteralKey(name, child) {
+			if name == "$ref" || referenceTraversalOpaque(path, name, child) {
 				continue
 			}
 			scanUnresolvedLocalReferences(root, child, append(path, name), source, result)

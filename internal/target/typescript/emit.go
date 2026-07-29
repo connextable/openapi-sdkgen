@@ -147,41 +147,74 @@ func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, 
 	plan := &sourcePlan{document: prepared, includeServer: includeServer}
 	targetDiagnostics := prepareTargetDiagnostics(plan)
 	diagnostics = append(diagnostics, targetDiagnostics...)
-	if !diagnostic.HasErrors(diagnostics) {
-		manifest, manifestErr := buildManifest(prepared)
-		if manifestErr != nil {
-			diagnostics = append(diagnostics, loweringPreparationDiagnostic(prepared, manifestErr))
-		} else {
+	manifest, manifestErrors := buildManifestDiagnostics(prepared)
+	for _, manifestErr := range manifestErrors {
+		diagnostics = append(diagnostics, loweringPreparationDiagnostic(prepared, manifestErr))
+	}
+	helperManifest := manifest
+	if len(manifestErrors) != 0 {
+		helperManifest = visibilityManifest(prepared)
+	} else {
+		plan.manifest = &manifest
+	}
+	links, linkErrors := generatedLinksDiagnostics(prepared, helperManifest)
+	for _, linksErr := range linkErrors {
+		diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response links", "SDKGEN-E509", linksErr))
+	}
+	if len(linkErrors) == 0 {
+		plan.links = links
+	}
+	streams, streamErrors := generatedStreamsDiagnostics(prepared, helperManifest)
+	for _, streamsErr := range streamErrors {
+		diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response streams", "SDKGEN-E510", streamsErr))
+	}
+	if len(streamErrors) == 0 {
+		plan.streams = streams
+	}
+	if len(manifestErrors) == 0 && len(linkErrors) == 0 && len(streamErrors) == 0 {
+		if plan.manifest != nil {
+			if reconcileErr := reconcileResourceCapabilities(prepared, &manifest, links, streams); reconcileErr != nil {
+				diagnostics = append(diagnostics, loweringPreparationDiagnostic(prepared, reconcileErr))
+			}
 			plan.manifest = &manifest
-			links, linksErr := generatedLinks(prepared, manifest)
-			if linksErr != nil {
-				diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response links", "SDKGEN-E509", linksErr))
-			} else {
-				plan.links = links
-			}
-			streams, streamsErr := generatedStreams(prepared, manifest)
-			if streamsErr != nil {
-				diagnostics = append(diagnostics, helperPreparationDiagnostic(prepared, "response streams", "SDKGEN-E510", streamsErr))
-			} else {
-				plan.streams = streams
-			}
 		}
 	}
 	if includeServer {
-		webhooks, webhookErr := collectWebhooks(prepared)
-		if webhookErr != nil {
+		webhooks, webhookErrors := collectWebhooksDiagnostics(prepared)
+		for _, webhookErr := range webhookErrors {
 			diagnostics = append(diagnostics, serverPreparationDiagnostic(prepared, "webhook contracts", webhookErr))
-		} else {
+		}
+		if len(webhookErrors) == 0 {
 			plan.webhooks = webhooks
 		}
-		callbacks, callbackErr := collectCallbacks(prepared)
-		if callbackErr != nil {
+		callbacks, callbackErrors := collectCallbacksDiagnostics(prepared)
+		for _, callbackErr := range callbackErrors {
 			diagnostics = append(diagnostics, serverPreparationDiagnostic(prepared, "callback contracts", callbackErr))
-		} else {
+		}
+		if len(callbackErrors) == 0 {
 			plan.callbacks = callbacks
 		}
 	}
 	return plan, diagnostic.Sort(diagnostics), nil
+}
+
+func reconcileResourceCapabilities(document *ir.Document, manifest *Manifest, links []generatedLink, streams []generatedStream) error {
+	tree, err := buildResourceTree(document, *manifest, resourceCapabilityMembers(links, streams))
+	if err != nil {
+		return err
+	}
+	reachable := make(map[string]bool)
+	resourceOperationIDs(tree, reachable)
+	for index := range manifest.Operations {
+		item := &manifest.Operations[index]
+		if item.Visibility != "public" || reachable[item.RouteKey] {
+			continue
+		}
+		operation := findOperation(document, item.RouteKey)
+		item.CallExpression = exactOperationCall(document, operation, item.InputTypes)
+		item.ResourceSegments = nil
+	}
+	return nil
 }
 
 func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
@@ -318,29 +351,47 @@ func exportedSymbols(source string) map[string]bool {
 }
 
 func buildManifest(document *ir.Document) (Manifest, error) {
+	manifest, failures := buildManifestDiagnostics(document)
+	if len(failures) != 0 {
+		return Manifest{}, failures[0]
+	}
+	return manifest, nil
+}
+
+func buildManifestDiagnostics(document *ir.Document) (Manifest, []error) {
 	manifest := Manifest{
 		Operations: make([]ManifestOperation, 0, len(document.Operations)),
 	}
-	_, errorsBySchema, err := errorContracts(document)
-	if err != nil {
-		return Manifest{}, err
-	}
+	_, errorsBySchema, failures := errorContractsDiagnostics(document)
 	for _, operation := range document.Operations {
+		operationFailed := false
 		outputExpression, err := operationOutputTypeExpression(document, operation)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s output: %w", operationLabel(operation), err)
+			failures = append(failures, fmt.Errorf("operation %s output: %w", operationLabel(operation), err))
+			operationFailed = true
 		}
-		inputTypes, err := operationInputTypes(document, operation)
-		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s input: %w", operationLabel(operation), err)
+		inputTypes, inputErr := operationInputTypes(document, operation)
+		if inputErr != nil {
+			failures = append(failures, fmt.Errorf("operation %s input: %w", operationLabel(operation), inputErr))
+			operationFailed = true
 		}
 		errorExpression, err := operationErrorTypeExpression(document, operation, errorsBySchema)
 		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s error: %w", operationLabel(operation), err)
+			failures = append(failures, fmt.Errorf("operation %s error: %w", operationLabel(operation), err))
+			operationFailed = true
 		}
-		callExpression, segments, err := operationCall(document, operation, inputTypes)
-		if err != nil {
-			return Manifest{}, fmt.Errorf("operation %s call expression: %w", operationLabel(operation), err)
+		callExpression := ""
+		var segments []string
+		if inputErr == nil {
+			var callErr error
+			callExpression, segments, callErr = operationCall(document, operation, inputTypes)
+			if callErr != nil {
+				failures = append(failures, fmt.Errorf("operation %s call expression: %w", operationLabel(operation), callErr))
+				operationFailed = true
+			}
+		}
+		if operationFailed {
+			continue
 		}
 		visibility := operation.Visibility
 		if visibility == "" {
@@ -374,9 +425,12 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 			}(),
 		})
 	}
+	if len(failures) != 0 {
+		return manifest, failures
+	}
 	tree, err := buildResourceTree(document, manifest)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, append(failures, err)
 	}
 	reachable := make(map[string]bool)
 	resourceOperationIDs(tree, reachable)
@@ -388,7 +442,25 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 			item.ResourceSegments = nil
 		}
 	}
-	return manifest, nil
+	return manifest, failures
+}
+
+func visibilityManifest(document *ir.Document) Manifest {
+	result := Manifest{Operations: make([]ManifestOperation, 0, len(document.Operations))}
+	for _, operation := range document.Operations {
+		visibility := operation.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		result.Operations = append(result.Operations, ManifestOperation{
+			RouteKey:    operationRouteKey(operation),
+			OperationID: operation.OperationID,
+			Method:      operation.Method,
+			Path:        operation.Path,
+			Visibility:  visibility,
+		})
+	}
+	return result
 }
 
 func (operation ManifestOperation) renderOutput(scope typeRenderScope) string {

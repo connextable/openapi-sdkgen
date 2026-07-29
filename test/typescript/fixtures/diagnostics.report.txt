@@ -1,0 +1,39 @@
+OpenAPI SDK generation: 4 error(s), 1 warning(s)
+
+Phase: target
+Source: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json
+
+error [SDKGEN-E611] x-envelope value "none" is not supported.
+  at: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json#/paths/~1errors/get/x-envelope
+  target: typescript
+  route: GET /errors
+  operation: getErrors
+  hint: Use x-envelope: data, or omit the extension for baseline behavior.
+
+error [SDKGEN-E650] x-pagination value "unknown" is not supported.
+  at: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json#/paths/~1errors/get/x-pagination
+  target: typescript
+  route: GET /errors
+  operation: getErrors
+  hint: Use cursor, offset, both, or the documented explicit object form.
+
+warning [SDKGEN-W620] x-sdk-visibility: public is redundant.
+  at: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json#/paths/~1errors/get/x-sdk-visibility
+  target: typescript
+  route: GET /errors
+  operation: getErrors
+  hint: Omit x-sdk-visibility; public is the default.
+
+error [SDKGEN-E600] Recognized extension "x-sort" is declared at an unsupported location.
+  at: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json#/paths/~1errors/get/x-sort
+  target: typescript
+  hint: Declare it only on the query Parameter Object it transforms.
+
+error [SDKGEN-E505] The OpenAPI feature #/webhooks (generated inbound webhook contracts) requires the TypeScript server add-on for inbound webhook contracts.
+  at: <ROOT>/test/typescript/fixtures/diagnostics.openapi.json#/webhooks
+  target: typescript
+  hint: Generate again with --with server, or remove the inbound contract.
+
+Skipped phases:
+- emit: target preflight reported errors
+- publish: target preflight reported errors

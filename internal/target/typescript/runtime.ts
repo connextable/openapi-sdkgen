@@ -1020,8 +1020,6 @@ const reservedHeaders = new Set([
   "accept",
   "authorization",
   "content-type",
-  "idempotency-key",
-  "if-match",
   "x-csrf-token",
   "x-request-id",
 ]);
@@ -1094,6 +1092,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
 			try {
 				headerValues = await decodeResponseHeaders(operation, response, codecs);
 			} catch (cause) {
+				await response.body?.cancel().catch(() => undefined);
 				throw transportErrorFromCause(TransportErrorCode.RESPONSE_DECODE_FAILED, "Failed to decode response headers", cause, responseMetadata);
 			}
 			return { status: response.status, ...(contentType === undefined ? {} : { contentType }), data: undefined as Output, headers: headerValues, request, response };

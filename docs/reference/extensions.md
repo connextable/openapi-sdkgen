@@ -116,7 +116,9 @@ short, total-complete, repeated, or non-progressing offset pages.
 
 ## `x-sort`
 
-Location: the exact query Parameter Object being transformed.
+Location: the exact query Parameter Object being transformed on an ordinary
+Paths operation. Webhook and callback parameters remain schema-derived and do
+not accept this client projection.
 
 ```yaml
 - name: sort
@@ -134,7 +136,8 @@ The schema must be an array of unique string enum values in `field:asc` or
 `field:desc` form. Generated input becomes a correlated
 `{field, direction}` union. The runtime converts it back to the declared enum,
 then applies the standard schema validation and Parameter serialization rules.
-Operation-level `x-sort` is invalid.
+Operation-level and inbound-only webhook/callback `x-sort` declarations are
+invalid.
 
 ## `x-sdk-visibility`
 

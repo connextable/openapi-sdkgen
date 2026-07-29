@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
@@ -35,6 +36,50 @@ func TestHermeticAfterSalesPaginationFixtureGenerates(t *testing.T) {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("after-sales pagination output missing %q:\n%s", expected, client)
 		}
+	}
+}
+
+func TestPaginationSchemaTypesIntersectAllOfAndUnionAlternatives(t *testing.T) {
+	document := &ir.Document{ComponentSchemas: map[string]map[string]any{}}
+	for _, test := range []struct {
+		name    string
+		schema  map[string]any
+		allowed map[string]bool
+		want    bool
+	}{
+		{
+			name: "cursor narrowed by allOf",
+			schema: map[string]any{"allOf": []any{
+				map[string]any{"type": []any{"string", "null"}},
+				map[string]any{"type": "string"},
+			}},
+			allowed: map[string]bool{"string": true},
+			want:    true,
+		},
+		{
+			name: "integer narrowed from number",
+			schema: map[string]any{"allOf": []any{
+				map[string]any{"type": "number"},
+				map[string]any{"type": "integer"},
+			}},
+			allowed: map[string]bool{"integer": true},
+			want:    true,
+		},
+		{
+			name: "alternative remains nullable",
+			schema: map[string]any{"anyOf": []any{
+				map[string]any{"type": "string"},
+				map[string]any{"type": "null"},
+			}},
+			allowed: map[string]bool{"string": true},
+			want:    false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := paginationSchemaHasOnlyTypes(document, test.schema, test.allowed); got != test.want {
+				t.Fatalf("paginationSchemaHasOnlyTypes = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 

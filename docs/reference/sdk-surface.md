@@ -52,8 +52,9 @@ projections. `Enums` exposes exact readonly runtime tuples for component enum
 values.
 
 `Routes` is the canonical complete operation catalog. Every non-hidden
-operation is keyed by its uppercase HTTP method and exact OpenAPI path, so it
-also covers documents without `operationId`. Each route correlates `input`,
+operation is keyed by its uppercase standard HTTP method and exact OpenAPI
+path; OpenAPI 3.2 `additionalOperations` keep their exact declared method
+spelling. It also covers documents without `operationId`. Each route correlates `input`,
 `resourceInput`, `options`, `output`, `error`, `rawResponse`, `call`,
 `resourceCall`, `pagination`, `links`, and `stream`.
 

@@ -51,17 +51,28 @@ if "$ROOT/.tmp/bin/openapi-sdkgen" generate \
   exit 1
 fi
 for expected in \
-  "OpenAPI SDK generation: 4 error(s), 0 warning(s)" \
+  "OpenAPI SDK generation: 4 error(s), 1 warning(s)" \
   "SDKGEN-E505" \
   "SDKGEN-E600" \
   "SDKGEN-E611" \
-  "SDKGEN-E650"; do
+  "SDKGEN-E650" \
+  "SDKGEN-W620" \
+  "Source:" \
+  "at:" \
+  "hint:"; do
   if ! grep -Fq "$expected" "$diagnostic_report"; then
     agent_note "failed accumulated diagnostic fixture: missing $expected"
     tail -n "$TAIL_LINES" "$diagnostic_report" || true
     exit 1
   fi
 done
+normalized_report="$LOG_DIR/conformance-diagnostics.normalized.log"
+sed "s|$ROOT|<ROOT>|g" "$diagnostic_report" >"$normalized_report"
+if ! cmp -s "$TYPESCRIPT_ROOT/fixtures/diagnostics.report.txt" "$normalized_report"; then
+  agent_note "failed accumulated diagnostic fixture: report differs from golden"
+  diff -u "$TYPESCRIPT_ROOT/fixtures/diagnostics.report.txt" "$normalized_report" || true
+  exit 1
+fi
 if [[ -e "$diagnostic_fixture" ]]; then
   agent_note "failed accumulated diagnostic fixture: output was published"
   exit 1

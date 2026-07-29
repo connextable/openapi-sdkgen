@@ -480,6 +480,36 @@ func TestBuildResourceTreePreservesFixedCallCapabilities(t *testing.T) {
 	}
 }
 
+func TestBuildResourceTreePreservesLinkAndStreamCapabilities(t *testing.T) {
+	source := ir.Operation{OperationID: "listUsers", Method: "GET", Path: "/users"}
+	streamChild := ir.Operation{OperationID: "getStreamChild", Method: "GET", Path: "/users/list/stream"}
+	linksChild := ir.Operation{OperationID: "getLinksChild", Method: "GET", Path: "/users/list/links"}
+	document := &ir.Document{Operations: []ir.Operation{source, streamChild, linksChild}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := []generatedLink{{SourceOperation: source}}
+	streams := []generatedStream{{Operation: source}}
+	if err := reconcileResourceCapabilities(document, &manifest, links, streams); err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	for _, operationID := range []string{"getStreamChild", "getLinksChild"} {
+		if !strings.HasPrefix(calls[operationID], `api.$operations["`+operationID+`"]`) {
+			t.Fatalf("%s capability collision call = %q", operationID, calls[operationID])
+		}
+	}
+	tree, err := buildResourceTree(document, manifest, resourceCapabilityMembers(links, streams))
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := tree.children["users"]
+	if users == nil || users.children["list"] != nil {
+		t.Fatalf("capability collision retained child namespace: %#v", users)
+	}
+}
+
 func TestBuildResourceTreeKeepsRootOperationAndOrdinaryChild(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{
 		{OperationID: "getRoot", Method: "GET", Path: "/"},

@@ -1,13 +1,15 @@
 package sdkgen
 
 import (
+	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -33,6 +35,7 @@ func CompileResult(data []byte) (Result, error) {
 	}
 	var decoded any
 	if err := yaml.Unmarshal(data, &decoded); err == nil {
+		collector.Extend(pathItemReferenceDiagnostics(decoded, "in-memory OpenAPI document", false))
 		collector.Extend(unresolvedLocalReferenceDiagnostics(decoded, "in-memory OpenAPI document"))
 	}
 	if collector.HasErrors() {
@@ -57,15 +60,15 @@ func CompileInputResultWithOptions(input string, options CompileOptions) (Result
 	options.diagnostics = collector
 	source, err := loadInputSource(input, options)
 	if err != nil {
-		return resultFromCompile(nil, err, safeInputDisplay(input), collector), nil
+		return resultFromCompile(nil, phaseError(diagnostic.PhaseInput, err), safeInputDisplay(input), collector), nil
 	}
 	var decoded any
 	if err := yaml.Unmarshal(source.data, &decoded); err != nil {
-		return resultFromCompile(nil, fmt.Errorf("decode OpenAPI input: %w", err), source.display, collector), nil
+		return resultFromCompile(nil, phaseError(diagnostic.PhaseDecode, fmt.Errorf("decode OpenAPI input: %w", err)), source.display, collector), nil
 	}
 	findings, err := reservedExtensionDiagnostics(source.data, source.display)
 	if err != nil {
-		return resultFromCompile(nil, err, source.display, collector), nil
+		return resultFromCompile(nil, phaseError(diagnostic.PhaseDecode, err), source.display, collector), nil
 	}
 	collector.Extend(findings)
 	if err := scanLocalReferenceDocuments(source, collector); err != nil {
@@ -74,6 +77,7 @@ func CompileInputResultWithOptions(input string, options CompileOptions) (Result
 	if collector.HasErrors() {
 		return reservedSourceScanResult(collector), nil
 	}
+	collector.Extend(pathItemReferenceDiagnostics(decoded, source.display, true))
 	collector.Extend(unresolvedLocalReferenceDiagnostics(decoded, source.display))
 	if collector.HasErrors() {
 		return referenceSourceScanResult(collector), nil
@@ -82,10 +86,56 @@ func CompileInputResultWithOptions(input string, options CompileOptions) (Result
 	return resultFromCompile(document, err, source.display, collector), nil
 }
 
+func pathItemReferenceDiagnostics(value any, source string, allowExternal bool) []diagnostic.Diagnostic {
+	document, _ := value.(map[string]any)
+	paths, _ := document["paths"].(map[string]any)
+	names := make([]string, 0, len(paths))
+	for path := range paths {
+		names = append(names, path)
+	}
+	sort.Strings(names)
+	var result []diagnostic.Diagnostic
+	for _, path := range names {
+		if openapiwalk.IsExtensionKey([]string{"paths"}, path) {
+			continue
+		}
+		pathItem, _ := paths[path].(map[string]any)
+		reference, _ := pathItem["$ref"].(string)
+		if reference == "" {
+			continue
+		}
+		local, err := ir.IsLocalPathItemReference(reference)
+		if err == nil && !local && allowExternal {
+			continue
+		}
+		if err == nil && local {
+			_, err = ir.ResolvePathItem(document, pathItem)
+			if err == nil {
+				continue
+			}
+			if _, found := resolveLocalReference(document, reference); !found {
+				continue
+			}
+		}
+		if err == nil {
+			err = fmt.Errorf("external path item reference %q is not supported for in-memory input", reference)
+		}
+		result = append(result, diagnostic.Diagnostic{
+			Severity: diagnostic.SeverityError,
+			Code:     "SDKGEN-E120",
+			Phase:    diagnostic.PhaseReferences,
+			Location: diagnostic.Location{Source: source, Pointer: sourceJSONPointer([]string{"paths", path, "$ref"})},
+			Message:  "Unable to resolve the Path Item reference.",
+			Cause:    sanitizeDiagnosticCause(err.Error()),
+		})
+	}
+	return result
+}
+
 func reservedSourceScanResult(collector *diagnostic.Collector) Result {
 	reason := "reserved extension keywords were found before reference bundling"
 	return Result{
-		Diagnostics: displayDiagnosticSources(collector.Diagnostics()),
+		Diagnostics: diagnostic.Sort(collector.Diagnostics()),
 		SkippedPhases: []diagnostic.SkippedPhase{
 			{Phase: diagnostic.PhaseReferences, Reason: reason},
 			{Phase: diagnostic.PhaseNormalize, Reason: reason},
@@ -98,7 +148,7 @@ func reservedSourceScanResult(collector *diagnostic.Collector) Result {
 func referenceSourceScanResult(collector *diagnostic.Collector) Result {
 	reason := "reference resolution reported errors"
 	return Result{
-		Diagnostics: displayDiagnosticSources(collector.Diagnostics()),
+		Diagnostics: diagnostic.Sort(collector.Diagnostics()),
 		SkippedPhases: []diagnostic.SkippedPhase{
 			{Phase: diagnostic.PhaseNormalize, Reason: reason},
 			{Phase: diagnostic.PhaseOpenAPI, Reason: reason},
@@ -122,54 +172,53 @@ func resultFromCompile(document *ir.Document, err error, source string, collecto
 		result.Document = nil
 		result.SkippedPhases = skippedAfter(phase)
 	}
-	result.Diagnostics = displayDiagnosticSources(collector.Diagnostics())
+	result.Diagnostics = diagnostic.Sort(collector.Diagnostics())
 	return result
 }
 
 func displayDiagnosticSources(values []diagnostic.Diagnostic) []diagnostic.Diagnostic {
-	sources := make([]string, 0, len(values))
-	for _, value := range values {
-		if value.Location.Source != "" {
-			sources = append(sources, value.Location.Source)
-		}
-		for _, related := range value.Related {
-			if related.Source != "" {
-				sources = append(sources, related.Source)
-			}
-		}
-	}
-	registry := diagnostic.NewSourceRegistry(sources)
-	displayed := append([]diagnostic.Diagnostic(nil), values...)
-	for index := range displayed {
-		displayed[index].Location.Source = registry.Display(displayed[index].Location.Source)
-		displayed[index].Related = append([]diagnostic.Location(nil), displayed[index].Related...)
-		for relatedIndex := range displayed[index].Related {
-			displayed[index].Related[relatedIndex].Source = registry.Display(displayed[index].Related[relatedIndex].Source)
-		}
-	}
-	return diagnostic.Sort(displayed)
+	return diagnostic.SanitizeSources(values)
 }
 
 func classifyCompileError(err error) (diagnostic.Phase, string, string) {
-	message := err.Error()
-	switch {
-	case strings.Contains(message, "decode"):
+	var phased *compilePhaseError
+	phase := diagnostic.PhaseIR
+	if errors.As(err, &phased) {
+		phase = phased.phase
+	}
+	switch phase {
+	case diagnostic.PhaseInput:
+		return phase, "SDKGEN-E100", "Unable to load the OpenAPI input."
+	case diagnostic.PhaseDecode:
 		return diagnostic.PhaseDecode, "SDKGEN-E110", "Unable to decode the OpenAPI document."
-	case strings.Contains(message, "read OpenAPI"), strings.Contains(message, "input"),
-		strings.Contains(message, "HTTP"), strings.Contains(message, "TLS"),
-		strings.Contains(message, "offline"), strings.Contains(message, "lock"):
-		return diagnostic.PhaseInput, "SDKGEN-E100", "Unable to load the OpenAPI input."
-	case strings.Contains(message, "reference"), strings.Contains(message, "$ref"),
-		strings.Contains(message, "bundle"):
+	case diagnostic.PhaseReferences:
 		return diagnostic.PhaseReferences, "SDKGEN-E120", "Unable to resolve OpenAPI references."
-	case strings.Contains(message, "normalize"):
+	case diagnostic.PhaseNormalize:
 		return diagnostic.PhaseNormalize, "SDKGEN-E130", "Unable to normalize the OpenAPI document."
-	case strings.Contains(message, "OpenAPI"), strings.Contains(message, "openapi"),
-		strings.Contains(message, "paths"), strings.Contains(message, "Path Item"):
+	case diagnostic.PhaseOpenAPI:
 		return diagnostic.PhaseOpenAPI, "SDKGEN-E140", "The OpenAPI document is invalid."
 	default:
 		return diagnostic.PhaseIR, "SDKGEN-E150", "Unable to build the SDK intermediate representation."
 	}
+}
+
+type compilePhaseError struct {
+	phase diagnostic.Phase
+	err   error
+}
+
+func (value *compilePhaseError) Error() string { return value.err.Error() }
+func (value *compilePhaseError) Unwrap() error { return value.err }
+
+func phaseError(phase diagnostic.Phase, err error) error {
+	if err == nil {
+		return nil
+	}
+	var existing *compilePhaseError
+	if errors.As(err, &existing) {
+		return err
+	}
+	return &compilePhaseError{phase: phase, err: err}
 }
 
 func skippedAfter(phase diagnostic.Phase) []diagnostic.SkippedPhase {
@@ -197,7 +246,7 @@ func skippedAfter(phase diagnostic.Phase) []diagnostic.SkippedPhase {
 	return result
 }
 
-var diagnosticURLPattern = regexp.MustCompile(`https?://[^\s"'<>]+`)
+var diagnosticURLPattern = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
 
 func sanitizeDiagnosticCause(message string) string {
 	message = diagnosticURLPattern.ReplaceAllStringFunc(message, safeInputDisplay)
@@ -211,13 +260,5 @@ func sanitizeDiagnosticCause(message string) string {
 }
 
 func safeInputDisplay(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return value
-	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	return parsed.String()
+	return diagnostic.SafeSourceDisplay(value)
 }

@@ -298,10 +298,8 @@ func (extension schemaExtension) describe() error {
 	command.Stdin = bytes.NewReader(request)
 	var output bytes.Buffer
 	command.Stdout = &limitedWriter{writer: &output, max: 1 << 20}
-	var stderr bytes.Buffer
-	command.Stderr = &limitedWriter{writer: &stderr, max: 16 << 10}
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("run describe: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("run describe: %w", err)
 	}
 	var response struct {
 		JSONRPC string `json:"jsonrpc"`
@@ -379,7 +377,7 @@ func (extension schemaExtension) lower(vocabulary, pointer string, schema any) (
 		return nil, errors.New("lower response does not match JSON-RPC request")
 	}
 	if response.Error != nil {
-		return nil, fmt.Errorf("extension rejected schema: %s", response.Error.Message)
+		return nil, errors.New("extension rejected schema")
 	}
 	if len(response.Result.Schema) == 0 {
 		return nil, errors.New("lower response has no schema")
@@ -403,10 +401,8 @@ func (extension schemaExtension) call(request []byte) ([]byte, error) {
 	command.Stdin = bytes.NewReader(append(request, '\n'))
 	var output bytes.Buffer
 	command.Stdout = &limitedWriter{writer: &output, max: 1 << 20}
-	var stderr bytes.Buffer
-	command.Stderr = &limitedWriter{writer: &stderr, max: 16 << 10}
 	if err := command.Run(); err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, err
 	}
 	return output.Bytes(), nil
 }

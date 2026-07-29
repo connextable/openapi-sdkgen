@@ -468,6 +468,33 @@ func TestCompileFileRejectsReferenceOutsideInputDirectory(t *testing.T) {
 	}
 }
 
+func TestCompileFileRejectsEscapingReferenceBelowPropertyNamedDefault(t *testing.T) {
+	root := t.TempDir()
+	inputDirectory := filepath.Join(root, "input")
+	if err := os.Mkdir(inputDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(inputDirectory, "openapi.json")
+	input := `{
+  "openapi":"3.1.0",
+  "info":{"title":"Named default","version":"1"},
+  "paths":{},
+  "components":{"schemas":{"Payload":{
+    "type":"object",
+    "properties":{"default":{"$ref":"../outside.json"}}
+  }}}
+}`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileFile(path); err == nil || !strings.Contains(err.Error(), "escapes the input directory") {
+		t.Fatalf("CompileFile error = %v", err)
+	}
+}
+
 func TestCompileFileRejectsTransitiveReferenceOutsideInputDirectory(t *testing.T) {
 	root := t.TempDir()
 	inputDirectory := filepath.Join(root, "input")

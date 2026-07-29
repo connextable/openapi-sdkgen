@@ -666,7 +666,7 @@ func operationRawResponseTypeForScope(document *ir.Document, operation ir.Operat
 			schema := media["schema"]
 			schemaObject, _ := schema.(map[string]any)
 			valueType := "void"
-			if schema != nil {
+			if _, sequential := media["itemSchema"]; !sequential && schema != nil {
 				if schema == false {
 					valueType = "never"
 				} else if isBinaryMedia(mediaType, schemaObject) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
 )
 
 var recognizedExtensionNames = map[string]bool{
@@ -60,29 +61,6 @@ func prepareKnownExtensions(document *ir.Document) (*ir.Document, []diagnostic.D
 	categoryDiagnostics := prepareErrorCategories(prepared, consumed)
 	diagnostics = append(diagnostics, categoryDiagnostics...)
 	diagnostics = append(diagnostics, validateVisibilityDependencies(prepared)...)
-
-	for _, occurrence := range occurrences {
-		if occurrence.Name != "x-sort" || consumed[occurrence.Pointer] {
-			continue
-		}
-		parentPointer := strings.TrimSuffix(occurrence.Pointer, "/x-sort")
-		parameter := operationParameter{
-			Name:     extensionStringValue(occurrence.Object, "name"),
-			Location: extensionStringValue(occurrence.Object, "in"),
-			Schema:   occurrence.Object["schema"],
-			Raw:      occurrence.Object,
-			Pointer:  parentPointer,
-		}
-		if parameter.Name == "" || parameter.Location == "" {
-			continue
-		}
-		consumed[occurrence.Pointer] = true
-		plan, findings := validateSortExtension(prepared, ir.Operation{}, parameter)
-		diagnostics = append(diagnostics, findings...)
-		if plan != nil {
-			prepared.ParameterSortPlans[parentPointer] = *plan
-		}
-	}
 
 	for _, occurrence := range occurrences {
 		if consumed[occurrence.Pointer] {
@@ -616,14 +594,18 @@ func collectRecognizedExtensionOccurrences(root map[string]any) []extensionOccur
 	visit = func(value any, path []string) {
 		switch typed := value.(type) {
 		case map[string]any:
-			namedMap := recognizedExtensionNamedMap(path)
+			namedMap := openapiwalk.IsNamedMap(path)
 			for _, name := range sortedAnyKeys(typed) {
 				child := typed[name]
-				if !namedMap && recognizedExtensionNames[name] {
+				extensionKey := openapiwalk.IsExtensionKey(path, name)
+				if extensionKey && recognizedExtensionNames[name] {
 					result = append(result, extensionOccurrence{Name: name, Pointer: pointerFromParts(append(path, name)), Object: typed})
 					continue
 				}
-				if strings.HasPrefix(name, "x-") && !namedMap {
+				if extensionKey {
+					continue
+				}
+				if !namedMap && openapiwalk.IsOpaqueDataField(name, child) {
 					continue
 				}
 				visit(child, append(path, name))
@@ -642,22 +624,6 @@ func collectRecognizedExtensionOccurrences(root map[string]any) []extensionOccur
 		return result[left].Pointer < result[right].Pointer
 	})
 	return result
-}
-
-func recognizedExtensionNamedMap(path []string) bool {
-	if len(path) == 0 {
-		return false
-	}
-	switch path[len(path)-1] {
-	case "paths", "webhooks", "schemas", "parameters", "headers", "requestBodies",
-		"responses", "securitySchemes", "links", "callbacks", "pathItems",
-		"mediaTypes", "examples", "properties", "patternProperties",
-		"dependentSchemas", "$defs", "definitions", "content", "encoding",
-		"additionalOperations", "variables", "scopes":
-		return true
-	default:
-		return false
-	}
 }
 
 func pointerFromParts(parts []string) string {

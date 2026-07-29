@@ -161,6 +161,7 @@ type remoteReferenceResolver struct {
 	lookup        hostLookup
 	mu            sync.Mutex
 	errs          []error
+	sources       map[string][]byte
 }
 
 func (r *remoteReferenceResolver) handle(rawURL string) (*http.Response, error) {
@@ -208,7 +209,7 @@ func newRemoteReferenceResolver(options CompileOptions, lock *referenceLock, cac
 	if options.remoteReferenceLookup != nil {
 		lookup = options.remoteReferenceLookup
 	}
-	resolver := &remoteReferenceResolver{origins: origins, trustedOrigin: trustedOrigin, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, diagnostics: options.diagnostics, lookup: lookup}
+	resolver := &remoteReferenceResolver{origins: origins, trustedOrigin: trustedOrigin, lock: lock, update: options.UpdateRefLock, offline: options.Offline, cache: cache, diagnostics: options.diagnostics, lookup: lookup, sources: make(map[string][]byte)}
 	resolver.client = secureRemoteHTTPClient(resolver)
 	if options.remoteReferenceClient != nil {
 		resolver.client = options.remoteReferenceClient
@@ -414,6 +415,7 @@ func (r *remoteReferenceResolver) fetch(rawURL string) (*http.Response, error) {
 	if err := r.scanRemoteSource(body, key); err != nil {
 		return nil, err
 	}
+	r.rememberSource(key, body)
 	digest := sha256.Sum256(body)
 	encoded := hex.EncodeToString(digest[:])
 	if previous, ok := r.lock.References[key]; ok && previous != encoded && !r.update {
@@ -463,6 +465,7 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 	if err := r.scanRemoteSource(data, key); err != nil {
 		return nil, err
 	}
+	r.rememberSource(key, data)
 	return &http.Response{
 		StatusCode:    http.StatusOK,
 		Status:        "200 OK",
@@ -470,6 +473,25 @@ func (r *remoteReferenceResolver) fetchCached(key string) (*http.Response, error
 		Body:          io.NopCloser(bytes.NewReader(data)),
 		ContentLength: int64(len(data)),
 	}, nil
+}
+
+func (r *remoteReferenceResolver) rememberSource(source string, data []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sources == nil {
+		r.sources = make(map[string][]byte)
+	}
+	r.sources[source] = append([]byte(nil), data...)
+}
+
+func (r *remoteReferenceResolver) sourceSnapshot() map[string][]byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make(map[string][]byte, len(r.sources))
+	for source, data := range r.sources {
+		result[source] = append([]byte(nil), data...)
+	}
+	return result
 }
 
 func (r *remoteReferenceResolver) scanRemoteSource(data []byte, source string) error {

@@ -15,6 +15,14 @@ type generatedStream struct {
 }
 
 func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStream, error) {
+	result, failures := generatedStreamsDiagnostics(document, manifest)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
+	return result, nil
+}
+
+func generatedStreamsDiagnostics(document *ir.Document, manifest Manifest) ([]generatedStream, []error) {
 	visible := map[string]bool{}
 	for _, operation := range manifest.Operations {
 		if operation.Visibility != "hidden" {
@@ -22,6 +30,7 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 		}
 	}
 	var result []generatedStream
+	var failures []error
 	for _, operation := range document.Operations {
 		if !visible[operationRouteKey(operation)] {
 			continue
@@ -35,25 +44,29 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 			response, _ := responses[status].(map[string]any)
 			response, err := resolveComponentObject(document, response, "responses")
 			if err != nil {
-				return nil, err
+				failures = append(failures, fmt.Errorf("streaming response %s %s: %w", operationLabel(operation), status, err))
+				continue
 			}
 			content, _ := response["content"].(map[string]any)
 			for _, mediaType := range sortedAnyKeys(content) {
 				media, _ := content[mediaType].(map[string]any)
 				media, err = resolveMediaTypeObject(document, media)
 				if err != nil {
-					return nil, err
+					failures = append(failures, fmt.Errorf("streaming response %s %s: %w", operationLabel(operation), mediaType, err))
+					continue
 				}
 				if !isStreamingMediaType(mediaType, media) && media["itemSchema"] == nil {
 					continue
 				}
 				itemSchema, exists := media["itemSchema"]
 				if !exists {
-					return nil, fmt.Errorf("streaming response %s %s has no itemSchema", operationLabel(operation), mediaType)
+					failures = append(failures, fmt.Errorf("streaming response %s %s has no itemSchema", operationLabel(operation), mediaType))
+					continue
 				}
 				itemType, err := schemaTypeForScope(document, itemSchema, projectionOutput, typeRenderContract)
 				if err != nil {
-					return nil, err
+					failures = append(failures, fmt.Errorf("streaming response %s %s item schema: %w", operationLabel(operation), mediaType, err))
+					continue
 				}
 				types = append(types, itemType)
 			}
@@ -65,7 +78,7 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 	sort.Slice(result, func(left, right int) bool {
 		return operationRouteKey(result[left].Operation) < operationRouteKey(result[right].Operation)
 	})
-	return result, nil
+	return result, failures
 }
 
 func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []generatedStream) error {

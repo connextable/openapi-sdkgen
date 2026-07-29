@@ -119,6 +119,14 @@ func errorContractsUseContractTypes(contracts []aggregatedErrorContract) bool {
 }
 
 func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[string][]errorContract, error) {
+	contracts, bySchema, failures := errorContractsDiagnostics(document)
+	if len(failures) != 0 {
+		return nil, nil, failures[0]
+	}
+	return contracts, bySchema, nil
+}
+
+func errorContractsDiagnostics(document *ir.Document) ([]aggregatedErrorContract, map[string][]errorContract, []error) {
 	names := make([]string, 0, len(document.ComponentSchemas))
 	for name := range document.ComponentSchemas {
 		names = append(names, name)
@@ -127,6 +135,7 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 	reachable := reachableErrorComponentSchemas(document)
 	byCode := make(map[string][]errorContract)
 	bySchema := make(map[string][]errorContract)
+	var failures []error
 	for _, schemaName := range names {
 		if !reachable[schemaName] {
 			continue
@@ -140,7 +149,8 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 		if len(detailsSchema) > 0 {
 			value, err := schemaTypeForScope(document, detailsSchema, projectionOutput, typeRenderContract)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error %s details: %w", schemaName, err)
+				failures = append(failures, fmt.Errorf("error %s details: %w", schemaName, err))
+				continue
 			}
 			detailsType = value
 		}
@@ -169,7 +179,8 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 		}
 	}
 	result := make([]aggregatedErrorContract, 0, len(byCode))
-	for code, contributions := range byCode {
+	for _, code := range sortedAnyKeys(mapStringAny(byCode)) {
+		contributions := byCode[code]
 		details := make(map[string]bool)
 		categories := make(map[string][]string)
 		schemaNames := make(map[string]bool)
@@ -191,7 +202,8 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 				sort.Strings(categories[category])
 				parts = append(parts, fmt.Sprintf("%q from schemas %s", category, strings.Join(uniqueStrings(categories[category]), ", ")))
 			}
-			return nil, nil, fmt.Errorf("error code %q has conflicting non-empty categories: %s", code, strings.Join(parts, "; "))
+			failures = append(failures, fmt.Errorf("error code %q has conflicting non-empty categories: %s", code, strings.Join(parts, "; ")))
+			continue
 		}
 		category := ""
 		for value := range categories {
@@ -206,7 +218,7 @@ func errorContracts(document *ir.Document) ([]aggregatedErrorContract, map[strin
 		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Code < result[j].Code })
-	return result, bySchema, nil
+	return result, bySchema, failures
 }
 
 func reachableErrorComponentSchemas(document *ir.Document) map[string]bool {

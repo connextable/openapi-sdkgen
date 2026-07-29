@@ -165,7 +165,7 @@ func Sort(values []Diagnostic) []Diagnostic {
 // RenderHuman renders one complete deterministic report. The severity counts
 // are deliberately first so long reports remain scannable.
 func RenderHuman(values []Diagnostic, skipped []SkippedPhase) string {
-	values = Sort(values)
+	values = SanitizeSources(values)
 	counts := Count(values)
 	var output strings.Builder
 	fmt.Fprintf(&output, "OpenAPI SDK generation: %d error(s), %d warning(s)\n", counts.Errors, counts.Warnings)
@@ -289,7 +289,7 @@ func NewSourceRegistry(sources []string) *SourceRegistry {
 	canonical = deduplicateStrings(canonical)
 	groups := make(map[string][]string)
 	for _, source := range canonical {
-		safe := safeSourceDisplay(source)
+		safe := SafeSourceDisplay(source)
 		groups[safe] = append(groups[safe], source)
 	}
 	display := make(map[string]string, len(canonical))
@@ -310,20 +310,72 @@ func (registry *SourceRegistry) Display(source string) string {
 	if value, exists := registry.display[source]; exists {
 		return value
 	}
-	return safeSourceDisplay(source)
+	return SafeSourceDisplay(source)
 }
 
-func safeSourceDisplay(source string) string {
+// SanitizeSources replaces every diagnostic source identity with a stable,
+// credential-safe display name after all compiler and target findings have
+// been merged.
+func SanitizeSources(values []Diagnostic) []Diagnostic {
+	sources := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.Location.Source != "" {
+			sources = append(sources, value.Location.Source)
+		}
+		for _, related := range value.Related {
+			if related.Source != "" {
+				sources = append(sources, related.Source)
+			}
+		}
+	}
+	registry := NewSourceRegistry(sources)
+	result := append([]Diagnostic(nil), values...)
+	for index := range result {
+		result[index].Location.Source = registry.Display(result[index].Location.Source)
+		result[index].Related = append([]Location(nil), result[index].Related...)
+		for relatedIndex := range result[index].Related {
+			result[index].Related[relatedIndex].Source = registry.Display(result[index].Related[relatedIndex].Source)
+		}
+	}
+	return Sort(result)
+}
+
+// SafeSourceDisplay removes URL credentials, query parameters, and fragments
+// from a source identity. It also handles malformed HTTP(S) URLs
+// conservatively so parse errors cannot expose the values being sanitized.
+func SafeSourceDisplay(source string) string {
 	value, err := url.Parse(source)
-	if err != nil || value.Scheme == "" || value.Host == "" {
+	if err == nil && value.Scheme != "" && value.Host != "" {
+		sanitized := *value
+		sanitized.User = nil
+		sanitized.RawQuery = ""
+		sanitized.ForceQuery = false
+		sanitized.Fragment = ""
+		return sanitized.String()
+	}
+	lower := strings.ToLower(source)
+	schemeLength := 0
+	switch {
+	case strings.HasPrefix(lower, "https://"):
+		schemeLength = len("https://")
+	case strings.HasPrefix(lower, "http://"):
+		schemeLength = len("http://")
+	default:
 		return source
 	}
-	sanitized := *value
-	sanitized.User = nil
-	sanitized.RawQuery = ""
-	sanitized.ForceQuery = false
-	sanitized.Fragment = ""
-	return sanitized.String()
+	end := len(source)
+	if index := strings.IndexAny(source[schemeLength:], "?#"); index >= 0 {
+		end = schemeLength + index
+	}
+	sanitized := source[:end]
+	authorityEnd := len(sanitized)
+	if index := strings.IndexByte(sanitized[schemeLength:], '/'); index >= 0 {
+		authorityEnd = schemeLength + index
+	}
+	if index := strings.LastIndexByte(sanitized[schemeLength:authorityEnd], '@'); index >= 0 {
+		sanitized = sanitized[:schemeLength] + sanitized[schemeLength+index+1:]
+	}
+	return sanitized
 }
 
 func deduplicateStrings(values []string) []string {

@@ -13,7 +13,8 @@ import (
 )
 
 func emitClient(document *ir.Document, manifest Manifest, links []generatedLink, streams []generatedStream) ([]byte, error) {
-	tree, err := buildResourceTree(document, manifest)
+	fixedMembers := resourceCapabilityMembers(links, streams)
+	tree, err := buildResourceTree(document, manifest, fixedMembers)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +882,11 @@ func newResourceNode() *resourceNode {
 	}
 }
 
-func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode, error) {
+func buildResourceTree(document *ir.Document, manifest Manifest, capabilities ...map[string]map[string]bool) (*resourceNode, error) {
+	fixedMembers := map[string]map[string]bool{}
+	if len(capabilities) != 0 {
+		fixedMembers = capabilities[0]
+	}
 	if err := validateTemplatedResourcePaths(document); err != nil {
 		return nil, err
 	}
@@ -976,7 +981,7 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 		}
 		node.operations[terminal] = item
 	}
-	resolveResourceNodeCollisions(root)
+	resolveResourceNodeCollisions(root, fixedMembers)
 	pruneEmptyResourceNodes(root)
 	return root, nil
 }
@@ -1068,12 +1073,12 @@ func resourceParameterSignature(document *ir.Document, parameter operationParame
 	}, "\x00"), nil
 }
 
-func resolveResourceNodeCollisions(node *resourceNode) {
+func resolveResourceNodeCollisions(node *resourceNode, fixedMembers map[string]map[string]bool) {
 	if node.parameterChild != nil {
-		resolveResourceNodeCollisions(node.parameterChild)
+		resolveResourceNodeCollisions(node.parameterChild, fixedMembers)
 	}
 	for _, child := range node.children {
-		resolveResourceNodeCollisions(child)
+		resolveResourceNodeCollisions(child, fixedMembers)
 	}
 	if operation, ok := paginatedResourceNodeOperation(node); ok && !node.suppressPagination {
 		node.pagination = &operation
@@ -1092,7 +1097,7 @@ func resolveResourceNodeCollisions(node *resourceNode) {
 			delete(node.operations, name)
 			continue
 		}
-		for _, fixed := range resourceOperationFixedMembers(operation) {
+		for _, fixed := range resourceOperationFixedMembers(operation, fixedMembers) {
 			removeResourceNodeMember(child, fixed)
 		}
 		if resourceNodeEmpty(child) {
@@ -1102,10 +1107,32 @@ func resolveResourceNodeCollisions(node *resourceNode) {
 	}
 }
 
-func resourceOperationFixedMembers(operation ManifestOperation) []string {
+func resourceOperationFixedMembers(operation ManifestOperation, fixedMembers map[string]map[string]bool) []string {
 	result := []string{"raw"}
 	if operation.Pagination != "" {
 		result = append(result, "paginate")
+	}
+	for _, name := range []string{"links", "stream"} {
+		if fixedMembers[manifestRouteKey(operation)][name] {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+func resourceCapabilityMembers(links []generatedLink, streams []generatedStream) map[string]map[string]bool {
+	result := make(map[string]map[string]bool)
+	add := func(routeKey, name string) {
+		if result[routeKey] == nil {
+			result[routeKey] = make(map[string]bool)
+		}
+		result[routeKey][name] = true
+	}
+	for _, link := range links {
+		add(operationRouteKey(link.SourceOperation), "links")
+	}
+	for _, stream := range streams {
+		add(operationRouteKey(stream.Operation), "stream")
 	}
 	return result
 }

@@ -256,6 +256,7 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 }
 
 func TestGenerateReportsPreflightOnceAndClassifiesInternalFailures(t *testing.T) {
+	const internalDetail = "extension-process-secret"
 	warning := diagnostic.Diagnostic{
 		Severity: diagnostic.SeverityWarning,
 		Code:     "SDKGEN-W900",
@@ -271,6 +272,7 @@ func TestGenerateReportsPreflightOnceAndClassifiesInternalFailures(t *testing.T)
 	for _, test := range []struct {
 		name        string
 		diagnostics []diagnostic.Diagnostic
+		compileErr  error
 		prepareErr  error
 		emitErr     error
 		publishErr  error
@@ -281,15 +283,16 @@ func TestGenerateReportsPreflightOnceAndClassifiesInternalFailures(t *testing.T)
 		{name: "clean", wantPublish: true},
 		{name: "warnings", diagnostics: []diagnostic.Diagnostic{warning}, wantPublish: true, wantReports: 1},
 		{name: "author errors", diagnostics: []diagnostic.Diagnostic{warning, blocking}, wantErr: errReportedDiagnostics.Error(), wantReports: 1},
-		{name: "prepare failure", diagnostics: []diagnostic.Diagnostic{warning}, prepareErr: fmt.Errorf("prepare boom"), wantErr: "internal typescript preparation failure", wantReports: 1},
-		{name: "emit failure", diagnostics: []diagnostic.Diagnostic{warning}, emitErr: fmt.Errorf("emit boom"), wantErr: "internal typescript emission failure", wantReports: 1},
-		{name: "publish failure", diagnostics: []diagnostic.Diagnostic{warning}, publishErr: fmt.Errorf("publish boom"), wantErr: "internal output publication failure", wantPublish: true, wantReports: 1},
+		{name: "compile failure", compileErr: errors.New(internalDetail), wantErr: "internal compiler failure"},
+		{name: "prepare failure", diagnostics: []diagnostic.Diagnostic{warning}, prepareErr: errors.New(internalDetail), wantErr: "internal typescript preparation failure", wantReports: 1},
+		{name: "emit failure", diagnostics: []diagnostic.Diagnostic{warning}, emitErr: errors.New(internalDetail), wantErr: "internal typescript emission failure", wantReports: 1},
+		{name: "publish failure", diagnostics: []diagnostic.Diagnostic{warning}, publishErr: errors.New(internalDetail), wantErr: "internal output publication failure", wantPublish: true, wantReports: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var published bool
 			runtime := generationRuntime{
 				compile: func(string, compiler.CompileOptions) (compiler.Result, error) {
-					return compiler.Result{Document: &ir.Document{}}, nil
+					return compiler.Result{Document: &ir.Document{}}, test.compileErr
 				},
 				prepare: func(generator.Target, compiler.Result, generator.Options) (generator.Preparation, error) {
 					return generator.Preparation{
@@ -320,6 +323,17 @@ func TestGenerateReportsPreflightOnceAndClassifiesInternalFailures(t *testing.T)
 				}
 			} else if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("error = %v", err)
+			}
+			if err != nil && strings.Contains(err.Error(), internalDetail) {
+				t.Fatalf("internal detail leaked: %v", err)
+			}
+			for _, cause := range []error{test.compileErr, test.prepareErr, test.emitErr, test.publishErr} {
+				if cause != nil && !errors.Is(err, cause) {
+					t.Fatalf("internal cause is not wrapped: %v", err)
+				}
+			}
+			if strings.Contains(report.String(), internalDetail) {
+				t.Fatalf("internal detail leaked in report: %s", report.String())
 			}
 			if published != test.wantPublish {
 				t.Fatalf("published = %v", published)

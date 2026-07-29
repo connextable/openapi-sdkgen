@@ -329,6 +329,19 @@ func TestResolvePathItemDecodesURIFragmentBeforeJSONPointer(t *testing.T) {
 	}
 }
 
+func TestResolvePathItemMarksCyclicReferenceErrors(t *testing.T) {
+	loop := map[string]any{"$ref": "#/components/pathItems/Loop"}
+	document := map[string]any{
+		"components": map[string]any{
+			"pathItems": map[string]any{"Loop": loop},
+		},
+	}
+	_, err := ResolvePathItem(document, loop)
+	if err == nil || !IsReferenceError(err) || !strings.Contains(err.Error(), "cyclic path item reference") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestBuildRegistersLosslessSchemaResources(t *testing.T) {
 	document := &openapidoc.Document{Raw: map[string]any{
 		"openapi":           "3.2.0",

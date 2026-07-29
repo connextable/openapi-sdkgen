@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -31,11 +32,11 @@ func scanExtensionKeywords(value any, path []string, source string, result *[]di
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		namedMap := extensionScanNamedMap(path)
+		namedMap := openapiwalk.IsNamedMap(path)
 		for _, name := range names {
 			child := typed[name]
-			if strings.HasPrefix(name, "x-") {
-				if !namedMap && strings.HasPrefix(name, reservedExtensionPrefix) {
+			if openapiwalk.IsExtensionKey(path, name) {
+				if strings.HasPrefix(name, reservedExtensionPrefix) {
 					*result = append(*result, diagnostic.Diagnostic{
 						Severity: diagnostic.SeverityError,
 						Code:     "SDKGEN-E160",
@@ -49,28 +50,15 @@ func scanExtensionKeywords(value any, path []string, source string, result *[]di
 				// them are data, not OpenAPI or JSON Schema extension keywords.
 				continue
 			}
+			if !namedMap && openapiwalk.IsOpaqueDataField(name, child) {
+				continue
+			}
 			scanExtensionKeywords(child, append(path, name), source, result)
 		}
 	case []any:
 		for index, child := range typed {
 			scanExtensionKeywords(child, append(path, fmt.Sprintf("%d", index)), source, result)
 		}
-	}
-}
-
-func extensionScanNamedMap(path []string) bool {
-	if len(path) == 0 {
-		return false
-	}
-	switch path[len(path)-1] {
-	case "paths", "webhooks", "schemas", "parameters", "headers", "requestBodies",
-		"responses", "securitySchemes", "links", "callbacks", "pathItems",
-		"mediaTypes", "examples", "properties", "patternProperties",
-		"dependentSchemas", "$defs", "definitions", "content", "encoding",
-		"additionalOperations", "variables", "scopes":
-		return true
-	default:
-		return false
 	}
 }
 
@@ -106,7 +94,7 @@ func scanLocalReferences(data []byte, directory, root string, visited map[string
 		return nil
 	}
 	var references []string
-	collectExternalReferences(value, &references)
+	collectExternalReferences(value, nil, &references)
 	sort.Strings(references)
 	for _, reference := range references {
 		name, _, _ := strings.Cut(reference, "#")
@@ -134,18 +122,26 @@ func scanLocalReferences(data []byte, directory, root string, visited map[string
 	return nil
 }
 
-func collectExternalReferences(value any, result *[]string) {
+func collectExternalReferences(value any, path []string, result *[]string) {
 	switch typed := value.(type) {
 	case map[string]any:
 		if reference, _ := typed["$ref"].(string); reference != "" && !strings.HasPrefix(reference, "#") {
 			*result = append(*result, reference)
 		}
-		for _, child := range typed {
-			collectExternalReferences(child, result)
+		for name, child := range typed {
+			if name == "$ref" || referenceTraversalOpaque(path, name, child) {
+				continue
+			}
+			collectExternalReferences(child, append(path, name), result)
 		}
 	case []any:
-		for _, child := range typed {
-			collectExternalReferences(child, result)
+		for index, child := range typed {
+			collectExternalReferences(child, append(path, fmt.Sprint(index)), result)
 		}
 	}
+}
+
+func referenceTraversalOpaque(path []string, name string, value any) bool {
+	return openapiwalk.IsExtensionKey(path, name) ||
+		(!openapiwalk.IsNamedMap(path) && openapiwalk.IsOpaqueDataField(name, value))
 }

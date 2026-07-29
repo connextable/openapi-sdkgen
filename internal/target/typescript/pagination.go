@@ -680,43 +680,84 @@ func paginationSchemaIncludesType(document *ir.Document, schema map[string]any, 
 
 func paginationSchemaTypeSet(document *ir.Document, schema map[string]any, resolving map[string]bool) map[string]bool {
 	result := make(map[string]bool)
+	constrained := false
+	intersect := func(values map[string]bool, present bool) {
+		if !present {
+			return
+		}
+		if !constrained {
+			result = copyStringBoolMap(values)
+			constrained = true
+			return
+		}
+		for value := range result {
+			if !values[value] {
+				delete(result, value)
+			}
+		}
+	}
+	direct := make(map[string]bool)
 	for _, value := range schemaTypes(schema["type"]) {
-		result[value] = true
+		direct[value] = true
+		if value == "number" {
+			direct["integer"] = true
+		}
 	}
 	if boolValue(schema, "nullable") {
-		result["null"] = true
+		direct["null"] = true
+	}
+	if len(direct) != 0 {
+		intersect(direct, true)
 	}
 	if reference, _ := schema["$ref"].(string); reference != "" {
 		if name, err := componentSchemaReferenceName(reference); err == nil && !resolving[name] {
 			resolving[name] = true
-			for value := range paginationSchemaTypeSet(document, document.ComponentSchemas[name], resolving) {
-				result[value] = true
-			}
+			referenced := paginationSchemaTypeSet(document, document.ComponentSchemas[name], resolving)
 			delete(resolving, name)
+			intersect(referenced, len(referenced) != 0)
 		}
 	}
-	for _, keyword := range []string{"allOf", "oneOf", "anyOf"} {
+	allOf, _ := schema["allOf"].([]any)
+	for _, raw := range allOf {
+		variant, _ := raw.(map[string]any)
+		values := paginationSchemaTypeSet(document, variant, copyStringBoolMap(resolving))
+		intersect(values, len(values) != 0)
+	}
+	for _, keyword := range []string{"oneOf", "anyOf"} {
+		alternatives := make(map[string]bool)
+		alternativeConstrained := true
 		variants, _ := schema[keyword].([]any)
 		for _, raw := range variants {
 			variant, _ := raw.(map[string]any)
-			for value := range paginationSchemaTypeSet(document, variant, copyStringBoolMap(resolving)) {
-				result[value] = true
+			values := paginationSchemaTypeSet(document, variant, copyStringBoolMap(resolving))
+			if len(values) == 0 {
+				alternativeConstrained = false
+				break
+			}
+			for value := range values {
+				alternatives[value] = true
+			}
+		}
+		intersect(alternatives, len(variants) != 0 && alternativeConstrained)
+	}
+	literals := make(map[string]bool)
+	if value, exists := schema["const"]; exists {
+		if inferred := paginationJSONType(value); inferred != "" {
+			literals[inferred] = true
+		}
+	}
+	if values, ok := schema["enum"].([]any); ok {
+		for _, value := range values {
+			if inferred := paginationJSONType(value); inferred != "" {
+				literals[inferred] = true
 			}
 		}
 	}
-	if len(result) == 0 {
-		if value, exists := schema["const"]; exists {
-			if inferred := paginationJSONType(value); inferred != "" {
-				result[inferred] = true
-			}
-		}
-		if values, ok := schema["enum"].([]any); ok {
-			for _, value := range values {
-				if inferred := paginationJSONType(value); inferred != "" {
-					result[inferred] = true
-				}
-			}
-		}
+	if len(literals) != 0 {
+		intersect(literals, true)
+	}
+	if !constrained {
+		return map[string]bool{}
 	}
 	return result
 }

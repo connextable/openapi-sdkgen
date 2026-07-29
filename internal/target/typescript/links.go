@@ -24,6 +24,14 @@ type generatedLink struct {
 }
 
 func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, error) {
+	result, failures := generatedLinksDiagnostics(document, manifest)
+	if len(failures) != 0 {
+		return nil, failures[0]
+	}
+	return result, nil
+}
+
+func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]generatedLink, []error) {
 	visible := map[string]bool{}
 	for _, operation := range manifest.Operations {
 		if operation.Visibility != "hidden" {
@@ -37,6 +45,7 @@ func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, 
 		}
 	}
 	var result []generatedLink
+	var failures []error
 	for _, source := range document.Operations {
 		if !visible[operationRouteKey(source)] {
 			continue
@@ -46,29 +55,35 @@ func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, 
 			response, _ := responses[status].(map[string]any)
 			resolved, err := resolveComponentObject(document, response, "responses")
 			if err != nil {
-				return nil, err
+				failures = append(failures, fmt.Errorf("response %s %s: %w", operationLabel(source), status, err))
+				continue
 			}
 			links, _ := resolved["links"].(map[string]any)
 			for _, name := range sortedAnyKeys(links) {
 				link, _ := links[name].(map[string]any)
 				link, err = resolveComponentObject(document, link, "links")
 				if err != nil {
-					return nil, err
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
 				}
 				target, err := linkTargetOperation(document, byID, link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
 				}
 				if !visible[operationRouteKey(target)] {
-					return nil, fmt.Errorf("response link %s %s targets hidden operation %q", operationLabel(source), name, operationLabel(target))
+					failures = append(failures, fmt.Errorf("response link %s %s targets hidden operation %q", operationLabel(source), name, operationLabel(target)))
+					continue
 				}
 				definition, err := linkDefinition(document, source, target, link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
 				}
 				serverURL, err := linkServerURL(link)
 				if err != nil {
-					return nil, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err)
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
 				}
 				result = append(result, generatedLink{SourceOperation: source, Status: status, Name: name, TargetOperation: target, Definition: definition, ServerURL: serverURL})
 			}
@@ -83,7 +98,7 @@ func generatedLinks(document *ir.Document, manifest Manifest) ([]generatedLink, 
 		}
 		return operationRouteKey(result[left].SourceOperation) < operationRouteKey(result[right].SourceOperation)
 	})
-	return result, nil
+	return result, failures
 }
 
 func linkServerURL(link map[string]any) (string, error) {

@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -153,7 +154,26 @@ func jsonPointer(parts ...string) string {
 // ResolvePathItem resolves a local OpenAPI Path Item reference and applies
 // sibling overrides. Path Item references may target any local JSON Pointer.
 func ResolvePathItem(document, pathItem map[string]any) (map[string]any, error) {
-	return resolvePathItem(document, pathItem, make(map[string]bool))
+	resolved, err := resolvePathItem(document, pathItem, make(map[string]bool))
+	if err != nil {
+		return nil, &ReferenceError{err: err}
+	}
+	return resolved, nil
+}
+
+// ReferenceError marks author-correctable Path Item reference failures.
+type ReferenceError struct {
+	err error
+}
+
+func (value *ReferenceError) Error() string { return value.err.Error() }
+func (value *ReferenceError) Unwrap() error { return value.err }
+
+// IsReferenceError reports whether an IR build failure belongs to reference
+// resolution rather than general OpenAPI validation.
+func IsReferenceError(err error) bool {
+	var target *ReferenceError
+	return errors.As(err, &target)
 }
 
 // IsLocalPathItemReference reports whether a Path Item reference uses a local

@@ -106,7 +106,8 @@ null, 빈 문자열, 반복 값이면 종료합니다. Offset page가 비었거�
 
 ## `x-sort`
 
-위치: 변환할 정확한 query Parameter Object.
+위치: 일반 Paths operation에서 변환할 정확한 query Parameter Object. Webhook과
+callback parameter는 schema에서 그대로 파생하며 이 client projection을 허용하지 않습니다.
 
 ```yaml
 - name: sort
@@ -123,7 +124,7 @@ null, 빈 문자열, 반복 값이면 종료합니다. Offset page가 비었거�
 Schema는 `field:asc` 또는 `field:desc` 형태의 고유한 string enum array여야 합니다.
 생성 input은 연관관계를 보존한 `{field, direction}` union이 됩니다. Runtime은 이를
 선언된 enum으로 변환한 다음 표준 schema validation과 Parameter serialization을 적용합니다.
-Operation-level `x-sort`는 잘못된 선언입니다.
+Operation-level 및 inbound-only webhook/callback `x-sort` 선언은 잘못된 선언입니다.
 
 ## `x-sdk-visibility`
 

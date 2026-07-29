@@ -1692,6 +1692,55 @@ await api.$operations.getLimit.raw().then(() => { throw new Error("malformed hea
 	}
 }
 
+func TestRawSequentialResponseKeepsBodyAndCancelsOnHeaderFailure(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0",
+  "info":{"title":"Sequential raw response","version":"1"},
+  "paths":{"/events":{"get":{
+    "operationId":"tailEvents",
+    "responses":{"200":{
+      "description":"OK",
+      "headers":{"X-Stream-ID":{"required":true,"schema":{"type":"string"}}},
+      "content":{"application/x-ndjson":{
+        "schema":{"type":"array","items":{"type":"string"}},
+        "itemSchema":{"type":"string"}
+      }}
+    }}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { createClient } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+const response = await api.$operations.tailEvents.raw()
+const data: void = response.data
+void data
+`
+	output := compileTypeScriptArtifactsWithProbe(t, document, "sequential-raw.probe.ts", probe)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let cancelled = 0;
+const body = new ReadableStream({
+  start(controller) { controller.enqueue(new TextEncoder().encode('"one"\n')); },
+  cancel() { cancelled++; }
+});
+const api = createClient({
+  baseURL: "https://api.example.test",
+  fetch: async () => new Response(body, { status: 200, headers: { "content-type": "application/x-ndjson" } })
+});
+await api.$operations.tailEvents.raw().then(
+  () => { throw new Error("missing response header was accepted"); },
+  (error) => { if (error.code !== "RESPONSE_DECODE_FAILED") throw error; }
+);
+if (cancelled !== 1) throw new Error("stream was not cancelled exactly once: " + cancelled);
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute raw sequential response cleanup test: %v\n%s", err, output)
+	}
+}
+
 func TestRuntimeRequiresDeclaredCapabilityForSetCookieResponseHeaders(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{"openapi":"3.1.0","info":{"title":"Cookies","version":"1"},"paths":{"/session":{"get":{"operationId":"getSession","responses":{"204":{"description":"OK","headers":{"Set-Cookie":{"required":true,"schema":{"type":"string"}}}}}}}}}`))
 	if err != nil {

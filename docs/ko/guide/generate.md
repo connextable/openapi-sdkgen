@@ -55,7 +55,9 @@ openapi-sdkgen generate \
 
 Warning은 생성을 막지 않습니다. Error가 하나라도 있으면 결과를 게시하지 않습니다.
 기존에 output이 없다면 새로 만들지 않고, 이미 있다면 byte 단위로 그대로 보존합니다.
-예상하지 못한 내부 실패도 같은 보고서로 출력하되 credential이나 무제한 cause text를 노출하지 않습니다.
+예상하지 못한 내부 실패가 나면 그전에 수집한 진단을 한 번 출력한 뒤, 실패 phase를 나타내는
+짧은 내부 오류 label로 종료합니다. 비공개 input, extension process output, credential,
+무제한 cause text는 포함하지 않습니다.
 
 ## CI
 

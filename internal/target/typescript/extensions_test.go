@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
@@ -57,6 +58,218 @@ func TestPrepareAccumulatesRecognizedExtensionDiagnosticsAndIgnoresInertMetadata
 		if strings.Contains(report, inert) {
 			t.Fatalf("inert extension %s produced a diagnostic:\n%s", inert, report)
 		}
+	}
+}
+
+func TestPrepareFindsRecognizedExtensionBelowCollidingSchemaNames(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Colliding names", "version": "1"},
+  "paths": {},
+  "components": {"schemas": {
+    "properties": {
+      "type": "object",
+      "properties": {
+        "paths": {"type": "string", "x-envelope": "data"}
+      }
+    }
+  }}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("diagnostics = %#v", values)
+	}
+}
+
+func TestPrepareTreatsPathsXKeysAsExtensions(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Path extensions", "version": "1"},
+  "paths": {"x-envelope": "data"}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("diagnostics = %#v", values)
+	}
+}
+
+func TestPrepareTreatsResponseXKeysAsExtensions(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Response extensions", "version": "1"},
+  "paths": {"/items": {"get": {"responses": {
+    "200": {"description": "OK"},
+    "x-envelope": "data"
+  }}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("diagnostics = %#v", values)
+	}
+}
+
+func TestPrepareIgnoresRecognizedExtensionNamesInsideLiteralPayloads(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Literal data", "version": "1"},
+  "paths": {},
+  "components": {"schemas": {"Payload": {
+    "type": "object",
+    "default": {"x-envelope": "data"},
+    "examples": [{"x-sort": {"format": "field-direction"}}]
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("literal payload produced diagnostics = %#v", values)
+	}
+}
+
+func TestPrepareDoesNotTreatNamedMapEntriesAsLiteralFields(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Named literal collision", "version": "1"},
+  "paths": {},
+  "components": {"schemas": {"Payload": {
+    "type": "object",
+    "properties": {
+      "default": {"type": "string", "x-envelope": "data"}
+    }
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("diagnostics = %#v", values)
+	}
+}
+
+func TestPrepareHandlesCallbackNamedCallbacks(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Callback collision", "version": "1"},
+  "paths": {"/source": {"post": {
+    "responses": {"202": {"description": "Accepted"}},
+    "callbacks": {"callbacks": {"{$request.body#/url}": {
+      "x-envelope": "data",
+      "post": {"responses": {"204": {"description": "OK"}}}
+    }}}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosticsContainCode(values, "SDKGEN-E600") {
+		t.Fatalf("diagnostics = %#v", values)
+	}
+}
+
+func TestDirectGenerationRedactsExtensionDiagnosticSources(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Safe diagnostics", "version": "1"},
+  "paths": {},
+  "components": {"schemas": {"Payload": {
+    "type": "string",
+    "x-envelope": "data"
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointer := "#/components/schemas/Payload/x-envelope"
+	document.Provenance[pointer] = ir.Provenance{
+		Primary: ir.SourceLocation{
+			Source:  "https://user:secret@example.test/schema.yaml?token=alpha#fragment",
+			Pointer: "#/Payload/x-envelope",
+		},
+	}
+	for _, generate := range []func() error{
+		func() error {
+			_, err := (Generator{}).Generate(document, generator.Options{})
+			return err
+		},
+		func() error {
+			_, err := SourceArtifacts(document)
+			return err
+		},
+	} {
+		err := generate()
+		if err == nil {
+			t.Fatal("invalid extension unexpectedly generated")
+		}
+		for _, secret := range []string{"user", "secret", "token", "alpha", "fragment"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("diagnostic leaked %q: %v", secret, err)
+			}
+		}
+	}
+}
+
+func TestPrepareRejectsSortExtensionOnInboundOnlyParameters(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Inbound sort", "version": "1"},
+  "paths": {"/source": {"post": {
+    "responses": {"202": {"description": "Accepted"}},
+    "callbacks": {"result": {"{$request.body#/callbackURL}": {"post": {
+      "parameters": [{"name": "sort", "in": "query", "x-sort": {"format": "field-direction"}, "schema": {"type": "array", "items": {"type": "string", "enum": ["name:asc"]}}}],
+      "responses": {"204": {"description": "OK"}}
+    }}}}
+  }}},
+  "webhooks": {"event": {"post": {
+    "parameters": [{"name": "sort", "in": "query", "x-sort": {"format": "field-direction"}, "schema": {"type": "array", "items": {"type": "string", "enum": ["name:asc"]}}}],
+    "responses": {"204": {"description": "OK"}}
+  }}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, value := range values {
+		if value.Code == "SDKGEN-E600" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("diagnostics = %#v", values)
 	}
 }
 

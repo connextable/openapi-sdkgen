@@ -46,9 +46,10 @@ import {
 `Components`는 모든 component schema key와 입출력 projection을 보존합니다.
 `Enums`는 component enum 값을 정확한 readonly runtime tuple로 제공합니다.
 
-`Routes`는 모든 operation을 담는 canonical catalog입니다. 모든 non-hidden operation을
-대문자 HTTP method와 정확한 OpenAPI path 조합으로 key를 만들기 때문에 `operationId`가
-없는 문서도 빠짐없이 표현합니다. 각 route는 `input`, `resourceInput`, `options`,
+`Routes`는 모든 operation을 담는 canonical catalog입니다. 모든 non-hidden operation은
+표준 HTTP method를 대문자로 쓰고 정확한 OpenAPI path와 조합해 key를 만듭니다.
+OpenAPI 3.2 `additionalOperations`는 선언된 method 철자를 그대로 보존합니다.
+따라서 `operationId`가 없는 문서도 빠짐없이 표현합니다. 각 route는 `input`, `resourceInput`, `options`,
 `output`, `error`, `rawResponse`, `call`, `resourceCall`, `pagination`, `links`,
 `stream` slot의 관계를 보존합니다.
 
