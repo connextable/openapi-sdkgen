@@ -123,7 +123,9 @@ role-specific entry and let the host own credential verification and routing:
 import { createWebhookRouter, type WebhookHandlers } from "./generated/api/server/webhooks";
 
 const handlers: WebhookHandlers = {
-  orderCreated: async ({ body }) => ({ status: 202, body: { accepted: body.id } }),
+  orderCreated: {
+    POST: async ({ body }) => ({ status: 202, body: { accepted: body.id } }),
+  },
 };
 const router = createWebhookRouter(handlers, {
   routes: { orderCreated: "/webhooks/orders" },
@@ -141,10 +143,20 @@ a generated Fetch endpoint instead of receiving a fabricated route matcher:
 ```ts
 import { createCallbackHandlers } from "./generated/api/server/callbacks";
 
-const callbacks = createCallbackHandlers({
-  orderStatus: async ({ body }) => ({ status: 204 }),
+const endpoints = createCallbackHandlers({
+  callbacks: {
+    createOrder: {
+      orderStatus: {
+        "{$request.body#/callbackURL}": {
+          POST: async ({ body }) => ({ status: 204 }),
+        },
+      },
+    },
+  },
 });
-await callbacks.orderStatus.fetch(request);
+await endpoints.callbacks.createOrder.orderStatus[
+  "{$request.body#/callbackURL}"
+].POST.fetch(request);
 ```
 
 Generate separate source trees by invoking the command once per OpenAPI document and output directory.

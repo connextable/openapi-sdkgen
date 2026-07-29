@@ -27,8 +27,11 @@ Node에서 직접 컴파일하고 실행한다면 `.js` 파일 경로를 명시�
 ```ts
 import {
   createClient,
-  isTransportError,
-  isValidationFailedError,
+  Enums,
+  isAPIError,
+  isErrorCategory,
+  isErrorCode,
+  TransportErrorCode,
   type Components,
   type ClientOptions,
   type Operations,
@@ -40,14 +43,17 @@ import {
 ### 정확한 타입 catalog
 
 `Components`는 모든 component schema key와 입출력 projection을 보존합니다.
-`Operations`는 모든 `operationId`와 그 input, output, raw response, error,
-option, stream item의 관계를 보존합니다.
+`Enums`는 component enum 값을 정확한 readonly runtime tuple로 제공합니다.
+`Operations`는 모든 `operationId`와 `input`, `resourceInput`, `options`,
+`output`, `error`, `rawResponse`, `call`, `resourceCall`, `pagination` slot의
+관계를 보존합니다.
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
 type GetPetInput = Operations["get-pet"]["input"];
 type GetPetError = Operations["get-pet"]["error"];
+const firstCurrency = Enums["Currency"][0];
 ```
 
 정확한 OpenAPI 이름을 정규화한 flat export type alias는 만들지 않습니다.
@@ -71,8 +77,16 @@ typed OpenAPI Link follow-up helper를 제공합니다.
 
 streaming response용 typed lazy `AsyncIterable` method를 제공합니다.
 
-error는 stable code와 cause를 함께 가진 값입니다. `isTransportError`는 transport/HTTP failure를,
-`isValidationFailedError`는 요청 전 또는 response decode 후에 발생한 schema validation failure를 판별합니다.
+error는 stable code와 cause를 함께 가진 값입니다. 기본 형태는
+`isAPIError(error)`, 정확한 runtime code는 `isErrorCode(error, code)`,
+생성된 server error category는 `isErrorCategory(error, category)`로
+판별합니다. Transport failure code는 `TransportErrorCode`의 정확한 값을
+사용합니다.
+
+정확성은 schema property와 operation input 내부에도 적용됩니다.
+`user_id`를 `userId`로 바꾸거나 parameter를 `query`, `headerParams` 등
+다른 location으로 옮기면 생성 API의 breaking change입니다. 각 location
+container에서 OpenAPI 원문의 quoted key를 사용하세요.
 
 ## Metadata entry
 

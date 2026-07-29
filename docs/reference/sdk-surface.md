@@ -31,8 +31,11 @@ not a Node ESM feature.
 ```ts
 import {
   createClient,
-  isTransportError,
-  isValidationFailedError,
+  Enums,
+  isAPIError,
+  isErrorCategory,
+  isErrorCode,
+  TransportErrorCode,
   type Components,
   type ClientOptions,
   type Operations,
@@ -44,14 +47,17 @@ import {
 ### Exact type catalogs
 
 `Components` preserves every component schema key and exposes its directional
-projections. `Operations` preserves every `operationId` and correlates its
-input, output, raw response, errors, options, and stream item:
+projections. `Enums` exposes exact readonly runtime tuples for component enum
+values. `Operations` preserves every `operationId` and correlates its `input`,
+`resourceInput`, `options`, `output`, `error`, `rawResponse`, `call`,
+`resourceCall`, and `pagination` slots:
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
 type GetPetInput = Operations["get-pet"]["input"];
 type GetPetError = Operations["get-pet"]["error"];
+const firstCurrency = Enums["Currency"][0];
 ```
 
 Exact OpenAPI names are never normalized into flat exported type aliases.
@@ -76,9 +82,15 @@ Typed OpenAPI Link follow-up helpers.
 
 Typed lazy `AsyncIterable` methods for streaming responses.
 
-Errors are values with a stable code and cause. `isTransportError` identifies
-transport/HTTP failures; `isValidationFailedError` identifies generated schema
-validation failures before a request or after a response decode.
+Errors are values with a stable code and cause. Use `isAPIError(error)` for the
+base shape, `isErrorCode(error, code)` for an exact runtime code, and
+`isErrorCategory(error, category)` for a generated server-error category.
+Transport failures use exact values from `TransportErrorCode`.
+
+Exactness also applies inside schemas and operation inputs. A property renamed
+from `user_id` to `userId`, or a parameter moved between `query`,
+`headerParams`, and another location, is a generated API breaking change; use
+the quoted source key in the matching location container.
 
 ## Metadata entry
 
