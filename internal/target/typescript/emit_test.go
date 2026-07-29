@@ -230,7 +230,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if manifest.Operations[2].Description != "Creates one catalog product from the supplied body." {
 		t.Fatalf("manifest JSDoc metadata = %#v", manifest.Operations[2])
 	}
-	if manifest.Operations[3].CallExpression != "api.products(productID).get()" {
+	if !strings.HasPrefix(manifest.Operations[3].CallExpression, "api.products(__sdkgen_") || !strings.HasSuffix(manifest.Operations[3].CallExpression, ").get()") {
 		t.Fatalf("get manifest = %#v", manifest.Operations[3])
 	}
 	if !manifest.Operations[3].Deprecated {
@@ -372,7 +372,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 		"(__sdkgen_revokeSessionPathSessionID_",
 		`readonly delete: Operations["revokeSession"]["resourceCall"]`,
 		"login: {\n      post: __sdkgen_",
-		"sessions: Object.assign(",
+		"sessions: assignCallableProperties(",
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("nested resource surface missing %q:\n%s", expected, client)
@@ -389,12 +389,14 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	for id, want := range map[string]string{
 		"login":          "api.auth.login.post()",
 		"revokeSessions": "api.auth.sessions.delete()",
-		"revokeSession":  "api.auth.sessions(sessionID).delete()",
 		"requestCode":    "api.auth.signup.verificationCode.post()",
 	} {
 		if got[id] != want {
 			t.Fatalf("%s call = %q, want %q", id, got[id], want)
 		}
+	}
+	if call := got["revokeSession"]; !strings.HasPrefix(call, "api.auth.sessions(__sdkgen_") || !strings.HasSuffix(call, ").delete()") {
+		t.Fatalf("revokeSession call = %q", call)
 	}
 }
 

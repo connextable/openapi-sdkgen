@@ -330,6 +330,54 @@ if (item.id !== "item-2" || seen.join(",") !== "/orders/latest,/links/eu%20west/
 	}
 }
 
+func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0","info":{"title":"Required options","version":"1"},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"operationId":"followTarget"}}}}}},
+    "/target":{"post":{"operationId":"followTarget","x-idempotency":"required","x-concurrency":"required","responses":{"204":{"description":"OK"}}}},
+    "/events":{"get":{"operationId":"tailEvents","x-concurrency":"required","responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		`invocation: RequiredLinkInvocation<never, Operations["followTarget"]["options"]`,
+		`readonly "tailEvents": (options: Operations["tailEvents"]["options"])`,
+	} {
+		if !strings.Contains(client, expected) {
+			t.Fatalf("required option contract missing %q:\n%s", expected, client)
+		}
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const seen = [];
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input, init) => {
+  const path = new URL(String(input)).pathname;
+  const headers = new Headers(init.headers);
+  seen.push([path, headers.get("idempotency-key"), headers.get("if-match")]);
+  if (path === "/source") return new Response(null, { status: 200 });
+  if (path === "/events") return new Response('"one"\n', { status: 200, headers: { "content-type": "application/x-ndjson" } });
+  return new Response(null, { status: 204 });
+}});
+const source = await api.$operations.getSource.raw();
+await api.$links.getSource.follow(source, { options: { idempotencyKey: "idem", ifMatch: "v1" } });
+for await (const _event of api.$streams.tailEvents({ ifMatch: "v2" })) { break; }
+if (JSON.stringify(seen) !== JSON.stringify([["/source",null,null],["/target","idem","v1"],["/events",null,"v2"]])) throw new Error("required options were not forwarded: " + JSON.stringify(seen));
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute required link/stream options test: %v\n%s", err, output)
+	}
+}
+
 func TestGeneratedPublicIdentityMapsPreserveExactAndPrototypeSensitiveKeys(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0", "info":{"title":"Exact identities","version":"1"},
@@ -1678,6 +1726,114 @@ await api.$operations.createUpload({ body: { metadata: { id: "one" } } });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript structured-multipart runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestWireSchemasPreservePrototypeNamedComponentsAndProperties(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1","info":{"title":"Prototype safety","version":"1"},
+  "paths":{"/value":{"post":{"operationId":"createValue","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/__proto__"}}}},"responses":{"204":{"description":"OK"}}}}},
+  "components":{"schemas":{"__proto__":{"type":"object","required":["__proto__"],"properties":{"__proto__":{"type":"string"}},"additionalProperties":false}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let calls = 0;
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (_url, init) => {
+  calls++;
+  const body = JSON.parse(init.body);
+  if (!Object.hasOwn(body, "__proto__") || body.__proto__ !== "safe" || Object.getPrototypeOf(body) !== Object.prototype) throw new Error("wire property was not preserved");
+  return new Response(null, { status: 204 });
+}});
+const invalid = Object.fromEntries([["__proto__", 7]]);
+try { await api.$operations.createValue({ body: invalid }); throw new Error("invalid prototype property accepted"); }
+catch (error) { if (!String(error).includes("expected string") && !String(error.cause).includes("expected string")) throw error; }
+if (calls !== 0) throw new Error("invalid value reached fetch");
+const valid = Object.fromEntries([["__proto__", "safe"]]);
+if (!Object.hasOwn(valid, "__proto__") || Object.getPrototypeOf(valid) !== Object.prototype) throw new Error("test input is not prototype-safe");
+await api.$operations.createValue({ body: valid });
+if (calls !== 1) throw new Error("valid value did not reach fetch");
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute prototype-safe wire schema test: %v\n%s", err, output)
+	}
+}
+
+func TestVisibleRecursiveComponentCanServeRequestSuccessAndErrorRoles(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1","info":{"title":"Dual role","version":"1"},
+  "paths":{"/node":{"post":{"operationId":"saveNode","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/NodeError"}}}},"responses":{
+    "200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/NodeError"}}}},
+    "400":{"description":"Error","content":{"application/problem+json":{"schema":{"$ref":"#/components/schemas/NodeError"}}}}
+  }}}},
+  "components":{"schemas":{"NodeError":{
+    "type":"object","required":["error"],"properties":{
+      "child":{"$ref":"#/components/schemas/NodeError"},
+      "requestOnly":{"type":"string","writeOnly":true},
+      "responseOnly":{"type":"string","readOnly":true},
+      "error":{"type":"object","required":["code","message","details"],"properties":{
+        "code":{"const":"node_error"},"message":{"type":"string"},"details":{"$ref":"#/components/schemas/NodeDetails"}
+      }}
+    }
+  },"NodeDetails":{"type":"object","properties":{"reason":{"type":"string"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := string(artifactByPath(t, artifacts, "generated/types.ts"))
+	errorsSource := string(artifactByPath(t, artifacts, "generated/errors.ts"))
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		`readonly "NodeError": {`,
+		`readonly "child"?: ComponentInput<"NodeError">`,
+		`readonly "child"?: ComponentOutput<"NodeError">`,
+	} {
+		if !strings.Contains(types, expected) {
+			t.Fatalf("dual-role component missing %q:\n%s", expected, types)
+		}
+	}
+	if !strings.Contains(errorsSource, `"node_error"`) || !strings.Contains(client, `readonly error: Errors.ServerError<"node_error"`) {
+		t.Fatalf("dual-role error contract missing:\n%s\n%s", errorsSource, client)
+	}
+	_ = compileTypeScriptArtifacts(t, document)
+}
+
+func TestResourceCallableNamespacesSupportFunctionIntrinsicNames(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1","info":{"title":"Callable namespaces","version":"1"},
+  "paths":{
+    "/users":{"get":{"operationId":"listUsers","responses":{"204":{"description":"OK"}}}},
+    "/users/list/name":{"get":{"operationId":"getName","responses":{"204":{"description":"OK"}}}},
+    "/users/list/length":{"get":{"operationId":"getLength","responses":{"204":{"description":"OK"}}}},
+    "/users/list/caller":{"get":{"operationId":"getCaller","responses":{"204":{"description":"OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const paths = [];
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (url) => { paths.push(new URL(url).pathname); return new Response(null, { status: 204 }); } });
+await api.users.list();
+await api.users.list.name.get();
+await api.users.list.length.get();
+await api.users.list.caller.get();
+if (JSON.stringify(paths) !== JSON.stringify(["/users", "/users/list/name", "/users/list/length", "/users/list/caller"])) throw new Error("callable namespace dispatch mismatch: " + JSON.stringify(paths));
+for (const key of ["name", "length", "caller"]) if (!Object.hasOwn(api.users.list, key)) throw new Error("missing own callable member " + key);
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute callable namespace intrinsic test: %v\n%s", err, output)
 	}
 }
 

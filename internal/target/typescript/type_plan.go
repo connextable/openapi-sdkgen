@@ -1,7 +1,6 @@
 package typescript
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -87,8 +86,9 @@ func stablePrivateIdentifier(role, source string) string {
 	if err != nil || base == "" {
 		base = "value"
 	}
-	sum := sha256.Sum256([]byte(role + "\x00" + source))
-	return "__sdkgen_" + base + "_" + hex.EncodeToString(sum[:4])
+	// The suffix is a lossless encoding, not a truncated digest. Two distinct
+	// role/source pairs therefore cannot produce the same private identifier.
+	return "__sdkgen_" + base + "_r" + hex.EncodeToString([]byte(role)) + "_s" + hex.EncodeToString([]byte(source))
 }
 
 type runtimeProperty struct {
@@ -146,6 +146,42 @@ func runtimeJSONExpression(value any) (string, error) {
 		data, err := json.Marshal(value)
 		if err != nil {
 			return "", fmt.Errorf("marshal JSON literal: %w", err)
+		}
+		return string(data), nil
+	}
+}
+
+func readonlyJSONType(value any) (string, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		names := make([]string, 0, len(typed))
+		for name := range typed {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fields := make([]string, 0, len(names))
+		for _, name := range names {
+			rendered, err := readonlyJSONType(typed[name])
+			if err != nil {
+				return "", fmt.Errorf("JSON property %q: %w", name, err)
+			}
+			fields = append(fields, "readonly "+quoteTS(name)+": "+rendered)
+		}
+		return "{ " + strings.Join(fields, "; ") + " }", nil
+	case []any:
+		items := make([]string, 0, len(typed))
+		for index, item := range typed {
+			rendered, err := readonlyJSONType(item)
+			if err != nil {
+				return "", fmt.Errorf("JSON item %d: %w", index, err)
+			}
+			items = append(items, rendered)
+		}
+		return "readonly [" + strings.Join(items, ", ") + "]", nil
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("marshal JSON literal type: %w", err)
 		}
 		return string(data), nil
 	}

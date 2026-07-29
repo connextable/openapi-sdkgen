@@ -20,6 +20,7 @@ type webhookDefinition struct {
 	bodyRequired bool
 	bodyPlans    string
 	parameters   string
+	paramsType   string
 	responseType string
 	responsePlan string
 	security     any
@@ -39,6 +40,7 @@ type callbackDefinition struct {
 	bodyRequired      bool
 	bodyPlans         string
 	parameters        string
+	paramsType        string
 	responseType      string
 	responsePlan      string
 	security          any
@@ -109,17 +111,19 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 			if !ok {
 				return nil, fmt.Errorf("%s must be a Callback Path Item Object", appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression))
 			}
-			for _, method := range serverHTTPMethods {
-				operation, ok := pathItem[method].(map[string]any)
-				if !ok {
-					continue
-				}
+			operations, resolvedPathItem, err := serverPathItemOperations(document, pathItem, appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression))
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range operations {
+				method := item.key
+				operation := item.operation
 				operationID, _ := operation["operationId"].(string)
 				if operationID == "" {
 					operationID = name
 				}
 				operationPath := appendOpenAPIPointer(appendOpenAPIPointer(appendOpenAPIPointer(path, name), expression), method)
-				parameters, err := inboundParameterDefinitions(document, pathItem, operation, operationPath, true)
+				parameters, paramsType, err := inboundParameterDefinitions(document, resolvedPathItem, operation, operationPath, true)
 				if err != nil {
 					return nil, err
 				}
@@ -139,7 +143,7 @@ func collectCallbackMap(document *ir.Document, values map[string]any, path, sour
 				result = append(result, callbackDefinition{
 					name: appendOpenAPIPointer(path, name), sourceOperationID: sourceOperationID, componentName: componentName, callbackName: name,
 					typeName: stablePrivateIdentifier("callback-type", identity), expression: expression, operationID: operationID, method: strings.ToUpper(method),
-					bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters,
+					bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType,
 					responseType: responseType, responsePlan: responsePlan, security: security,
 				})
 			}
@@ -221,11 +225,11 @@ func emitCallbackCatalogObject(output *bytes.Buffer, node *callbackCatalogNode, 
 			}
 			switch mode {
 			case callbackCatalogTypes:
-				fmt.Fprintf(output, "{ readonly context: %sContext; readonly response: %sResponse }", child.callback.typeName, child.callback.typeName)
+				fmt.Fprintf(output, "{ readonly context: %sContext; readonly input: %sContext; readonly output: %sResponse; readonly response: %sResponse; readonly handler: (context: %sContext) => %sResponse | Promise<%sResponse>; readonly endpoint: CallbackEndpoint }", child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName)
 			case callbackCatalogHandlers:
-				fmt.Fprintf(output, "(context: %s[\"context\"]) => %s[\"response\"] | Promise<%s[\"response\"]>", slot, slot, slot)
+				fmt.Fprintf(output, "%s[\"handler\"]", slot)
 			case callbackCatalogEndpoints:
-				output.WriteString("CallbackEndpoint")
+				fmt.Fprintf(output, "%s[\"endpoint\"]", slot)
 			case callbackCatalogPathParams:
 				output.WriteString("Readonly<Record<string, string>>")
 			}
@@ -428,7 +432,7 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	componentCatalog := buildCallbackCatalog(callbacks, true)
 	for _, callback := range callbacks {
 		fmt.Fprintf(&output, "/** Host-owned Callback endpoint for URL expression %s. No route is generated. */\n", quoteTS(callback.expression))
-		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n", callback.typeName)
+		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n  readonly params: %s\n", callback.typeName, callback.paramsType)
 		if callback.hasBody {
 			fmt.Fprintf(&output, "  readonly body: %s\n", callback.bodyType)
 		} else {
@@ -466,7 +470,7 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		fmt.Fprintf(&output, "  const %s: CallbackEndpoint = {\n    async fetch(request: Request): Promise<Response> {\n", callbackEndpointSymbol(callback))
 		fmt.Fprintf(&output, "      if (request.method !== %s) return new Response(\"Method Not Allowed\", { status: 405, headers: { allow: %s } })\n", quoteTS(callback.method), quoteTS(callback.method))
 		fmt.Fprintf(&output, "      const handler = %s\n      if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n", handler)
-		fmt.Fprintf(&output, "      let params: InboundParameterValues\n      try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %s) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n      const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: new URL(request.url).pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", definition, pathParams, definition, definition, definition, definition)
+		fmt.Fprintf(&output, "      let params: %s\n      try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %s) as %s } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n      const context = { request, operationID: %s.operationID, method: %s.method, path: new URL(request.url).pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) } as Omit<%sContext, \"body\">\n", callback.paramsType, definition, pathParams, callback.paramsType, definition, definition, definition, definition, callback.typeName)
 		output.WriteString("      if (requiresInboundAuthentication(context.security)) {\n        if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n        try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n        catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n      }\n")
 		if callback.hasBody {
 			output.WriteString("      try {\n")
@@ -498,13 +502,15 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s must be a Path Item Object", openAPIPointer("webhooks", name))
 		}
-		for _, method := range serverHTTPMethods {
-			operation, ok := item[method].(map[string]any)
-			if !ok {
-				continue
-			}
+		operations, resolvedItem, err := serverPathItemOperations(document, item, openAPIPointer("webhooks", name))
+		if err != nil {
+			return nil, err
+		}
+		for _, itemOperation := range operations {
+			method := itemOperation.key
+			operation := itemOperation.operation
 			operationPath := openAPIPointer("webhooks", name, method)
-			parameters, err := inboundParameterDefinitions(document, item, operation, operationPath, true)
+			parameters, paramsType, err := inboundParameterDefinitions(document, resolvedItem, operation, operationPath, true)
 			if err != nil {
 				return nil, err
 			}
@@ -527,7 +533,7 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 			methodName := strings.ToUpper(method)
 			result = append(result, webhookDefinition{
 				name: name, property: name, typeName: stablePrivateIdentifier("webhook-type", name+"\x00"+methodName), operationID: operationID,
-				method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, responseType: responseType, responsePlan: responsePlan, security: security,
+				method: methodName, bodyType: body.typeName, hasBody: body.hasBody, bodyRequired: body.required, bodyPlans: body.plans, parameters: parameters, paramsType: paramsType, responseType: responseType, responsePlan: responsePlan, security: security,
 			})
 		}
 	}
@@ -541,6 +547,35 @@ func collectWebhooks(document *ir.Document) ([]webhookDefinition, error) {
 }
 
 var serverHTTPMethods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace", "query"}
+
+type serverPathItemOperation struct {
+	key       string
+	method    string
+	operation map[string]any
+}
+
+func serverPathItemOperations(document *ir.Document, pathItem map[string]any, path string) ([]serverPathItemOperation, map[string]any, error) {
+	resolved, err := resolveComponentObject(document, pathItem, "pathItems")
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	result := make([]serverPathItemOperation, 0)
+	for _, method := range serverHTTPMethods {
+		if operation, ok := resolved[method].(map[string]any); ok {
+			result = append(result, serverPathItemOperation{key: method, method: strings.ToUpper(method), operation: operation})
+		}
+	}
+	additional, _ := resolved["additionalOperations"].(map[string]any)
+	for _, method := range sortedAnyKeys(additional) {
+		operation, ok := additional[method].(map[string]any)
+		if !ok {
+			return nil, nil, fmt.Errorf("%s/additionalOperations/%s must be an Operation Object", path, method)
+		}
+		result = append(result, serverPathItemOperation{key: method, method: strings.ToUpper(method), operation: operation})
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].method < result[j].method })
+	return result, resolved, nil
+}
 
 type inboundBodyDefinition struct {
 	typeName string
@@ -660,31 +695,53 @@ func isInboundRuntimeMediaType(mediaType string, schema map[string]any) bool {
 	return isStreamMediaType(mediaType) || isJSONMediaType(mediaType) || isTextMedia(mediaType) || strings.Contains(strings.ToLower(mediaType), "xml") || strings.EqualFold(mediaType, "application/x-www-form-urlencoded") || strings.EqualFold(mediaType, "multipart/form-data") || isBinaryMedia(mediaType, schema)
 }
 
-func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[string]any, path string, allowPath bool) (string, error) {
+func inboundParameterDefinitions(document *ir.Document, pathItem, operation map[string]any, path string, allowPath bool) (string, string, error) {
 	parameters, err := operationParameters(document, ir.Operation{PathItemRaw: pathItem, Raw: operation})
 	if err != nil {
-		return "", fmt.Errorf("%s/parameters: %w", path, err)
+		return "", "", fmt.Errorf("%s/parameters: %w", path, err)
 	}
 	entries := make([]string, 0, len(parameters))
+	locations := map[string][]string{
+		"path": {}, "query": {}, "querystring": {}, "headerParams": {}, "cookieParams": {},
+	}
 	for _, parameter := range parameters {
 		if parameter.Location == "path" && !allowPath {
-			return "", fmt.Errorf("%s/parameters/%s: server add-on requires host route path binding for inbound path parameters", path, parameter.Name)
+			return "", "", fmt.Errorf("%s/parameters/%s: server add-on requires host route path binding for inbound path parameters", path, parameter.Name)
 		}
 		schema, err := runtimeJSONExpression(parameter.Schema)
 		if err != nil {
-			return "", fmt.Errorf("%s/parameters/%s: encode schema: %w", path, parameter.Name, err)
+			return "", "", fmt.Errorf("%s/parameters/%s: encode schema: %w", path, parameter.Name, err)
 		}
 		wireSchema, err := wireSchemaDescriptor(parameter.Schema, projectionInput)
 		if err != nil {
-			return "", fmt.Errorf("%s/parameters/%s: encode wire schema: %w", path, parameter.Name, err)
+			return "", "", fmt.Errorf("%s/parameters/%s: encode wire schema: %w", path, parameter.Name, err)
 		}
 		entry := "{ location: " + quoteTS(parameter.Location) + ", name: " + quoteTS(parameter.Name) + ", property: " + quoteTS(parameter.Property) + ", style: " + quoteTS(parameter.Style) + ", explode: " + fmt.Sprint(parameter.Explode) + ", allowReserved: " + fmt.Sprint(parameter.AllowReserved) + ", required: " + fmt.Sprint(parameter.Required) + ", schema: " + schema + ", wireSchema: " + wireSchema
 		if parameter.ContentType != "" {
 			entry += ", contentType: " + quoteTS(parameter.ContentType)
 		}
 		entries = append(entries, entry+" }")
+		valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
+		if err != nil {
+			return "", "", fmt.Errorf("%s/parameters/%s: render input type: %w", path, parameter.Name, err)
+		}
+		location := parameter.Location
+		if location == "header" {
+			location = "headerParams"
+		} else if location == "cookie" {
+			location = "cookieParams"
+		}
+		optional := "?"
+		if parameter.Required {
+			optional = ""
+		}
+		locations[location] = append(locations[location], "readonly "+quoteTS(parameter.Property)+optional+": "+valueType)
 	}
-	return "[" + strings.Join(entries, ", ") + "]", nil
+	fields := make([]string, 0, 5)
+	for _, location := range []string{"path", "query", "querystring", "headerParams", "cookieParams"} {
+		fields = append(fields, "readonly "+location+": Readonly<{ "+strings.Join(locations[location], "; ")+" }>")
+	}
+	return "[" + strings.Join(entries, ", ") + "]", "Readonly<{ " + strings.Join(fields, "; ") + " }>", nil
 }
 
 func webhooksHaveBodies(webhooks []webhookDefinition) bool {
@@ -753,7 +810,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 		return nil, err
 	}
 	for _, webhook := range webhooks {
-		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n", webhook.typeName)
+		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n  readonly params: %s\n", webhook.typeName, webhook.paramsType)
 		if webhook.hasBody {
 			fmt.Fprintf(&output, "  readonly body: %s\n", webhook.bodyType)
 		} else {
@@ -767,7 +824,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 	for _, name := range webhookHandlerProperties(webhooks) {
 		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(name))
 		for _, webhook := range webhooksForProperty(webhooks, name) {
-			fmt.Fprintf(&output, "    readonly %s: { readonly context: %sContext; readonly response: %sResponse }\n", quoteTS(webhook.method), webhook.typeName, webhook.typeName)
+			fmt.Fprintf(&output, "    readonly %s: { readonly context: %sContext; readonly input: %sContext; readonly output: %sResponse; readonly response: %sResponse; readonly handler: (context: %sContext) => %sResponse | Promise<%sResponse>; readonly endpoint: WebhookRouter }\n", quoteTS(webhook.method), webhook.typeName, webhook.typeName, webhook.typeName, webhook.typeName, webhook.typeName, webhook.typeName, webhook.typeName)
 		}
 		output.WriteString("  }\n")
 	}
@@ -778,7 +835,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 		fmt.Fprintf(&output, "  readonly %s?: {\n", quoteTS(name))
 		for _, webhook := range webhooksForProperty(webhooks, name) {
 			slot := "Webhooks[" + quoteTS(name) + "][" + quoteTS(webhook.method) + "]"
-			fmt.Fprintf(&output, "    readonly %s?: (context: %s[\"context\"]) => %s[\"response\"] | Promise<%s[\"response\"]>\n", quoteTS(webhook.method), slot, slot, slot)
+			fmt.Fprintf(&output, "    readonly %s?: %s[\"handler\"]\n", quoteTS(webhook.method), slot)
 		}
 		output.WriteString("  }\n")
 	}
@@ -812,11 +869,11 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 	}
 	output.WriteString("  return {\n    async fetch(request: Request): Promise<Response> {\n      const pathname = new URL(request.url).pathname\n")
 	for _, webhook := range webhooks {
-		fmt.Fprintf(&output, "      const %sPathParameters = matchInboundRoute(routes[%s], pathname)\n      if (request.method === %s && %sPathParameters !== undefined) {\n", webhookDefinitionSymbol(webhook), quoteTS(webhook.name), quoteTS(webhook.method), webhookDefinitionSymbol(webhook))
+		fmt.Fprintf(&output, "      const %sPathParameters = matchInboundRoute(routes[%s], pathname)\n      if (handlers[%s]?.[%s] !== undefined && request.method === %s && %sPathParameters !== undefined) {\n", webhookDefinitionSymbol(webhook), quoteTS(webhook.name), quoteTS(webhook.name), quoteTS(webhook.method), quoteTS(webhook.method), webhookDefinitionSymbol(webhook))
 		fmt.Fprintf(&output, "        const handler = handlers[%s]?.[%s]\n", quoteTS(webhook.name), quoteTS(webhook.method))
 		output.WriteString("        if (handler === undefined) return new Response(\"Not Found\", { status: 404 })\n")
 		symbol := webhookDefinitionSymbol(webhook)
-		fmt.Fprintf(&output, "        let params: InboundParameterValues\n        try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %sPathParameters) } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context: InboundRequestContext = { request, operationID: %s.operationID, method: %s.method, path: pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) }\n", symbol, symbol, symbol, symbol, symbol, symbol)
+		fmt.Fprintf(&output, "        let params: %s\n        try { params = await decodeInboundParameters(request, %s.parameters, inputSchemas, inputWireSchemas, inboundCodecs, %sPathParameters) as %s } catch (error) { if (error instanceof InboundRequestError) return error.response; throw error }\n        const context = { request, operationID: %s.operationID, method: %s.method, path: pathname, params, security: %s.security, securityCandidates: collectInboundSecurityCandidates(request, %s.security, securitySchemes) } as Omit<%sContext, \"body\">\n", webhook.paramsType, symbol, symbol, webhook.paramsType, symbol, symbol, symbol, symbol, webhook.typeName)
 		output.WriteString("        if (requiresInboundAuthentication(context.security)) {\n          if (options.authenticate === undefined) return new Response(\"Unauthorized\", { status: 401 })\n          try { const denied = await options.authenticate(context); if (denied instanceof Response) return denied }\n          catch { return new Response(\"Internal Server Error\", { status: 500 }) }\n        }\n")
 		if webhook.hasBody {
 			output.WriteString("        try {\n")
@@ -1693,8 +1750,8 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
   if (value === null && (schema["nullable"] === true || schemaAcceptsType(schema["type"], "null"))) return undefined
   if (value instanceof Blob && schemaAcceptsType(schema["type"], "string") && (schema["format"] === "binary" || schema["contentEncoding"] === "binary")) return undefined
   if (!schemaAcceptsValue(value, schema["type"])) return path + " has an invalid type"
-  if (Object.hasOwn(schema, "const") && JSON.stringify(value) !== JSON.stringify(schema["const"])) return path + " must equal its declared constant"
-  if (Array.isArray(schema["enum"]) && !schema["enum"].some((item) => JSON.stringify(item) === JSON.stringify(value))) return path + " is not an allowed value"
+  if (Object.hasOwn(schema, "const") && !inboundJSONEquals(value, schema["const"])) return path + " must equal its declared constant"
+  if (Array.isArray(schema["enum"]) && !schema["enum"].some((item) => inboundJSONEquals(item, value))) return path + " is not an allowed value"
   if (typeof value === "string") {
     if (typeof schema["minLength"] === "number" && value.length < schema["minLength"]) return path + " is shorter than minLength"
     if (typeof schema["maxLength"] === "number" && value.length > schema["maxLength"]) return path + " is longer than maxLength"
@@ -1713,7 +1770,7 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
   if (Array.isArray(value)) {
     if (typeof schema["minItems"] === "number" && value.length < schema["minItems"]) return path + " has too few items"
     if (typeof schema["maxItems"] === "number" && value.length > schema["maxItems"]) return path + " has too many items"
-    if (schema["uniqueItems"] === true && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) return path + " has duplicate items"
+    if (schema["uniqueItems"] === true && value.some((item, index) => value.slice(0, index).some((previous) => inboundJSONEquals(previous, item)))) return path + " has duplicate items"
     const prefixItems = Array.isArray(schema["prefixItems"]) ? schema["prefixItems"] : []
     for (let index = 0; index < prefixItems.length && index < value.length; index++) {
       if (isInboundSchema(prefixItems[index])) { const error = validateInboundValue(value[index], prefixItems[index], schemas, path + "[" + index + "]"); if (error !== undefined) return error }
@@ -1732,6 +1789,19 @@ function validateInboundValue(value: unknown, schema: InboundSchema, schemas: In
   }
   if (Array.isArray(schema["allOf"])) for (const part of schema["allOf"]) if (isInboundSchema(part)) { const error = validateInboundValue(value, part, schemas, path); if (error !== undefined) return error }
   return undefined
+}
+
+function inboundJSONEquals(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((item, index) => inboundJSONEquals(item, right[index]))
+  }
+  if (isRecord(left) && isRecord(right)) {
+    const leftKeys = Object.keys(left).sort()
+    const rightKeys = Object.keys(right).sort()
+    return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && inboundJSONEquals(left[key], right[key]))
+  }
+  return false
 }
 
 function schemaAcceptsValue(value: unknown, type: unknown): boolean {

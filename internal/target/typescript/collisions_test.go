@@ -26,6 +26,25 @@ func TestSourceArtifactsPreservesNormalizationEquivalentOperationIDs(t *testing.
 	}
 }
 
+func TestSourceArtifactsRejectsMissingAndDuplicateExactOperationIDs(t *testing.T) {
+	for name, operations := range map[string][]ir.Operation{
+		"missing": {
+			{Method: "GET", Path: "/missing"},
+		},
+		"duplicate": {
+			{OperationID: "same", Method: "GET", Path: "/one"},
+			{OperationID: "same", Method: "POST", Path: "/two"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := SourceArtifacts(&ir.Document{Operations: operations})
+			if err == nil || !strings.Contains(err.Error(), "operationId") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *testing.T) {
 	for name, schema := range map[string]map[string]map[string]any{
 		"normalized": {
@@ -117,6 +136,33 @@ func TestOperationParametersKeepSameExactNameSeparateByLocation(t *testing.T) {
 	}
 }
 
+func TestManifestExamplesUsePlannedBindingsForNormalizationEquivalentPathKeys(t *testing.T) {
+	operation := ir.Operation{
+		OperationID:        "getPair",
+		Method:             "GET",
+		Path:               "/pairs/{foo-bar}/{foo_bar}",
+		PathParameterOrder: []string{"foo-bar", "foo_bar"},
+		Raw: map[string]any{"parameters": []any{
+			map[string]any{"name": "foo-bar", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "foo_bar", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+		}},
+	}
+	document := &ir.Document{Operations: []ir.Operation{operation}}
+	parameters, err := operationParameters(document, operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := manifest.Operations[0].CallExpression
+	if len(parameters) != 2 || parameters[0].Binding == parameters[1].Binding ||
+		!strings.Contains(call, parameters[0].Binding) || !strings.Contains(call, parameters[1].Binding) {
+		t.Fatalf("parameters = %#v, call = %q", parameters, call)
+	}
+}
+
 func TestOperationParametersFollowURIPathParameterOrder(t *testing.T) {
 	parameters, err := operationParameters(&ir.Document{}, ir.Operation{
 		PathParameterOrder: []string{"customerID", "widgetID"},
@@ -204,7 +250,7 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	if !strings.Contains(source, `readonly list: Operations["listUsers"]["call"] & {`) || !strings.Contains(source, "list: Object.assign(") {
+	if !strings.Contains(source, `readonly list: Operations["listUsers"]["call"] & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
 		t.Fatalf("callable namespace was not emitted:\n%s", source)
 	}
 }
@@ -219,7 +265,7 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 		t.Fatal(err)
 	}
 	calls := manifestCalls(manifest)
-	if calls["listUsers"] != `api.$operations["listUsers"]()` || calls["getListedUser"] != "api.users.list(id).get()" {
+	if calls["listUsers"] != `api.$operations["listUsers"]()` || !strings.HasPrefix(calls["getListedUser"], "api.users.list(__sdkgen_") || !strings.HasSuffix(calls["getListedUser"], ").get()") {
 		t.Fatalf("calls = %#v", calls)
 	}
 	tree, err := buildResourceTree(document, manifest)
@@ -228,6 +274,22 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 	}
 	if _, exists := tree.children["users"].operations["list"]; exists || tree.children["users"].children["list"].parameterChild == nil {
 		t.Fatalf("callable parameter branch collision was not resolved: %#v", tree.children["users"])
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	start := strings.Index(source, `readonly "listUsers": {`)
+	if start < 0 {
+		t.Fatalf("listUsers catalog entry missing:\n%s", source)
+	}
+	entry := source[start:]
+	if end := strings.Index(entry, "\n  }"); end >= 0 {
+		entry = entry[:end]
+	}
+	if !strings.Contains(entry, "readonly resourceCall: never") {
+		t.Fatalf("omitted resource shortcut remained callable:\n%s", entry)
 	}
 }
 
@@ -325,7 +387,7 @@ func TestBuildResourceTreeFallsBackForRootParameterBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if call := manifest.Operations[0].CallExpression; call != `api.$operations["getTenant"]({ path: { "tenant": tenant } })` {
+	if call := manifest.Operations[0].CallExpression; !strings.HasPrefix(call, `api.$operations["getTenant"]({ path: { "tenant": __sdkgen_`) || !strings.HasSuffix(call, ` } })`) {
 		t.Fatalf("call = %q", call)
 	}
 }
@@ -386,6 +448,20 @@ func TestBuildResourceTreeRejectsIdenticalTemplatedPathShapes(t *testing.T) {
 	}
 }
 
+func TestBuildResourceTreeRejectsEmptyConflictingTemplatedPathItem(t *testing.T) {
+	document := &ir.Document{
+		Raw: map[string]any{"paths": map[string]any{
+			"/users/{id}":   map[string]any{"get": map[string]any{"operationId": "getUser"}},
+			"/users/{name}": map[string]any{},
+		}},
+		Operations: []ir.Operation{pathOperation("getUser", "GET", "/users/{id}", "id", map[string]any{"type": "string"})},
+	}
+	_, err := buildManifest(document)
+	if err == nil || !strings.Contains(err.Error(), "identical templated shape") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestBuildResourceTreePreservesLiteralAndTemplateTraversal(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{
 		{OperationID: "getCurrentUser", Method: "GET", Path: "/users/me"},
@@ -396,7 +472,7 @@ func TestBuildResourceTreePreservesLiteralAndTemplateTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := manifestCalls(manifest)
-	if calls["getCurrentUser"] != "api.users.me.get()" || calls["getUser"] != "api.users(id).get()" {
+	if calls["getCurrentUser"] != "api.users.me.get()" || !strings.HasPrefix(calls["getUser"], "api.users(__sdkgen_") || !strings.HasSuffix(calls["getUser"], ").get()") {
 		t.Fatalf("calls = %#v", calls)
 	}
 }

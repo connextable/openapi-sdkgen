@@ -49,10 +49,10 @@
               }
             },
             "links": {
-              "next-step": { "operationId": "get_pet" },
-              "next_step": { "operationId": "get_pet" },
-              "__proto__": { "operationId": "get_pet" },
-              "constructor": { "operationId": "get_pet" }
+              "next-step": { "operationId": "get_pet", "parameters": { "legacy-id": "linked" } },
+              "next_step": { "operationId": "get_pet", "parameters": { "legacy-id": "linked" } },
+              "__proto__": { "operationId": "get_pet", "parameters": { "legacy-id": "linked" } },
+              "constructor": { "operationId": "get_pet", "parameters": { "legacy-id": "linked" } }
             }
           },
           "401": {
@@ -60,6 +60,14 @@
             "content": {
               "application/problem+json": {
                 "schema": { "$ref": "#/components/schemas/AuthErrorOne" }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/RateError" }
               }
             }
           }
@@ -91,6 +99,14 @@
       "get": {
         "operationId": "get_pet",
         "security": [],
+        "parameters": [
+          {
+            "name": "legacy-id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
         "responses": {
           "204": { "description": "No content" },
           "200": {
@@ -108,6 +124,18 @@
                 "schema": { "$ref": "#/components/schemas/AuthErrorTwo" }
               }
             }
+          }
+        }
+      }
+    },
+    "/pets/secondary": {
+      "get": {
+        "operationId": "get-pet-secondary",
+        "security": [],
+        "responses": { "204": { "description": "No content" } },
+        "callbacks": {
+          "component-status": {
+            "$ref": "#/components/callbacks/Reusable-status"
           }
         }
       }
@@ -188,6 +216,14 @@
       },
       "MoneyInput": { "type": "string" },
       "MoneyOutput": { "type": "integer" },
+      "ProjectionInput": {
+        "type": "object",
+        "required": ["source", "receipt"],
+        "properties": {
+          "source": { "type": "string", "writeOnly": true },
+          "receipt": { "type": "string", "readOnly": true }
+        }
+      },
       "foo-bar": { "type": "string" },
       "foo_bar": { "type": "number" },
       "Status": {
@@ -200,6 +236,12 @@
           "foo_bar",
           "__proto__",
           "constructor",
+          "prototype",
+          "toString",
+          "quote\"key",
+          "back\\slash",
+          "line\nbreak",
+          "한글",
           "money",
           "moneyInput",
           "moneyOutput",
@@ -212,6 +254,12 @@
           "foo_bar": { "type": "string" },
           "__proto__": { "type": "string" },
           "constructor": { "type": "string" },
+          "prototype": { "type": "string" },
+          "toString": { "type": "string" },
+          "quote\"key": { "type": "string" },
+          "back\\slash": { "type": "string" },
+          "line\nbreak": { "type": "string" },
+          "한글": { "type": "string" },
           "money": { "$ref": "#/components/schemas/Money" },
           "moneyInput": { "$ref": "#/components/schemas/MoneyInput" },
           "moneyOutput": { "$ref": "#/components/schemas/MoneyOutput" },
@@ -261,13 +309,44 @@
             }
           }
         }
+      },
+      "RateDetails": {
+        "type": "object",
+        "required": ["retryAfter"],
+        "properties": { "retryAfter": { "type": "integer" } }
+      },
+      "RateError": {
+        "type": "object",
+        "x-error-category": "authentication-required",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details"],
+            "properties": {
+              "code": { "const": "rate_limited" },
+              "message": { "type": "string" },
+              "details": { "$ref": "#/components/schemas/RateDetails" }
+            }
+          }
+        }
       }
     },
     "callbacks": {
       "Reusable-status": {
         "{$request.query.callbackURL}": {
+          "get": {
+            "operationId": "reusable-status-read-callback",
+            "responses": { "204": { "description": "OK" } }
+          },
           "post": {
             "operationId": "reusable-status-callback",
+            "responses": { "204": { "description": "OK" } }
+          }
+        },
+        "{$request.query.backupURL}": {
+          "delete": {
+            "operationId": "reusable-status-backup-callback",
             "responses": { "204": { "description": "OK" } }
           }
         }

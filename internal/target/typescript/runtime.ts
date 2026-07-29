@@ -614,6 +614,12 @@ export interface LinkInvocation<Input, Options, SourceInput = unknown> {
   readonly options?: Options;
 }
 
+/** Link invocation whose target operation requires per-request options. */
+export type RequiredLinkInvocation<Input, Options, SourceInput = unknown> =
+  Omit<LinkInvocation<Input, Options, SourceInput>, "options"> & {
+    readonly options: Options;
+  };
+
 /** Allows one Link call to override individual parameter sections. */
 export type LinkInputOverride<Input> = {
   readonly [Section in keyof Input]?: Input[Section] extends Readonly<Record<string, unknown>>
@@ -3763,6 +3769,17 @@ function awaitAbortable<Value>(value: Promise<Value>, signal: AbortSignal | unde
 /** Defines one enumerable own data property without prototype-setter semantics. */
 export function defineOwnDataProperty<Value>(target: Record<string, Value>, key: string, value: Value): void {
   Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
+/** Adds namespace members to a callable without colliding with Function prototype properties. */
+export function assignCallableProperties<Call extends (...args: never[]) => unknown, Members extends object>(
+  call: Call,
+  members: Members,
+): Call & Members {
+  for (const [key, value] of Object.entries(members)) {
+    Object.defineProperty(call, key, { value, enumerable: true, configurable: true, writable: true });
+  }
+  return call as Call & Members;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

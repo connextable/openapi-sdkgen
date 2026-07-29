@@ -623,6 +623,139 @@ func TestServerAddOnEmitsInboundParameterDefinitions(t *testing.T) {
 	}
 }
 
+func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0","info":{"title":"Server catalog","version":"1"},
+  "paths":{"/source":{"post":{"operationId":"createSource","responses":{"204":{"description":"OK"}},"callbacks":{
+    "copied":{"{$request.body#/callback}":{"$ref":"#/components/pathItems/CopyCallback"}}
+  }}}},
+  "webhooks":{
+    "first":{"post":{"operationId":"firstHook","responses":{"204":{"description":"OK"}}}},
+    "second":{"post":{"operationId":"secondHook","parameters":[
+      {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+      {"name":"id","in":"query","required":true,"schema":{"type":"integer"}},
+      {"name":"id","in":"querystring","required":true,"schema":{"type":"string"}},
+      {"name":"id","in":"header","required":true,"schema":{"type":"boolean"}},
+      {"name":"id","in":"cookie","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}},
+    "purged":{"$ref":"#/components/pathItems/PurgeHook"},
+    "validated":{"post":{"operationId":"validatedHook","requestBody":{"required":true,"content":{"application/json":{"schema":{
+      "type":"object","required":["choice","constant","items"],"properties":{
+        "choice":{"enum":[{"a":1,"b":2}]},
+        "constant":{"const":{"x":1,"y":2}},
+        "items":{"type":"array","uniqueItems":true,"items":{"type":"object"}}
+      }
+    }}}},"responses":{"204":{"description":"OK"}}}}
+  },
+  "components":{"pathItems":{
+    "PurgeHook":{"additionalOperations":{"PURGE":{"operationId":"purgeHook","responses":{"204":{"description":"OK"}}}}},
+    "CopyCallback":{"additionalOperations":{"COPY":{"operationId":"copyCallback","responses":{"204":{"description":"OK"}}}}}
+  }}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
+	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
+	for _, expected := range []string{
+		`readonly "PURGE": { readonly context:`,
+		`readonly input:`,
+		`readonly output:`,
+		`readonly response:`,
+		`readonly handler:`,
+		`readonly endpoint:`,
+		`readonly params: Readonly<{ readonly path: Readonly<{ readonly "id": string }>`,
+	} {
+		if !strings.Contains(webhooks, expected) {
+			t.Fatalf("webhook catalog missing %q:\n%s", expected, webhooks)
+		}
+	}
+	for _, expected := range []string{`readonly "COPY": { readonly context:`, `readonly handler:`, `readonly endpoint:`} {
+		if !strings.Contains(callbacks, expected) {
+			t.Fatalf("callback catalog missing %q:\n%s", expected, callbacks)
+		}
+	}
+
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source")
+	writeTargetArtifacts(t, source, artifacts)
+	probe := `import type { Webhooks } from "./server/webhooks.js"
+type Leaf = Webhooks["second"]["POST"]
+const handler: Leaf["handler"] = ({ params }) => {
+  const path: string = params.path["id"]
+  const query: number = params.query["id"]
+  const querystring: string = params.querystring["id"]
+  const header: boolean = params.headerParams["id"]
+  const cookie: string = params.cookieParams["id"]
+  void [path, query, querystring, header, cookie]
+  // @ts-expect-error exact query parameter is numeric
+  const invalid: string = params.query["id"]
+  return { status: 204 }
+}
+const context: Leaf["input"] = null as never
+const output: Leaf["output"] = { status: 204 }
+const response: Leaf["response"] = output
+const endpoint: Leaf["endpoint"] = null as never
+void [handler, context, response, endpoint]
+`
+	if err := os.WriteFile(filepath.Join(source, "probe.ts"), []byte(probe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Skipf("TypeScript compiler unavailable for server catalog test: %v", err)
+	}
+	if output, err := exec.Command("node", tsc, "--project", filepath.Join(source, "tsconfig.json")).CombinedOutput(); err != nil {
+		t.Fatalf("compile generated server catalog: %v\n%s", err, output)
+	}
+	outputDirectory := filepath.Join(directory, "output")
+	if err := os.WriteFile(filepath.Join(outputDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import { pathToFileURL } from "node:url";
+const webhookModule = await import(pathToFileURL(process.argv[1]).href);
+const callbackModule = await import(pathToFileURL(process.argv[2]).href);
+let second = 0, purge = 0, valid = 0;
+const router = webhookModule.createWebhookRouter({
+  second: { POST: async () => { second++; return { status: 204 }; } },
+  purged: { PURGE: async () => { purge++; return { status: 204 }; } },
+  validated: { POST: async () => { valid++; return { status: 204 }; } },
+}, { routes: { first: "/same/{id}", second: "/same/{id}", purged: "/purged", validated: "/validated" } });
+const same = await router.fetch(new Request("https://host.test/same/value?id=7", { method: "POST", headers: { id: "true", cookie: "id=cookie" } }));
+if (same.status !== 204 || second !== 1) throw new Error("unhandled webhook shadowed a handled route");
+if ((await router.fetch(new Request("https://host.test/purged", { method: "PURGE" }))).status !== 204 || purge !== 1) throw new Error("referenced additional webhook did not dispatch");
+const accepted = { choice: { b: 2, a: 1 }, constant: { y: 2, x: 1 }, items: [{ a: 1, b: 2 }] };
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(accepted) }))).status !== 204 || valid !== 1) throw new Error("reordered JSON object was rejected");
+const duplicate = { ...accepted, items: [{ a: 1, b: 2 }, { b: 2, a: 1 }] };
+if ((await router.fetch(new Request("https://host.test/validated", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(duplicate) }))).status !== 400 || valid !== 1) throw new Error("reordered uniqueItems duplicate was accepted");
+const endpoints = callbackModule.createCallbackHandlers({ callbacks: { createSource: { copied: { "{$request.body#/callback}": { COPY: async () => ({ status: 204 }) } } } } });
+if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].COPY.fetch(new Request("https://host.test/callback", { method: "COPY" }))).status !== 204) throw new Error("referenced additional callback did not dispatch");
+`
+	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js"), filepath.Join(outputDirectory, "server", "callbacks.js"))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("execute generated server catalog runtime test: %v\n%s", err, output)
+	}
+}
+
 const serverTSConfig = `{
   "compilerOptions": {"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"skipLibCheck":true,"rootDir":".","outDir":"../output"},
   "include": ["**/*.ts"]

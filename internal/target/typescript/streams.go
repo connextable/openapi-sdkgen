@@ -81,10 +81,14 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 		}
 		inputType := operationSlotType(stream.Operation.OperationID, "input")
 		optionsType := operationSlotType(stream.Operation.OperationID, "options")
+		optionMarker := "?"
+		if operationRequiresOptions(stream.Operation) {
+			optionMarker = ""
+		}
 		if len(inputs) == 0 {
-			fmt.Fprintf(output, "    readonly %s: (options?: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), optionsType, stream.ItemType)
+			fmt.Fprintf(output, "    readonly %s: (options%s: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), optionMarker, optionsType, stream.ItemType)
 		} else {
-			fmt.Fprintf(output, "    readonly %s: (input: %s, options?: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), inputType, optionsType, stream.ItemType)
+			fmt.Fprintf(output, "    readonly %s: (input: %s, options%s: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), inputType, optionMarker, optionsType, stream.ItemType)
 		}
 	}
 	output.WriteString("  }\n")
@@ -103,14 +107,22 @@ func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []gen
 		}
 		inputType := operationSlotType(stream.Operation.OperationID, "input")
 		optionsType := operationSlotType(stream.Operation.OperationID, "options")
+		optionMarker := "?"
+		if operationRequiresOptions(stream.Operation) {
+			optionMarker = ""
+		}
 		variable := stablePrivateIdentifier("stream-value", stream.Operation.OperationID)
 		if len(inputs) == 0 {
-			fmt.Fprintf(output, "  const %s = (options?: %s): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, optionsType, stream.ItemType, stream.ItemType, definition)
+			fmt.Fprintf(output, "  const %s = (options%s: %s): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, optionMarker, optionsType, stream.ItemType, stream.ItemType, definition)
 		} else {
-			fmt.Fprintf(output, "  const %s = (input: %s, options?: %s): AsyncIterable<%s> => request.stream<%s>(%s, input, options)\n", variable, inputType, optionsType, stream.ItemType, stream.ItemType, definition)
+			fmt.Fprintf(output, "  const %s = (input: %s, options%s: %s): AsyncIterable<%s> => request.stream<%s>(%s, input, options)\n", variable, inputType, optionMarker, optionsType, stream.ItemType, stream.ItemType, definition)
 		}
 	}
 	return nil
+}
+
+func operationRequiresOptions(operation ir.Operation) bool {
+	return operation.Idempotency == "required" || operation.Concurrency == "required"
 }
 
 func emitStreamReturnValue(output *bytes.Buffer, streams []generatedStream) error {

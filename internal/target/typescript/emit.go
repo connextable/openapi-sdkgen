@@ -97,6 +97,9 @@ func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, err
 	if err := validateOpenAPISupportWithServer(document, "TypeScript", includeServer); err != nil {
 		return nil, err
 	}
+	if err := validateOperationIdentities(document); err != nil {
+		return nil, err
+	}
 	manifest, err := buildManifest(document)
 	if err != nil {
 		return nil, err
@@ -248,7 +251,7 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 		if err != nil {
 			return Manifest{}, fmt.Errorf("operation %s error: %w", operation.OperationID, err)
 		}
-		callExpression, segments, err := operationCall(operation, inputTypes)
+		callExpression, segments, err := operationCall(document, operation, inputTypes)
 		if err != nil {
 			return Manifest{}, fmt.Errorf("operation %s call expression: %w", operation.OperationID, err)
 		}
@@ -289,7 +292,7 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 		item := &manifest.Operations[index]
 		if item.Visibility == "public" && !reachable[item.OperationID] {
 			operation := findOperation(document, item.OperationID)
-			item.CallExpression = exactOperationCall(operation, item.InputTypes)
+			item.CallExpression = exactOperationCall(document, operation, item.InputTypes)
 			item.ResourceSegments = nil
 		}
 	}
@@ -310,38 +313,44 @@ func (operation ManifestOperation) renderError(scope typeRenderScope) string {
 	return operation.errorExpression.render(scope)
 }
 
-func operationCall(operation ir.Operation, inputTypes []string) (string, []string, error) {
+func operationCall(document *ir.Document, operation ir.Operation, inputTypes []string) (string, []string, error) {
+	pathBindings, err := operationPathBindings(document, operation)
+	if err != nil {
+		return "", nil, err
+	}
 	parts := resourcePathParts(operation.Path)
 	segments := make([]string, 0, len(parts))
 	chain := "api"
 	for _, part := range parts {
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-			parameter, err := naming.Property(strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}"))
-			if err != nil {
-				return exactOperationCall(operation, inputTypes), nil, nil
+			name := strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}")
+			parameter := pathBindings[name]
+			if parameter == "" {
+				return exactOperationCall(document, operation, inputTypes), nil, nil
 			}
 			chain += "(" + parameter + ")"
 			continue
 		}
 		property, err := naming.Property(part)
 		if err != nil {
-			return exactOperationCall(operation, inputTypes), nil, nil
+			return exactOperationCall(document, operation, inputTypes), nil, nil
 		}
 		segments = append(segments, property)
 		chain += "." + property
 	}
 	terminal, err := resourceTerminalName(operation, parts)
 	if err != nil {
-		return exactOperationCall(operation, inputTypes), nil, nil
+		return exactOperationCall(document, operation, inputTypes), nil, nil
 	}
 	if operation.Visibility == "internal" {
-		return exactOperationCall(operation, inputTypes), segments, nil
+		return exactOperationCall(document, operation, inputTypes), segments, nil
 	}
-	return chain + "." + terminal + callInput(operation, inputTypes, len(operation.PathParameterOrder) > 0, operation.PathParameterOrder), segments, nil
+	return chain + "." + terminal + callInput(operation, inputTypes, len(operation.PathParameterOrder) > 0, operation.PathParameterOrder, pathBindings), segments, nil
 }
 
-func exactOperationCall(operation ir.Operation, inputTypes []string) string {
-	return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder)
+func exactOperationCall(document *ir.Document, operation ir.Operation, inputTypes []string) string {
+	pathBindings, _ := operationPathBindings(document, operation)
+	return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder, pathBindings)
 }
 
 func resourcePathParts(path string) []string {
@@ -395,7 +404,21 @@ func methodTerminal(method string) (string, error) {
 	}
 }
 
-func callInput(operation ir.Operation, inputTypes []string, pathBound bool, pathParameters []string) string {
+func operationPathBindings(document *ir.Document, operation ir.Operation) (map[string]string, error) {
+	parameters, err := operationParameters(document, operation)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for _, parameter := range parameters {
+		if parameter.Location == "path" {
+			result[parameter.Name] = parameter.Binding
+		}
+	}
+	return result, nil
+}
+
+func callInput(operation ir.Operation, inputTypes []string, pathBound bool, pathParameters []string, pathBindings map[string]string) string {
 	var fields []string
 	for _, inputType := range inputTypes {
 		switch {
@@ -405,8 +428,8 @@ func callInput(operation ir.Operation, inputTypes []string, pathBound bool, path
 			}
 			values := make([]string, 0, len(pathParameters))
 			for _, parameter := range pathParameters {
-				binding, err := naming.Property(parameter)
-				if err != nil {
+				binding := pathBindings[parameter]
+				if binding == "" {
 					binding = stablePrivateIdentifier("example-path-parameter", parameter)
 				}
 				values = append(values, quoteTS(parameter)+": "+binding)

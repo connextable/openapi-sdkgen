@@ -29,6 +29,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	hasPagination := resourceTreeHasPagination(tree)
 	var output bytes.Buffer
 	output.WriteString("import {\n")
+	output.WriteString("  assignCallableProperties,\n")
 	output.WriteString("  bindOperation,\n")
 	if hasPathOperations {
 		output.WriteString("  bindPathOperation,\n")
@@ -42,6 +43,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		output.WriteString("  resolveLinkInput,\n")
 		output.WriteString("  type APIError,\n")
 		output.WriteString("  type LinkInvocation,\n")
+		output.WriteString("  type RequiredLinkInvocation,\n")
 	}
 	output.WriteString("  type ClientOptions,\n")
 	output.WriteString("  type BinaryBody,\n")
@@ -73,12 +75,14 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	output.WriteString("  isAPIError,\n")
 	output.WriteString("  isErrorCode,\n")
 	output.WriteString("} from \"./runtime.js\"\n")
-	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
+	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
 
 	operationsByID := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
 		operationsByID[operation.OperationID] = operation
 	}
+	resourceReachable := make(map[string]bool)
+	resourceOperationIDs(tree, resourceReachable)
 
 	for _, item := range manifest.Operations {
 		if item.Visibility == "hidden" {
@@ -113,7 +117,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			callType = "(" + callType + ") & { readonly paginate: " + paginationType + " }"
 		}
 		resourceCallType := callType
-		if operation.Visibility == "internal" {
+		if operation.Visibility == "internal" || !resourceReachable[operation.OperationID] {
 			resourceCallType = "never"
 		} else if len(operation.PathParameterOrder) > 0 {
 			resourceCallType = operationName + "ResourceCall"
@@ -208,7 +212,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			}
 			paginationBinding := operationPaginationValueName(operation.OperationID)
 			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", paginationBinding, itemType, operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), baseBinding, quoteTS(operation.Pagination))
-			fmt.Fprintf(&output, "  const %s = Object.assign(%s, { paginate: %s }) as Operations[%s][\"call\"]\n", binding, baseBinding, paginationBinding, quoteTS(operation.OperationID))
+			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, { paginate: %s }) as Operations[%s][\"call\"]\n", binding, baseBinding, paginationBinding, quoteTS(operation.OperationID))
 		}
 	}
 	if err := emitLinkValues(&output, document, links); err != nil {
@@ -949,8 +953,19 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 
 func validateTemplatedResourcePaths(document *ir.Document) error {
 	paths := make(map[string]string)
-	for _, operation := range document.Operations {
-		parts := resourcePathParts(operation.Path)
+	rawPaths, _ := document.Raw["paths"].(map[string]any)
+	sourcePaths := make([]string, 0, len(rawPaths))
+	for path := range rawPaths {
+		sourcePaths = append(sourcePaths, path)
+	}
+	if len(sourcePaths) == 0 {
+		for _, operation := range document.Operations {
+			sourcePaths = append(sourcePaths, operation.Path)
+		}
+	}
+	sort.Strings(sourcePaths)
+	for _, path := range sourcePaths {
+		parts := resourcePathParts(path)
 		templated := false
 		for index, part := range parts {
 			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
@@ -962,10 +977,25 @@ func validateTemplatedResourcePaths(document *ir.Document) error {
 			continue
 		}
 		shape := "/" + strings.Join(parts, "/")
-		if previous, exists := paths[shape]; exists && previous != operation.Path {
-			return fmt.Errorf("OpenAPI paths %q and %q have identical templated shape %q; path parameter names do not distinguish paths", previous, operation.Path, shape)
+		if previous, exists := paths[shape]; exists && previous != path {
+			return fmt.Errorf("OpenAPI paths %q and %q have identical templated shape %q; path parameter names do not distinguish paths", previous, path, shape)
 		}
-		paths[shape] = operation.Path
+		paths[shape] = path
+	}
+	return nil
+}
+
+func validateOperationIdentities(document *ir.Document) error {
+	seen := make(map[string]string, len(document.Operations))
+	for _, operation := range document.Operations {
+		location := operation.Method + " " + operation.Path
+		if operation.OperationID == "" {
+			return fmt.Errorf("OpenAPI operation %s is missing operationId required by the TypeScript target", location)
+		}
+		if previous, exists := seen[operation.OperationID]; exists {
+			return fmt.Errorf("OpenAPI operationId %q is duplicated by %s and %s", operation.OperationID, previous, location)
+		}
+		seen[operation.OperationID] = location
 	}
 	return nil
 }
@@ -1244,7 +1274,7 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 		return err
 	}
 	nextBound := append(append([]string{}, bound...), parameter.Binding)
-	output.WriteString("Object.assign(\n")
+	output.WriteString("assignCallableProperties(\n")
 	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Binding, parameterType)
 	if err := emitResourceNodeValue(output, document, node.parameterChild, nextBound, indent+"  "); err != nil {
 		return err
@@ -1279,7 +1309,7 @@ func emitResourceMemberValue(output *bytes.Buffer, document *ir.Document, node *
 	operation, hasOperation := node.operations[name]
 	child := node.children[name]
 	if hasOperation && child != nil {
-		output.WriteString("Object.assign(")
+		output.WriteString("assignCallableProperties(")
 		if err := emitResourceOperationValue(output, document, operation, bound); err != nil {
 			return err
 		}

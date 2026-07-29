@@ -42,6 +42,36 @@ func TestPlannedIdentityPreservesExactKeyAndStablePrivateIdentifier(t *testing.T
 	}
 }
 
+func TestStablePrivateIdentifierIsInjectiveAcrossRoleAndSourceBoundaries(t *testing.T) {
+	values := []string{
+		stablePrivateIdentifier("a", "b\x00c"),
+		stablePrivateIdentifier("a\x00b", "c"),
+		stablePrivateIdentifier("a", "b"),
+		stablePrivateIdentifier("a", "B"),
+	}
+	seen := map[string]bool{}
+	for _, value := range values {
+		if seen[value] {
+			t.Fatalf("private identifier collision: %q", value)
+		}
+		seen[value] = true
+	}
+}
+
+func TestReadonlyJSONTypePreservesNestedExactValues(t *testing.T) {
+	got, err := readonlyJSONType([]any{
+		map[string]any{"__proto__": map[string]any{"value": 1.0}},
+		[]any{"x", true, nil},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `readonly [{ readonly "__proto__": { readonly "value": 1 } }, readonly ["x", true, null]]`
+	if got != want {
+		t.Fatalf("type = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeJSONExpressionIsDeterministicAndPrototypeSafe(t *testing.T) {
 	left := map[string]any{
 		"z": 1,

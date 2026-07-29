@@ -84,8 +84,12 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("component %s enum: %w", schemaName, err)
 		}
+		enumType, err := readonlyJSONType(values)
+		if err != nil {
+			return nil, fmt.Errorf("component %s enum type: %w", schemaName, err)
+		}
 		binding := stablePrivateIdentifier("component-enum", schemaName)
-		fmt.Fprintf(&output, "const %s = %s as const\n", binding, rendered)
+		fmt.Fprintf(&output, "const %s = %s as unknown as %s\n", binding, rendered, enumType)
 		enumBindings = append(enumBindings, runtimeProperty{key: schemaName, value: binding})
 		enumNames = append(enumNames, schemaName)
 	}
@@ -143,6 +147,15 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 		if !hidden[name] || visible[name] {
 			result[name] = true
 		}
+	}
+	// Public roots include otherwise-unreferenced components. Close over their
+	// references so an included schema never points at an omitted dependency.
+	roots := make([]string, 0, len(result))
+	for name := range result {
+		roots = append(roots, name)
+	}
+	for _, name := range roots {
+		visit(document.ComponentSchemas[name], result)
 	}
 	return result
 }

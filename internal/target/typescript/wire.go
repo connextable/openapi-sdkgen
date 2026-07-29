@@ -23,7 +23,7 @@ func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string
 		names = append(names, schemaName)
 	}
 	sort.Strings(names)
-	fmt.Fprintf(output, "const %s: WireSchemas = {\n", name)
+	properties := make([]runtimeProperty, 0, len(names))
 	for _, schemaName := range names {
 		value := any(document.ComponentSchemas[schemaName])
 		if schema, ok := document.Schemas[schemaName]; ok {
@@ -33,9 +33,9 @@ func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string
 		if err != nil {
 			return fmt.Errorf("component %s wire schema: %w", schemaName, err)
 		}
-		fmt.Fprintf(output, "  %s: %s,\n", quoteTS(schemaName), descriptor)
+		properties = append(properties, runtimeProperty{key: schemaName, value: descriptor})
 	}
-	output.WriteString("}\n\n")
+	fmt.Fprintf(output, "const %s: WireSchemas = %s\n\n", name, runtimeObjectExpression(properties))
 	return nil
 }
 
@@ -221,7 +221,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			wireNames = append(wireNames, wireName)
 		}
 		sort.Strings(wireNames)
-		var entries []string
+		var entries []runtimeProperty
 		for _, wireName := range wireNames {
 			propertyValue := properties[wireName]
 			propertySchema, _ := propertyValue.(map[string]any)
@@ -235,10 +235,10 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			if err != nil {
 				return "", err
 			}
-			entries = append(entries, fmt.Sprintf("%s: { property: %s, schema: %s }", quoteTS(wireName), quoteTS(wireName), nested))
+			entries = append(entries, runtimeProperty{key: wireName, value: "{ property: " + quoteTS(wireName) + ", schema: " + nested + " }"})
 		}
 		if len(entries) > 0 {
-			fields = append(fields, "properties: { "+strings.Join(entries, ", ")+" }")
+			fields = append(fields, "properties: "+runtimeObjectExpression(entries))
 		}
 	}
 	if patterns, ok := schema["patternProperties"].(map[string]any); ok && len(patterns) > 0 {
@@ -247,16 +247,16 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		entries := make([]string, 0, len(names))
+		entries := make([]runtimeProperty, 0, len(names))
 		for _, name := range names {
 			child, _ := patterns[name].(map[string]any)
 			descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion)
 			if err != nil {
 				return "", err
 			}
-			entries = append(entries, quoteTS(name)+": "+descriptor)
+			entries = append(entries, runtimeProperty{key: name, value: descriptor})
 		}
-		fields = append(fields, "patternProperties: { "+strings.Join(entries, ", ")+" }")
+		fields = append(fields, "patternProperties: "+runtimeObjectExpression(entries))
 	}
 	if propertyNames, ok := schema["propertyNames"].(map[string]any); ok {
 		descriptor, err := wireSchemaDescriptorScoped(propertyNames, direction, formatAssertion)
@@ -271,7 +271,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		entries := make([]string, 0, len(names))
+		entries := make([]runtimeProperty, 0, len(names))
 		for _, name := range names {
 			values, _ := dependencies[name].([]any)
 			items := make([]string, 0, len(values))
@@ -280,9 +280,9 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 					items = append(items, quoteTS(dependency))
 				}
 			}
-			entries = append(entries, quoteTS(name)+": ["+strings.Join(items, ", ")+"]")
+			entries = append(entries, runtimeProperty{key: name, value: "[" + strings.Join(items, ", ") + "]"})
 		}
-		fields = append(fields, "dependentRequired: { "+strings.Join(entries, ", ")+" }")
+		fields = append(fields, "dependentRequired: "+runtimeObjectExpression(entries))
 	}
 	if dependencies, ok := schema["dependentSchemas"].(map[string]any); ok && len(dependencies) > 0 {
 		names := make([]string, 0, len(dependencies))
@@ -290,16 +290,16 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		entries := make([]string, 0, len(names))
+		entries := make([]runtimeProperty, 0, len(names))
 		for _, name := range names {
 			child, _ := dependencies[name].(map[string]any)
 			descriptor, err := wireSchemaDescriptorScoped(child, direction, formatAssertion)
 			if err != nil {
 				return "", err
 			}
-			entries = append(entries, quoteTS(name)+": "+descriptor)
+			entries = append(entries, runtimeProperty{key: name, value: descriptor})
 		}
-		fields = append(fields, "dependentSchemas: { "+strings.Join(entries, ", ")+" }")
+		fields = append(fields, "dependentSchemas: "+runtimeObjectExpression(entries))
 	}
 	if required, ok := schema["required"].([]any); ok && len(required) > 0 {
 		names := make([]string, 0, len(required))
@@ -423,7 +423,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 			}
 			field := "discriminator: { property: " + quoteTS(property)
 			if len(mapping) > 0 {
-				field += ", mapping: { " + strings.Join(mapping, ", ") + " }"
+				field += ", mapping: " + runtimeObjectExpression(mapping)
 			}
 			if value, ok := discriminator["defaultMapping"].(string); ok && value != "" {
 				descriptor, err := discriminatorReferenceDescriptor(value, direction)
@@ -441,7 +441,7 @@ func wireSchemaDescriptorScoped(value any, direction projection, formatAssertion
 	return "{ " + strings.Join(fields, ", ") + " }", nil
 }
 
-func discriminatorWireMapping(schema, discriminator map[string]any, direction projection, formatAssertion bool) ([]string, error) {
+func discriminatorWireMapping(schema, discriminator map[string]any, direction projection, formatAssertion bool) ([]runtimeProperty, error) {
 	mapping := make(map[string]any)
 	if explicit, ok := discriminator["mapping"].(map[string]any); ok {
 		for name, value := range explicit {
@@ -469,13 +469,13 @@ func discriminatorWireMapping(schema, discriminator map[string]any, direction pr
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	entries := make([]string, 0, len(names))
+	entries := make([]runtimeProperty, 0, len(names))
 	for _, name := range names {
 		descriptor, err := wireSchemaDescriptorScoped(mapping[name], direction, formatAssertion)
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, quoteTS(name)+": "+descriptor)
+		entries = append(entries, runtimeProperty{key: name, value: descriptor})
 	}
 	return entries, nil
 }
