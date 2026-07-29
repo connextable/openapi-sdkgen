@@ -174,18 +174,261 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 	}
 }
 
-func TestBuildResourceTreeRejectsOperationAndChildNameCollision(t *testing.T) {
+func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 	document := &ir.Document{Operations: []ir.Operation{
 		{OperationID: "listUsers", Method: "GET", Path: "/users"},
 		{OperationID: "getList", Method: "GET", Path: "/users/list"},
 	}}
-	_, err := buildResourceTree(document, Manifest{Operations: []ManifestOperation{
+	manifest := Manifest{Operations: []ManifestOperation{
 		{OperationID: "listUsers", Method: "GET", Path: "/users", Visibility: "public"},
 		{OperationID: "getList", Method: "GET", Path: "/users/list", Visibility: "public"},
-	}})
-	if err == nil || !strings.Contains(err.Error(), "resource member collision") {
+	}}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := tree.children["users"]
+	if users == nil || users.operations["list"].OperationID != "listUsers" || users.children["list"].operations["get"].OperationID != "getList" {
+		t.Fatalf("resource tree did not retain the composable collision: %#v", users)
+	}
+	built, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(built)
+	if calls["listUsers"] != "api.users.list()" || calls["getList"] != "api.users.list.get()" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	if !strings.Contains(source, `readonly list: Operations["listUsers"]["call"] & {`) || !strings.Contains(source, "list: Object.assign(") {
+		t.Fatalf("callable namespace was not emitted:\n%s", source)
+	}
+}
+
+func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "listUsers", Method: "GET", Path: "/users"},
+		pathOperation("getListedUser", "GET", "/users/list/{id}", "id", map[string]any{"type": "string"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	if calls["listUsers"] != `api.$operations["listUsers"]()` || calls["getListedUser"] != "api.users.list(id).get()" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := tree.children["users"].operations["list"]; exists || tree.children["users"].children["list"].parameterChild == nil {
+		t.Fatalf("callable parameter branch collision was not resolved: %#v", tree.children["users"])
+	}
+}
+
+func TestBuildResourceTreeOmitsNormalizationEquivalentLiteralSiblings(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "getModern", Method: "GET", Path: "/foo-bar"},
+		{OperationID: "getLegacy", Method: "GET", Path: "/foo_bar"},
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(buildResourceSegments(manifest)) != 0 {
+		t.Fatalf("normalization-equivalent siblings retained a resource shortcut: %#v", manifest.Operations)
+	}
+	for id, call := range manifestCalls(manifest) {
+		if call != `api.$operations["`+id+`"]()` {
+			t.Fatalf("%s call = %q", id, call)
+		}
+	}
+}
+
+func TestBuildResourceTreeOmitsTwoOperationsRequiringOneTerminal(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "listUsers", Method: "GET", Path: "/users"},
+		{OperationID: "searchUsers", Method: "GET", Path: "/users"},
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, call := range manifestCalls(manifest) {
+		if call != `api.$operations["`+id+`"]()` {
+			t.Fatalf("%s call = %q", id, call)
+		}
+	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := tree.children["users"].operations["list"]; exists {
+		t.Fatal("one colliding operation terminal was selected as a winner")
+	}
+}
+
+func TestBuildResourceTreePreservesFixedCallCapabilities(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "listUsers", Method: "GET", Path: "/users", Pagination: "cursor"},
+		{OperationID: "getPaginate", Method: "GET", Path: "/users/paginate"},
+		{OperationID: "getRaw", Method: "GET", Path: "/users/list/raw"},
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	if calls["listUsers"] != "api.users.list({ query })" {
+		t.Fatalf("paginated operation call = %q", calls["listUsers"])
+	}
+	for _, id := range []string{"getPaginate", "getRaw"} {
+		if !strings.HasPrefix(calls[id], `api.$operations["`+id+`"]`) {
+			t.Fatalf("%s did not fall back: %q", id, calls[id])
+		}
+	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := tree.children["users"]
+	if _, ok := paginatedResourceNodeOperation(users); !ok || users.children["paginate"] != nil || users.children["list"] != nil {
+		t.Fatalf("fixed capability collision was not resolved: %#v", users)
+	}
+}
+
+func TestBuildResourceTreeKeepsRootOperationAndOrdinaryChild(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "getRoot", Method: "GET", Path: "/"},
+		{OperationID: "getGet", Method: "GET", Path: "/get"},
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	if calls["getRoot"] != "api.get()" || calls["getGet"] != "api.getValue.get()" {
+		t.Fatalf("calls = %#v", calls)
+	}
+}
+
+func TestBuildResourceTreeFallsBackForRootParameterBranch(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		pathOperation("getTenant", "GET", "/{tenant}", "tenant", map[string]any{"type": "string"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call := manifest.Operations[0].CallExpression; call != `api.$operations["getTenant"]({ path: { "tenant": tenant } })` {
+		t.Fatalf("call = %q", call)
+	}
+}
+
+func TestBuildResourceTreeSharesCompatibleParameterPositionAndRemapsNames(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		pathOperation("getProfile", "GET", "/users/{id}/profile", "id", map[string]any{"type": "string"}),
+		pathOperation("getSettings", "GET", "/users/{userID}/settings", "userID", map[string]any{"type": "string"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.children["users"].parameterChild == nil {
+		t.Fatal("compatible structural parameter branch was omitted")
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	if !strings.Contains(source, `{ "id": __sdkgen_`) || !strings.Contains(source, `{ "userID": __sdkgen_`) {
+		t.Fatalf("terminal parameter remapping missing:\n%s", source)
+	}
+}
+
+func TestBuildResourceTreeOmitsIncompatibleSharedParameterPosition(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		pathOperation("getProfile", "GET", "/users/{id}/profile", "id", map[string]any{"type": "string"}),
+		pathOperation("getSettings", "GET", "/users/{userID}/settings", "userID", map[string]any{"type": "integer"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree, err := buildResourceTree(document, manifest); err != nil || tree.children["users"].parameterChild != nil {
+		t.Fatalf("incompatible parameter branch = %#v, %v", tree, err)
+	}
+	for id, call := range manifestCalls(manifest) {
+		if !strings.HasPrefix(call, `api.$operations["`+id+`"]`) {
+			t.Fatalf("%s call = %q", id, call)
+		}
+	}
+}
+
+func TestBuildResourceTreeRejectsIdenticalTemplatedPathShapes(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		pathOperation("getByID", "GET", "/users/{id}", "id", map[string]any{"type": "string"}),
+		pathOperation("getByName", "GET", "/users/{name}", "name", map[string]any{"type": "string"}),
+	}}
+	_, err := buildManifest(document)
+	if err == nil || !strings.Contains(err.Error(), "identical templated shape") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestBuildResourceTreePreservesLiteralAndTemplateTraversal(t *testing.T) {
+	document := &ir.Document{Operations: []ir.Operation{
+		{OperationID: "getCurrentUser", Method: "GET", Path: "/users/me"},
+		pathOperation("getUser", "GET", "/users/{id}", "id", map[string]any{"type": "string"}),
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	if calls["getCurrentUser"] != "api.users.me.get()" || calls["getUser"] != "api.users(id).get()" {
+		t.Fatalf("calls = %#v", calls)
+	}
+}
+
+func pathOperation(operationID, method, path, parameterName string, schema map[string]any) ir.Operation {
+	return ir.Operation{
+		OperationID:        operationID,
+		Method:             method,
+		Path:               path,
+		PathParameterOrder: []string{parameterName},
+		Raw: map[string]any{"parameters": []any{
+			map[string]any{"name": parameterName, "in": "path", "required": true, "schema": schema},
+		}},
+	}
+}
+
+func manifestCalls(manifest Manifest) map[string]string {
+	result := make(map[string]string, len(manifest.Operations))
+	for _, operation := range manifest.Operations {
+		result[operation.OperationID] = operation.CallExpression
+	}
+	return result
+}
+
+func buildResourceSegments(manifest Manifest) map[string]bool {
+	result := make(map[string]bool)
+	for _, operation := range manifest.Operations {
+		for _, segment := range operation.ResourceSegments {
+			result[segment] = true
+		}
+	}
+	return result
 }
 
 func TestEmitQueryTypesKeepsOrdinaryLimitAndSortParameters(t *testing.T) {

@@ -279,6 +279,20 @@ func buildManifest(document *ir.Document) (Manifest, error) {
 			errorExpression:    errorExpression,
 		})
 	}
+	tree, err := buildResourceTree(document, manifest)
+	if err != nil {
+		return Manifest{}, err
+	}
+	reachable := make(map[string]bool)
+	resourceOperationIDs(tree, reachable)
+	for index := range manifest.Operations {
+		item := &manifest.Operations[index]
+		if item.Visibility == "public" && !reachable[item.OperationID] {
+			operation := findOperation(document, item.OperationID)
+			item.CallExpression = exactOperationCall(operation, item.InputTypes)
+			item.ResourceSegments = nil
+		}
+	}
 	return manifest, nil
 }
 
@@ -304,26 +318,30 @@ func operationCall(operation ir.Operation, inputTypes []string) (string, []strin
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 			parameter, err := naming.Property(strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}"))
 			if err != nil {
-				return "", nil, err
+				return exactOperationCall(operation, inputTypes), nil, nil
 			}
 			chain += "(" + parameter + ")"
 			continue
 		}
 		property, err := naming.Property(part)
 		if err != nil {
-			return "", nil, err
+			return exactOperationCall(operation, inputTypes), nil, nil
 		}
 		segments = append(segments, property)
 		chain += "." + property
 	}
 	terminal, err := resourceTerminalName(operation, parts)
 	if err != nil {
-		return "", nil, err
+		return exactOperationCall(operation, inputTypes), nil, nil
 	}
 	if operation.Visibility == "internal" {
-		return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder), segments, nil
+		return exactOperationCall(operation, inputTypes), segments, nil
 	}
 	return chain + "." + terminal + callInput(operation, inputTypes, len(operation.PathParameterOrder) > 0, operation.PathParameterOrder), segments, nil
+}
+
+func exactOperationCall(operation ir.Operation, inputTypes []string) string {
+	return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder)
 }
 
 func resourcePathParts(path string) []string {
@@ -387,14 +405,17 @@ func callInput(operation ir.Operation, inputTypes []string, pathBound bool, path
 			}
 			values := make([]string, 0, len(pathParameters))
 			for _, parameter := range pathParameters {
-				property, err := naming.Property(parameter)
-				if err == nil {
-					values = append(values, property)
+				binding, err := naming.Property(parameter)
+				if err != nil {
+					binding = stablePrivateIdentifier("example-path-parameter", parameter)
 				}
+				values = append(values, quoteTS(parameter)+": "+binding)
 			}
 			fields = append(fields, "path: { "+strings.Join(values, ", ")+" }")
 		case strings.HasSuffix(inputType, "QueryInput"):
 			fields = append(fields, "query")
+		case strings.HasSuffix(inputType, "QuerystringInput"):
+			fields = append(fields, "querystring")
 		case strings.HasSuffix(inputType, "HeaderInput"):
 			fields = append(fields, "headerParams")
 		case strings.HasSuffix(inputType, "CookieInput"):

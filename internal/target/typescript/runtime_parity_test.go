@@ -372,6 +372,40 @@ await api.$links.createSource.follow(response, { sourceInput });
 	}
 }
 
+func TestGeneratedResourceOperationComposesWithChildNamespace(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.0",
+  "info":{"title":"Resource composition","version":"1"},
+  "paths":{
+    "/users":{"get":{"operationId":"listUsers","responses":{"204":{"description":"OK"}}}},
+    "/users/list":{"get":{"operationId":"getList","responses":{"204":{"description":"OK"}}}},
+    "/users/{id}/profile":{"get":{"operationId":"getProfile","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"OK"}}}},
+    "/users/{userID}/settings":{"get":{"operationId":"getSettings","parameters":[{"name":"userID","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const seen = [];
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input) => {
+  seen.push(new URL(String(input)).pathname);
+  return new Response(null, { status: 204 });
+} });
+await api.users.list();
+await api.users.list.get();
+await api.users("profile-id").profile.get();
+await api.users("settings-id").settings.get();
+if (typeof api.users.list.raw !== "function" || seen.join(",") !== "/users,/users/list,/users/profile-id/profile,/users/settings-id/settings") throw new Error("callable resource namespace mismatch");
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute callable resource namespace test: %v\n%s", err, output)
+	}
+}
+
 func TestGeneratedResponseLinksRejectUnknownRequestParameterExpressions(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.0", "info":{"title":"Invalid request link","version":"1"},

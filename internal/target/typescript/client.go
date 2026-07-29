@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
@@ -235,18 +236,19 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 	if err := emitStreamReturnValue(&output, streams); err != nil {
 		return nil, err
 	}
-	for _, terminal := range sortedManifestOperationNames(tree.operations) {
-		fmt.Fprintf(&output, "    %s: ", terminal)
-		if err := emitResourceOperationValue(&output, document, tree.operations[terminal], nil); err != nil {
+	for _, name := range sortedResourceMemberNames(tree) {
+		if tree.children[name] != nil {
+			fmt.Fprintf(&output, "    %s,\n", name)
+			continue
+		}
+		fmt.Fprintf(&output, "    %s: ", name)
+		if err := emitResourceOperationValue(&output, document, tree.operations[name], nil); err != nil {
 			return nil, err
 		}
 		output.WriteString(",\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(tree); ok {
 		fmt.Fprintf(&output, "    paginate: %s,\n", operationPaginationValueName(paginated.OperationID))
-	}
-	for _, name := range sortedResourceChildNames(tree) {
-		fmt.Fprintf(&output, "    %s,\n", name)
 	}
 	output.WriteString("  }\n")
 	output.WriteString("}\n")
@@ -830,14 +832,34 @@ func isStreamingRequestMediaType(mediaType string, media map[string]any) bool {
 }
 
 type resourceNode struct {
-	parameter      *operationParameter
-	operations     map[string]ManifestOperation
-	children       map[string]*resourceNode
-	parameterChild *resourceNode
+	parameter          *operationParameter
+	parameterSignature string
+	parameterChild     *resourceNode
+	parameterBlocked   bool
+	operations         map[string]ManifestOperation
+	blockedOperations  map[string]bool
+	children           map[string]*resourceNode
+	childSources       map[string]string
+	blockedChildren    map[string]bool
+	pagination         *ManifestOperation
+	suppressPagination bool
+}
+
+func newResourceNode() *resourceNode {
+	return &resourceNode{
+		operations:        make(map[string]ManifestOperation),
+		blockedOperations: make(map[string]bool),
+		children:          make(map[string]*resourceNode),
+		childSources:      make(map[string]string),
+		blockedChildren:   make(map[string]bool),
+	}
 }
 
 func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode, error) {
-	root := &resourceNode{children: make(map[string]*resourceNode)}
+	if err := validateTemplatedResourcePaths(document); err != nil {
+		return nil, err
+	}
+	root := newResourceNode()
 	for _, item := range manifest.Operations {
 		if item.Visibility != "public" {
 			continue
@@ -852,75 +874,240 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 			byName[parameter.Name] = parameter
 		}
 		node := root
+		omitted := false
 		parts := resourcePathParts(operation.Path)
-		for _, part := range parts {
+		for index, part := range parts {
 			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 				name := strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}")
 				parameter, ok := byName[name]
 				if !ok {
 					return nil, fmt.Errorf("resource path %s has undeclared parameter %q", operation.Path, name)
 				}
+				if index == 0 || node.parameterBlocked {
+					omitted = true
+					break
+				}
+				signature, err := resourceParameterSignature(document, parameter)
+				if err != nil {
+					return nil, fmt.Errorf("resource path %s parameter %q: %w", operation.Path, name, err)
+				}
 				if node.parameterChild == nil {
-					node.parameterChild = &resourceNode{parameter: &parameter, children: make(map[string]*resourceNode)}
-				} else if node.parameterChild.parameter.Name != parameter.Name {
-					return nil, fmt.Errorf("resource path parameter collision below %s: %q and %q", operation.Path, node.parameterChild.parameter.Name, parameter.Name)
+					node.parameterChild = newResourceNode()
+					node.parameterChild.parameter = &parameter
+					node.parameterSignature = signature
+				} else if node.parameterSignature != signature {
+					node.parameterChild = nil
+					node.parameterBlocked = true
+					omitted = true
+					break
 				}
 				node = node.parameterChild
 				continue
 			}
 			property, err := naming.Property(part)
 			if err != nil {
-				return nil, err
+				omitted = true
+				break
+			}
+			if node.blockedChildren[property] {
+				omitted = true
+				break
+			}
+			if source, exists := node.childSources[property]; exists && source != part {
+				delete(node.children, property)
+				delete(node.childSources, property)
+				node.blockedChildren[property] = true
+				omitted = true
+				break
 			}
 			if node.children[property] == nil {
-				node.children[property] = &resourceNode{children: make(map[string]*resourceNode)}
+				node.children[property] = newResourceNode()
+				node.childSources[property] = part
 			}
 			node = node.children[property]
+		}
+		if omitted {
+			continue
 		}
 		terminal, err := resourceTerminalName(operation, parts)
 		if err != nil {
 			return nil, err
 		}
-		if node.operations == nil {
-			node.operations = make(map[string]ManifestOperation)
+		if node.blockedOperations[terminal] {
+			continue
 		}
-		if existing, ok := node.operations[terminal]; ok {
-			return nil, fmt.Errorf("resource alias collision at %s.%s between %s and %s", operation.Path, terminal, existing.OperationID, item.OperationID)
+		if _, ok := node.operations[terminal]; ok {
+			delete(node.operations, terminal)
+			node.blockedOperations[terminal] = true
+			continue
 		}
 		node.operations[terminal] = item
 	}
-	if root.parameterChild != nil {
-		return nil, fmt.Errorf("resource paths may not begin with a path parameter")
-	}
-	if err := validateResourceNodeSymbols(root, "api"); err != nil {
-		return nil, err
-	}
+	resolveResourceNodeCollisions(root)
 	return root, nil
 }
 
-func validateResourceNodeSymbols(node *resourceNode, path string) error {
-	members := make(map[string]string, len(node.operations)+1)
-	for terminal, operation := range node.operations {
-		members[terminal] = "operation " + fmt.Sprintf("%q", operation.OperationID)
+func validateTemplatedResourcePaths(document *ir.Document) error {
+	paths := make(map[string]string)
+	for _, operation := range document.Operations {
+		parts := resourcePathParts(operation.Path)
+		templated := false
+		for index, part := range parts {
+			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+				parts[index] = "{}"
+				templated = true
+			}
+		}
+		if !templated {
+			continue
+		}
+		shape := "/" + strings.Join(parts, "/")
+		if previous, exists := paths[shape]; exists && previous != operation.Path {
+			return fmt.Errorf("OpenAPI paths %q and %q have identical templated shape %q; path parameter names do not distinguish paths", previous, operation.Path, shape)
+		}
+		paths[shape] = operation.Path
 	}
-	if operation, ok := paginatedResourceNodeOperation(node); ok {
-		if previous, exists := members["paginate"]; exists {
-			return fmt.Errorf("resource member collision at %s.paginate between %s and pagination for operation %q", path, previous, operation.OperationID)
-		}
-		members["paginate"] = "pagination for operation " + fmt.Sprintf("%q", operation.OperationID)
+	return nil
+}
+
+func resourceParameterSignature(document *ir.Document, parameter operationParameter) (string, error) {
+	inputType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
+	if err != nil {
+		return "", err
 	}
-	for name, child := range node.children {
-		if previous, exists := members[name]; exists {
-			return fmt.Errorf("resource member collision at %s.%s between %s and path segment %q", path, name, previous, name)
+	wireSchema, err := wireSchemaDescriptorScoped(parameter.Schema, projectionInput, false)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join([]string{
+		inputType,
+		parameter.Location,
+		parameter.Style,
+		strconv.FormatBool(parameter.Explode),
+		strconv.FormatBool(parameter.AllowReserved),
+		parameter.ContentType,
+		wireSchema,
+	}, "\x00"), nil
+}
+
+func resolveResourceNodeCollisions(node *resourceNode) {
+	if node.parameterChild != nil {
+		resolveResourceNodeCollisions(node.parameterChild)
+	}
+	for _, child := range node.children {
+		resolveResourceNodeCollisions(child)
+	}
+	if operation, ok := paginatedResourceNodeOperation(node); ok && !node.suppressPagination {
+		node.pagination = &operation
+		delete(node.operations, "paginate")
+		if _, exists := node.children["paginate"]; exists {
+			delete(node.children, "paginate")
+			delete(node.childSources, "paginate")
 		}
-		if err := validateResourceNodeSymbols(child, path+"."+name); err != nil {
-			return err
+	}
+	for name, operation := range node.operations {
+		child := node.children[name]
+		if child == nil {
+			continue
 		}
+		if child.parameterChild != nil {
+			delete(node.operations, name)
+			continue
+		}
+		for _, fixed := range resourceOperationFixedMembers(operation) {
+			removeResourceNodeMember(child, fixed)
+		}
+		if resourceNodeEmpty(child) {
+			delete(node.children, name)
+			delete(node.childSources, name)
+		}
+	}
+}
+
+func resourceOperationFixedMembers(operation ManifestOperation) []string {
+	result := []string{"raw"}
+	if operation.Pagination != "" {
+		result = append(result, "paginate")
+	}
+	return result
+}
+
+func removeResourceNodeMember(node *resourceNode, name string) {
+	delete(node.operations, name)
+	delete(node.children, name)
+	delete(node.childSources, name)
+	if name == "paginate" {
+		node.suppressPagination = true
+	}
+}
+
+func resourceNodeEmpty(node *resourceNode) bool {
+	if node.parameterChild != nil || len(node.operations) > 0 || len(node.children) > 0 {
+		return false
+	}
+	if node.pagination != nil && !node.suppressPagination {
+		return false
+	}
+	return true
+}
+
+func resourceOperationIDs(node *resourceNode, result map[string]bool) {
+	for _, operation := range node.operations {
+		result[operation.OperationID] = true
 	}
 	if node.parameterChild != nil {
-		if err := validateResourceNodeSymbols(node.parameterChild, path+"(path parameter)"); err != nil {
-			return err
+		resourceOperationIDs(node.parameterChild, result)
+	}
+	for _, child := range node.children {
+		resourceOperationIDs(child, result)
+	}
+}
+
+func sortedResourceMemberNames(node *resourceNode) []string {
+	names := make(map[string]bool, len(node.operations)+len(node.children))
+	for name := range node.operations {
+		names[name] = true
+	}
+	for name := range node.children {
+		names[name] = true
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func resourceMemberOperationType(operation ManifestOperation) string {
+	if len(operation.PathParameterOrder) > 0 {
+		return operationResourceFunctionType(nil, operation)
+	}
+	return operationFunctionType(nil, operation)
+}
+
+func resourceMemberOperation(node *resourceNode, name string) (ManifestOperation, bool) {
+	operation, ok := node.operations[name]
+	return operation, ok
+}
+
+func emitResourceMemberInterface(output *bytes.Buffer, document *ir.Document, node *resourceNode, name, indent string) error {
+	operation, hasOperation := resourceMemberOperation(node, name)
+	child := node.children[name]
+	if hasOperation {
+		emitOperationJSDoc(output, indent, operation)
+	} else {
+		output.WriteString(indent + "/** Nested resource path segment. */\n")
+	}
+	fmt.Fprintf(output, "%sreadonly %s: ", indent, name)
+	if hasOperation {
+		output.WriteString(resourceMemberOperationType(operation))
+		if child != nil {
+			output.WriteString(" & ")
 		}
+	}
+	if child != nil {
+		return emitResourceNodeInterface(output, document, child, indent)
 	}
 	return nil
 }
@@ -947,6 +1134,9 @@ func resourceTreeHasPathOperations(node *resourceNode) bool {
 }
 
 func resourceTreeHasPagination(node *resourceNode) bool {
+	if node.pagination != nil && !node.suppressPagination {
+		return true
+	}
 	for _, operation := range node.operations {
 		if operation.Pagination != "" && len(operation.PathParameterOrder) == 0 {
 			return true
@@ -964,10 +1154,11 @@ func resourceTreeHasPagination(node *resourceNode) bool {
 }
 
 func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root *resourceNode) error {
-	for _, terminal := range sortedManifestOperationNames(root.operations) {
-		operation := root.operations[terminal]
-		emitOperationJSDoc(output, "  ", operation)
-		fmt.Fprintf(output, "  readonly %s: %s\n", terminal, operationFunctionType(document, operation))
+	for _, name := range sortedResourceMemberNames(root) {
+		if err := emitResourceMemberInterface(output, document, root, name, "  "); err != nil {
+			return err
+		}
+		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(root); ok {
 		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
@@ -977,28 +1168,17 @@ func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root
 		fmt.Fprintf(output, "  /** Lazily iterates every item from exact operation `%s` pagination. */\n", sanitizeComment(paginated.OperationID))
 		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, itemType))
 	}
-	for _, name := range sortedResourceChildNames(root) {
-		output.WriteString("  /** Resource-oriented operations generated from the OpenAPI path tree. */\n")
-		fmt.Fprintf(output, "  readonly %s: ", name)
-		if err := emitResourceNodeInterface(output, document, root.children[name], "  "); err != nil {
-			return err
-		}
-		output.WriteString("\n")
-	}
 	return nil
 }
 
 func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node *resourceNode, indent string) error {
 	output.WriteString("{\n")
 	memberIndent := indent + "  "
-	for _, terminal := range sortedManifestOperationNames(node.operations) {
-		operation := node.operations[terminal]
-		emitOperationJSDoc(output, memberIndent, operation)
-		functionType := operationFunctionType(document, operation)
-		if len(operation.PathParameterOrder) > 0 {
-			functionType = operationResourceFunctionType(document, operation)
+	for _, name := range sortedResourceMemberNames(node) {
+		if err := emitResourceMemberInterface(output, document, node, name, memberIndent); err != nil {
+			return err
 		}
-		fmt.Fprintf(output, "%sreadonly %s: %s\n", memberIndent, terminal, functionType)
+		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
 		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
@@ -1007,14 +1187,6 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 		}
 		fmt.Fprintf(output, "%s/** Lazily iterates every item from exact operation `%s` pagination. */\n", memberIndent, sanitizeComment(paginated.OperationID))
 		fmt.Fprintf(output, "%sreadonly paginate: %s\n", memberIndent, paginationFunctionType(paginated, itemType))
-	}
-	for _, name := range sortedResourceChildNames(node) {
-		output.WriteString(memberIndent + "/** Nested resource path segment. */\n")
-		fmt.Fprintf(output, "%sreadonly %s: ", memberIndent, name)
-		if err := emitResourceNodeInterface(output, document, node.children[name], memberIndent); err != nil {
-			return err
-		}
-		output.WriteString("\n")
 	}
 	if node.parameterChild != nil {
 		parameter := node.parameterChild.parameter
@@ -1034,6 +1206,9 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 }
 
 func paginatedResourceNodeOperation(node *resourceNode) (ManifestOperation, bool) {
+	if node.pagination != nil {
+		return *node.pagination, !node.suppressPagination
+	}
 	var result ManifestOperation
 	found := false
 	for _, operation := range node.operations {
@@ -1051,7 +1226,7 @@ func paginatedResourceNodeOperation(node *resourceNode) (ManifestOperation, bool
 func emitResourceTreeValues(output *bytes.Buffer, document *ir.Document, root *resourceNode) error {
 	for _, name := range sortedResourceChildNames(root) {
 		fmt.Fprintf(output, "  const %s = ", name)
-		if err := emitResourceNodeValue(output, document, root.children[name], nil, "  "); err != nil {
+		if err := emitResourceMemberValue(output, document, root, name, nil, "  "); err != nil {
 			return err
 		}
 		output.WriteString("\n")
@@ -1059,7 +1234,7 @@ func emitResourceTreeValues(output *bytes.Buffer, document *ir.Document, root *r
 	return nil
 }
 
-func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *resourceNode, bound map[string]string, indent string) error {
+func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *resourceNode, bound []string, indent string) error {
 	if node.parameterChild == nil {
 		return emitResourceNodeObject(output, document, node, bound, indent)
 	}
@@ -1068,11 +1243,7 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 	if err != nil {
 		return err
 	}
-	nextBound := make(map[string]string, len(bound)+1)
-	for name, value := range bound {
-		nextBound[name] = value
-	}
-	nextBound[parameter.Name] = parameter.Binding
+	nextBound := append(append([]string{}, bound...), parameter.Binding)
 	output.WriteString("Object.assign(\n")
 	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Binding, parameterType)
 	if err := emitResourceNodeValue(output, document, node.parameterChild, nextBound, indent+"  "); err != nil {
@@ -1087,12 +1258,12 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 	return nil
 }
 
-func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *resourceNode, bound map[string]string, indent string) error {
+func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *resourceNode, bound []string, indent string) error {
 	output.WriteString("{\n")
 	memberIndent := indent + "  "
-	for _, terminal := range sortedManifestOperationNames(node.operations) {
-		fmt.Fprintf(output, "%s%s: ", memberIndent, terminal)
-		if err := emitResourceOperationValue(output, document, node.operations[terminal], bound); err != nil {
+	for _, name := range sortedResourceMemberNames(node) {
+		fmt.Fprintf(output, "%s%s: ", memberIndent, name)
+		if err := emitResourceMemberValue(output, document, node, name, bound, memberIndent); err != nil {
 			return err
 		}
 		output.WriteString(",\n")
@@ -1100,30 +1271,43 @@ func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *r
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
 		fmt.Fprintf(output, "%spaginate: %s,\n", memberIndent, operationPaginationValueName(paginated.OperationID))
 	}
-	for _, name := range sortedResourceChildNames(node) {
-		fmt.Fprintf(output, "%s%s: ", memberIndent, name)
-		if err := emitResourceNodeValue(output, document, node.children[name], bound, memberIndent); err != nil {
-			return err
-		}
-		output.WriteString(",\n")
-	}
 	output.WriteString(indent + "}")
 	return nil
 }
 
-func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, operation ManifestOperation, bound map[string]string) error {
+func emitResourceMemberValue(output *bytes.Buffer, document *ir.Document, node *resourceNode, name string, bound []string, indent string) error {
+	operation, hasOperation := node.operations[name]
+	child := node.children[name]
+	if hasOperation && child != nil {
+		output.WriteString("Object.assign(")
+		if err := emitResourceOperationValue(output, document, operation, bound); err != nil {
+			return err
+		}
+		output.WriteString(", ")
+		if err := emitResourceNodeValue(output, document, child, bound, indent); err != nil {
+			return err
+		}
+		output.WriteString(")")
+		return nil
+	}
+	if hasOperation {
+		return emitResourceOperationValue(output, document, operation, bound)
+	}
+	return emitResourceNodeValue(output, document, child, bound, indent)
+}
+
+func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, operation ManifestOperation, bound []string) error {
 	property := operationValueName(operation.OperationID)
 	if len(operation.PathParameterOrder) == 0 {
 		output.WriteString(property)
 		return nil
 	}
 	values := make([]string, 0, len(operation.PathParameterOrder))
-	for _, parameter := range operation.PathParameterOrder {
-		value, ok := bound[parameter]
-		if !ok {
+	for index, parameter := range operation.PathParameterOrder {
+		if index >= len(bound) {
 			return fmt.Errorf("resource operation %s is missing bound path parameter %q", operation.OperationID, parameter)
 		}
-		values = append(values, quoteTS(parameter)+": "+value)
+		values = append(values, quoteTS(parameter)+": "+bound[index])
 	}
 	name := operationTypeName(operation.OperationID)
 	hasInput := len(operation.InputTypes) > 1
@@ -1138,15 +1322,6 @@ func findOperation(document *ir.Document, operationID string) ir.Operation {
 		}
 	}
 	return ir.Operation{OperationID: operationID}
-}
-
-func sortedManifestOperationNames(operations map[string]ManifestOperation) []string {
-	result := make([]string, 0, len(operations))
-	for name := range operations {
-		result = append(result, name)
-	}
-	sort.Strings(result)
-	return result
 }
 
 func operationFunctionType(document *ir.Document, operation ManifestOperation) string {
