@@ -52,11 +52,11 @@ func generatedStreams(document *ir.Document, manifest Manifest) ([]generatedStre
 				if !exists {
 					return nil, fmt.Errorf("streaming response %s %s has no itemSchema", operation.OperationID, mediaType)
 				}
-				itemType, err := schemaType(document, itemSchema, projectionOutput)
+				itemType, err := schemaTypeForScope(document, itemSchema, projectionOutput, typeRenderContract)
 				if err != nil {
 					return nil, err
 				}
-				types = append(types, qualifyClientType(document, itemType))
+				types = append(types, itemType)
 			}
 		}
 		if len(types) != 0 {

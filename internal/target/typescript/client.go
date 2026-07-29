@@ -104,7 +104,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		fmt.Fprintf(&output, "    /** Complete generated input type. */\n")
 		fmt.Fprintf(&output, "    readonly input: %s\n", operationInputAlias(operation))
 		fmt.Fprintf(&output, "    /** Decoded successful output type. */\n")
-		fmt.Fprintf(&output, "    readonly output: %s\n", qualifyClientType(document, operation.OutputType))
+		fmt.Fprintf(&output, "    readonly output: %s\n", operation.renderOutput(typeRenderContract))
 		fmt.Fprintf(&output, "    /** Generated server and transport error union. */\n")
 		fmt.Fprintf(&output, "    readonly error: Errors.%sError\n", operationName)
 		output.WriteString("  }\n")
@@ -161,7 +161,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		outputType := qualifyClientType(document, operation.OutputType)
+		outputType := operation.renderOutput(typeRenderContract)
 		definition, err := operationDefinition(document, operationsByID[operation.OperationID], operation)
 		if err != nil {
 			return nil, err
@@ -174,11 +174,11 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		}
 		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", property, inputType, outputType, operationTypeName(operation.OperationID), operationTypeName(operation.OperationID), definition, hasInput, operationTypeName(operation.OperationID))
 		if operation.Pagination != "" && len(operation.PathParameterOrder) == 0 {
-			itemType, err := operationItemType(document, operationsByID[operation.OperationID])
+			itemType, err := operationItemTypeForScope(document, operationsByID[operation.OperationID], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&output, "  const paginate%s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", operationTypeName(operation.OperationID), qualifyClientType(document, itemType), operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), property, quoteTS(operation.Pagination))
+			fmt.Fprintf(&output, "  const paginate%s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", operationTypeName(operation.OperationID), itemType, operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), property, quoteTS(operation.Pagination))
 		}
 	}
 	if err := emitLinkValues(&output, document, links); err != nil {
@@ -263,17 +263,16 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 		if err != nil {
 			return err
 		}
-		bodyType, err := requestBodyType(document, resolvedBody)
+		bodyType, err := requestBodyTypeForScope(document, resolvedBody, typeRenderContract)
 		if err != nil {
 			return err
 		}
-		qualifiedBodyType := qualifyClientType(document, bodyType)
 		bodyDescription, _ := resolvedBody["description"].(string)
 		if bodyDescription == "" {
 			bodyDescription = "Request body for `" + operation.OperationID + "` (`" + operation.Method + " " + operation.Path + "`)."
 		}
-		fmt.Fprintf(output, "/**\n * %s\n *\n * Type: %s\n */\n", sanitizeComment(bodyDescription), jsDocTypeReference(qualifiedBodyType))
-		fmt.Fprintf(output, "export type %sBodyInput = %s\n\n", operationName, qualifiedBodyType)
+		fmt.Fprintf(output, "/**\n * %s\n *\n * Type: %s\n */\n", sanitizeComment(bodyDescription), jsDocTypeReference(bodyType))
+		fmt.Fprintf(output, "export type %sBodyInput = %s\n\n", operationName, bodyType)
 	}
 	if len(item.InputTypes) > 0 {
 		fmt.Fprintf(output, "/** Complete input for `%s` (`%s %s`). */\n", operation.OperationID, operation.Method, operation.Path)
@@ -312,16 +311,15 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 		fmt.Fprintf(output, "export type %sResourceInput = %s\n\n", operationName, resourceInput)
 	}
 
-	outputType := qualifyClientType(document, item.OutputType)
-	rawResponseType, err := operationRawResponseType(document, operation)
+	outputType := item.renderOutput(typeRenderContract)
+	rawResponseType, err := operationRawResponseTypeForScope(document, operation, typeRenderContract)
 	if err != nil {
 		return err
 	}
-	qualifiedRawResponseType := qualifyClientType(document, rawResponseType)
 	if err := emitRawResponseJSDoc(output, document, operation); err != nil {
 		return err
 	}
-	fmt.Fprintf(output, "export type %sRawResponse = %s\n\n", operationName, qualifiedRawResponseType)
+	fmt.Fprintf(output, "export type %sRawResponse = %s\n\n", operationName, rawResponseType)
 	emitOutputJSDoc(output, operation, item, outputType)
 	fmt.Fprintf(output, "export type %sOutput = %s\n", operationName, outputType)
 	output.WriteString("\n")
@@ -369,7 +367,7 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType, outputType, rawType string) error {
 	operationName := operationTypeName(operation.OperationID)
 	requiresOptions := operation.Idempotency == "required" || operation.Concurrency == "required"
-	mediaOutputs, err := operationMediaOutputTypes(document, operation)
+	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
 		return err
 	}
@@ -382,7 +380,7 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 	if len(mediaTypes) > 1 {
 		for _, mediaType := range mediaTypes {
 			optionsType := "Omit<" + operationName + "Options, \"accept\"> & { readonly accept: " + quoteTS(mediaType) + " }"
-			emitCallSignature(output, inputType, optionsType, qualifyClientType(document, mediaOutputs[mediaType]), false)
+			emitCallSignature(output, inputType, optionsType, mediaOutputs[mediaType], false)
 			emitRawCallSignature(output, inputType, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
 		}
 	}
@@ -458,11 +456,10 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 	fmt.Fprintf(output, "/** %s parameters for `%s` (`%s %s`). */\n", locationLabel, operation.OperationID, operation.Method, operation.Path)
 	fmt.Fprintf(output, "export interface %s {\n", typeName)
 	for _, parameter := range parameters {
-		valueType, err := schemaType(document, parameter.Schema, projectionInput)
+		valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 		if err != nil {
 			return err
 		}
-		valueType = qualifyClientType(document, valueType)
 		optional := "?"
 		if parameter.Required {
 			optional = ""
@@ -653,11 +650,10 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 		fmt.Fprintf(output, "/** Filter query parameters for `%s` (`%s %s`). */\n", operation.OperationID, operation.Method, operation.Path)
 		fmt.Fprintf(output, "export type %s = {\n", filterType)
 		for _, parameter := range filters {
-			valueType, err := schemaType(document, parameter.Schema, projectionInput)
+			valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 			if err != nil {
 				return err
 			}
-			valueType = qualifyClientType(document, valueType)
 			optional := "?"
 			if parameter.Required {
 				optional = ""
@@ -729,37 +725,11 @@ func operationSortFields(operation ir.Operation) []string {
 	return result
 }
 
-func qualifyClientType(document *ir.Document, value string) string {
-	var typeNames []string
-	reachable := reachableComponentSchemas(document)
-	names := make([]string, 0, len(document.ComponentSchemas))
-	for name := range document.ComponentSchemas {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if !reachable[name] {
-			continue
-		}
-		schema := document.ComponentSchemas[name]
-		if isErrorSchema(document, schema) {
-			continue
-		}
-		for _, declaration := range componentDeclarations(name, schema) {
-			if typeName, err := naming.Public(declaration.name); err == nil {
-				typeNames = append(typeNames, typeName)
-			}
-		}
-	}
-	sort.Slice(typeNames, func(i, j int) bool { return len(typeNames[i]) > len(typeNames[j]) })
-	for _, typeName := range typeNames {
-		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(typeName) + `\b`)
-		value = pattern.ReplaceAllString(value, "Contract."+typeName)
-	}
-	return value
+func requestBodyType(document *ir.Document, body map[string]any) (string, error) {
+	return requestBodyTypeForScope(document, body, typeRenderLocal)
 }
 
-func requestBodyType(document *ir.Document, body map[string]any) (string, error) {
+func requestBodyTypeForScope(document *ir.Document, body map[string]any, scope typeRenderScope) (string, error) {
 	content, _ := body["content"].(map[string]any)
 	mediaTypes := make([]string, 0, len(content))
 	for mediaType := range content {
@@ -780,7 +750,7 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 			if !exists {
 				return "", fmt.Errorf("streaming request body %s has no itemSchema", mediaTypes[0])
 			}
-			itemType, err := schemaType(document, itemSchema, projectionInput)
+			itemType, err := schemaTypeForScope(document, itemSchema, projectionInput, scope)
 			if err != nil {
 				return "", err
 			}
@@ -794,7 +764,7 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 		if isBinaryMedia(mediaTypes[0], schemaObject) {
 			return "BinaryBody", nil
 		}
-		return schemaType(document, schema, projectionInput)
+		return schemaTypeForScope(document, schema, projectionInput, scope)
 	}
 	variants := make([]string, 0, len(mediaTypes))
 	for _, mediaType := range mediaTypes {
@@ -811,7 +781,7 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 			if !exists {
 				return "", fmt.Errorf("streaming request body %s has no itemSchema", mediaType)
 			}
-			itemType, err := schemaType(document, itemSchema, projectionInput)
+			itemType, err := schemaTypeForScope(document, itemSchema, projectionInput, scope)
 			if err != nil {
 				return "", err
 			}
@@ -820,7 +790,7 @@ func requestBodyType(document *ir.Document, body map[string]any) (string, error)
 			if isBinaryMedia(mediaType, schemaObject) {
 				valueType = "BinaryBody"
 			} else {
-				valueType, err = schemaType(document, schema, projectionInput)
+				valueType, err = schemaTypeForScope(document, schema, projectionInput, scope)
 			}
 		}
 		if err != nil {
@@ -977,12 +947,12 @@ func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root
 		fmt.Fprintf(output, "  readonly %s: %s\n", terminal, operationFunctionType(document, operation))
 	}
 	if paginated, ok := paginatedResourceNodeOperation(root); ok {
-		itemType, err := operationItemType(document, findOperation(document, paginated.OperationID))
+		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(output, "  /** Lazily iterates every item from {@link Operations.%s} pagination. */\n", paginated.OperationID)
-		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, qualifyClientType(document, itemType)))
+		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, itemType))
 	}
 	for _, name := range sortedResourceChildNames(root) {
 		output.WriteString("  /** Resource-oriented operations generated from the OpenAPI path tree. */\n")
@@ -1008,12 +978,12 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 		fmt.Fprintf(output, "%sreadonly %s: %s\n", memberIndent, terminal, functionType)
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
-		itemType, err := operationItemType(document, findOperation(document, paginated.OperationID))
+		itemType, err := operationItemTypeForScope(document, findOperation(document, paginated.OperationID), typeRenderContract)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(output, "%s/** Lazily iterates every item from {@link Operations.%s} pagination. */\n", memberIndent, paginated.OperationID)
-		fmt.Fprintf(output, "%sreadonly paginate: %s\n", memberIndent, paginationFunctionType(paginated, qualifyClientType(document, itemType)))
+		fmt.Fprintf(output, "%sreadonly paginate: %s\n", memberIndent, paginationFunctionType(paginated, itemType))
 	}
 	for _, name := range sortedResourceChildNames(node) {
 		output.WriteString(memberIndent + "/** Nested resource path segment. */\n")
@@ -1025,12 +995,12 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 	}
 	if node.parameterChild != nil {
 		parameter := node.parameterChild.parameter
-		parameterType, err := schemaType(document, parameter.Schema, projectionInput)
+		parameterType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(output, "%s/** Selects one resource by the `%s` path parameter. */\n", memberIndent, parameter.Name)
-		fmt.Fprintf(output, "%s(%s: %s): ", memberIndent, parameter.Property, qualifyClientType(document, parameterType))
+		fmt.Fprintf(output, "%s(%s: %s): ", memberIndent, parameter.Property, parameterType)
 		if err := emitResourceNodeInterface(output, document, node.parameterChild, memberIndent); err != nil {
 			return err
 		}
@@ -1071,7 +1041,7 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 		return emitResourceNodeObject(output, document, node, bound, indent)
 	}
 	parameter := node.parameterChild.parameter
-	parameterType, err := schemaType(document, parameter.Schema, projectionInput)
+	parameterType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 	if err != nil {
 		return err
 	}
@@ -1081,7 +1051,7 @@ func emitResourceNodeValue(output *bytes.Buffer, document *ir.Document, node *re
 	}
 	nextBound[parameter.Name] = parameter.Property
 	output.WriteString("Object.assign(\n")
-	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Property, qualifyClientType(document, parameterType))
+	fmt.Fprintf(output, "%s  (%s: %s) => (", indent, parameter.Property, parameterType)
 	if err := emitResourceNodeValue(output, document, node.parameterChild, nextBound, indent+"  "); err != nil {
 		return err
 	}
@@ -1141,7 +1111,7 @@ func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, ope
 	}
 	name := operationTypeName(operation.OperationID)
 	hasInput := len(operation.InputTypes) > 1
-	fmt.Fprintf(output, "bindPathOperation<%sInput, %sResourceInput, %s, %sOptions, %sRawResponse>(%s, { %s }, %t)", name, name, qualifyClientType(document, operation.OutputType), name, name, property, strings.Join(values, ", "), hasInput)
+	fmt.Fprintf(output, "bindPathOperation<%sInput, %sResourceInput, %s, %sOptions, %sRawResponse>(%s, { %s }, %t)", name, name, operation.renderOutput(typeRenderContract), name, name, property, strings.Join(values, ", "), hasInput)
 	return nil
 }
 

@@ -14,9 +14,8 @@ import (
 type projection string
 
 const (
-	projectionNeutral projection = "neutral"
-	projectionInput   projection = "input"
-	projectionOutput  projection = "output"
+	projectionInput  projection = "input"
+	projectionOutput projection = "output"
 )
 
 func emitTypes(document *ir.Document) ([]byte, error) {
@@ -49,85 +48,32 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	if err := validateComponentSymbols(document, names); err != nil {
-		return nil, err
-	}
-
-	var exported []string
-	for _, schemaName := range names {
-		schema := document.ComponentSchemas[schemaName]
-		if isErrorSchema(document, schema) {
-			continue
-		}
-		declarations := componentDeclarations(schemaName, schema)
-		for _, declaration := range declarations {
-			typeName, err := naming.Public(declaration.name)
-			if err != nil {
-				return nil, fmt.Errorf("component %s: %w", schemaName, err)
-			}
-			typeSource, err := schemaType(document, schema, declaration.projection)
-			if err != nil {
-				return nil, fmt.Errorf("component %s: %w", schemaName, err)
-			}
-			emitSchemaJSDoc(&output, schemaName, schema, declaration.projection)
-			fmt.Fprintf(&output, "export type %s = %s\n\n", typeName, typeSource)
-			if enumValues, ok := stringEnum(schema); ok {
-				fmt.Fprintf(&output, "/** Runtime values for {@link %s}. */\n", typeName)
-				fmt.Fprintf(&output, "export const %s = {\n", typeName)
-				enumKeys := make(map[string]string, len(enumValues))
-				for _, value := range enumValues {
-					key, err := naming.Public(value)
-					if err != nil {
-						return nil, fmt.Errorf("enum %s value %q: %w", schemaName, value, err)
-					}
-					if previous, exists := enumKeys[key]; exists {
-						return nil, fmt.Errorf("enum %s values %q and %q both generate TypeScript key %q", schemaName, previous, value, key)
-					}
-					enumKeys[key] = value
-					fmt.Fprintf(&output, "  /** OpenAPI enum value `%s`. */\n", sanitizeComment(value))
-					fmt.Fprintf(&output, "  %s: %s,\n", key, quoteTS(value))
-				}
-				output.WriteString("} as const\n\n")
-			}
-			exported = append(exported, typeName)
-		}
-	}
-
-	output.WriteString("/** Map of every public OpenAPI component name to its generated TypeScript type. */\n")
+	output.WriteString("/** Type catalog keyed by exact OpenAPI component schema names. */\n")
 	output.WriteString("export interface Components {\n")
-	for _, name := range exported {
-		fmt.Fprintf(&output, "  /** {@link %s} */\n", name)
-		fmt.Fprintf(&output, "  readonly %s: %s\n", name, name)
-	}
-	output.WriteString("}\n")
-	return output.Bytes(), nil
-}
-
-func validateComponentSymbols(document *ir.Document, names []string) error {
-	symbols := map[string]string{
-		"SortDirection":         "built-in SortDirection",
-		"CursorPaginationInput": "built-in CursorPaginationInput",
-		"OffsetPaginationInput": "built-in OffsetPaginationInput",
-		"BothPaginationInput":   "built-in BothPaginationInput",
-		"Components":            "built-in Components",
-	}
 	for _, schemaName := range names {
 		schema := document.ComponentSchemas[schemaName]
-		if isErrorSchema(document, schema) {
-			continue
+		input, err := schemaType(document, schema, projectionInput)
+		if err != nil {
+			return nil, fmt.Errorf("component %s input: %w", schemaName, err)
 		}
-		for _, declaration := range componentDeclarations(schemaName, schema) {
-			symbol, err := naming.Public(declaration.name)
-			if err != nil {
-				return fmt.Errorf("component %s: %w", schemaName, err)
-			}
-			if previous, exists := symbols[symbol]; exists {
-				return fmt.Errorf("component %q generates TypeScript symbol %q already used by %s", schemaName, symbol, previous)
-			}
-			symbols[symbol] = "component " + fmt.Sprintf("%q", schemaName)
+		outputType, err := schemaType(document, schema, projectionOutput)
+		if err != nil {
+			return nil, fmt.Errorf("component %s output: %w", schemaName, err)
 		}
+		emitSchemaValueJSDoc(&output, "  ", schema, "OpenAPI component `"+sanitizeComment(schemaName)+"`.")
+		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(schemaName))
+		output.WriteString("    /** Request/input projection. */\n")
+		fmt.Fprintf(&output, "    readonly input: %s\n", input)
+		output.WriteString("    /** Response/output projection. */\n")
+		fmt.Fprintf(&output, "    readonly output: %s\n", outputType)
+		output.WriteString("  }\n")
 	}
-	return nil
+	output.WriteString("}\n\n")
+	output.WriteString("/** Input projection for an exact OpenAPI component schema name. */\n")
+	output.WriteString("export type ComponentInput<Name extends keyof Components> = Components[Name][\"input\"]\n")
+	output.WriteString("/** Output projection for an exact OpenAPI component schema name. */\n")
+	output.WriteString("export type ComponentOutput<Name extends keyof Components> = Components[Name][\"output\"]\n")
+	return output.Bytes(), nil
 }
 
 func reachableComponentSchemas(document *ir.Document) map[string]bool {
@@ -176,16 +122,6 @@ func reachableComponentSchemas(document *ir.Document) map[string]bool {
 		}
 	}
 	return result
-}
-
-func emitSchemaJSDoc(output *bytes.Buffer, schemaName string, schema map[string]any, direction projection) {
-	fallback := "OpenAPI component `" + sanitizeComment(schemaName) + "`."
-	if direction == projectionInput {
-		fallback = "Input representation of OpenAPI component `" + sanitizeComment(schemaName) + "`."
-	} else if direction == projectionOutput {
-		fallback = "Output representation of OpenAPI component `" + sanitizeComment(schemaName) + "`."
-	}
-	emitSchemaValueJSDoc(output, "", schema, fallback)
 }
 
 func emitSchemaValueJSDoc(output *bytes.Buffer, indent string, schema map[string]any, fallback string) {
@@ -241,28 +177,11 @@ func schemaConstraintSummary(schema map[string]any) string {
 	return strings.Join(items, ", ")
 }
 
-type componentDeclaration struct {
-	name       string
-	projection projection
-}
-
-func componentDeclarations(name string, schema map[string]any) []componentDeclaration {
-	if !isStructuralSchema(schema) || isDirectionNeutral(name) {
-		return []componentDeclaration{{name: name, projection: projectionNeutral}}
-	}
-	if strings.HasSuffix(name, "Input") {
-		return []componentDeclaration{{name: name, projection: projectionInput}}
-	}
-	if strings.HasSuffix(name, "Output") {
-		return []componentDeclaration{{name: name, projection: projectionOutput}}
-	}
-	return []componentDeclaration{
-		{name: name + "Input", projection: projectionInput},
-		{name: name + "Output", projection: projectionOutput},
-	}
-}
-
 func schemaType(document *ir.Document, value any, direction projection) (string, error) {
+	return schemaTypeForScope(document, value, direction, typeRenderLocal)
+}
+
+func schemaTypeForScope(document *ir.Document, value any, direction projection, scope typeRenderScope) (string, error) {
 	if boolean, ok := value.(bool); ok {
 		if boolean {
 			return "unknown", nil
@@ -282,7 +201,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 				withoutNullable[key] = value
 			}
 		}
-		value, err := schemaType(document, withoutNullable, direction)
+		value, err := schemaTypeForScope(document, withoutNullable, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -294,7 +213,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 		if err != nil {
 			return "", err
 		}
-		referenced, err := referencedType(document, name, direction)
+		referenced, err := referencedType(document, name, direction, scope)
 		if err != nil || len(schema) == 1 {
 			return referenced, err
 		}
@@ -307,7 +226,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 		if len(siblings) == 0 {
 			return referenced, nil
 		}
-		siblingType, err := schemaType(document, siblings, direction)
+		siblingType, err := schemaTypeForScope(document, siblings, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -318,7 +237,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 		if err != nil {
 			return "", err
 		}
-		referenced, err := referencedType(document, name, direction)
+		referenced, err := referencedType(document, name, direction, scope)
 		if err != nil || len(schema) == 1 {
 			return referenced, err
 		}
@@ -331,7 +250,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 		if len(siblings) == 0 {
 			return referenced, nil
 		}
-		siblingType, err := schemaType(document, siblings, direction)
+		siblingType, err := schemaTypeForScope(document, siblings, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -348,13 +267,13 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 		return strings.Join(quoted, " | "), nil
 	}
 	if variants, ok := schema["oneOf"].([]any); ok {
-		return unionType(document, variants, direction)
+		return unionType(document, variants, direction, scope)
 	}
 	if variants, ok := schema["anyOf"].([]any); ok {
-		return unionType(document, variants, direction)
+		return unionType(document, variants, direction, scope)
 	}
 	if variants, ok := schema["allOf"].([]any); ok {
-		parts, err := schemaListTypes(document, variants, direction)
+		parts, err := schemaListTypes(document, variants, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -365,7 +284,7 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 	if len(types) > 1 {
 		parts := make([]string, 0, len(types))
 		for _, value := range types {
-			part, err := scalarOrCompositeType(document, value, schema, direction)
+			part, err := scalarOrCompositeType(document, value, schema, direction, scope)
 			if err != nil {
 				return "", err
 			}
@@ -375,17 +294,17 @@ func schemaType(document *ir.Document, value any, direction projection) (string,
 	}
 	if len(types) == 0 {
 		if _, exists := schema["properties"]; exists {
-			return objectType(document, schema, direction)
+			return objectTypeForScope(document, schema, direction, scope)
 		}
 		if _, exists := schema["additionalProperties"]; exists {
-			return objectType(document, schema, direction)
+			return objectTypeForScope(document, schema, direction, scope)
 		}
 		if _, exists := schema["prefixItems"]; exists {
-			return arrayType(document, schema, direction)
+			return arrayType(document, schema, direction, scope)
 		}
 		return "unknown", nil
 	}
-	return scalarOrCompositeType(document, types[0], schema, direction)
+	return scalarOrCompositeType(document, types[0], schema, direction, scope)
 }
 
 func isTypeAffectingSchemaKeyword(key string) bool {
@@ -397,7 +316,7 @@ func isTypeAffectingSchemaKeyword(key string) bool {
 	}
 }
 
-func scalarOrCompositeType(document *ir.Document, kind string, schema map[string]any, direction projection) (string, error) {
+func scalarOrCompositeType(document *ir.Document, kind string, schema map[string]any, direction projection, scope typeRenderScope) (string, error) {
 	switch kind {
 	case "string":
 		return "string", nil
@@ -408,22 +327,22 @@ func scalarOrCompositeType(document *ir.Document, kind string, schema map[string
 	case "null":
 		return "null", nil
 	case "array":
-		return arrayType(document, schema, direction)
+		return arrayType(document, schema, direction, scope)
 	case "object":
-		return objectType(document, schema, direction)
+		return objectTypeForScope(document, schema, direction, scope)
 	default:
 		return "unknown", nil
 	}
 }
 
-func arrayType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+func arrayType(document *ir.Document, schema map[string]any, direction projection, scope typeRenderScope) (string, error) {
 	if prefixItems, ok := schema["prefixItems"].([]any); ok && len(prefixItems) > 0 {
-		parts, err := schemaListTypes(document, prefixItems, direction)
+		parts, err := schemaListTypes(document, prefixItems, direction, scope)
 		if err != nil {
 			return "", err
 		}
 		if items, exists := schema["items"]; exists {
-			itemType, err := schemaType(document, items, direction)
+			itemType, err := schemaTypeForScope(document, items, direction, scope)
 			if err != nil {
 				return "", err
 			}
@@ -439,7 +358,7 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 	if !exists {
 		return "readonly unknown[]", nil
 	}
-	itemType, err := schemaType(document, items, direction)
+	itemType, err := schemaTypeForScope(document, items, direction, scope)
 	if err != nil {
 		return "", err
 	}
@@ -447,10 +366,14 @@ func arrayType(document *ir.Document, schema map[string]any, direction projectio
 }
 
 func objectType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+	return objectTypeForScope(document, schema, direction, typeRenderLocal)
+}
+
+func objectTypeForScope(document *ir.Document, schema map[string]any, direction projection, scope typeRenderScope) (string, error) {
 	properties, _ := schema["properties"].(map[string]any)
 	if len(properties) == 0 {
 		if additional, exists := schema["additionalProperties"]; exists {
-			valueType, err := schemaType(document, additional, direction)
+			valueType, err := schemaTypeForScope(document, additional, direction, scope)
 			if err != nil {
 				return "", err
 			}
@@ -486,7 +409,7 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 		if direction == projectionOutput && boolValue(propertySchema, "writeOnly") {
 			continue
 		}
-		propertyType, err := schemaType(document, propertyValue, direction)
+		propertyType, err := schemaTypeForScope(document, propertyValue, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -509,7 +432,7 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 		fmt.Fprintf(&output, "  readonly %s%s: %s\n", propertyName, optional, propertyType)
 	}
 	output.WriteString("}")
-	additional, err := objectAdditionalType(document, schema, direction)
+	additional, err := objectAdditionalType(document, schema, direction, scope)
 	if err != nil {
 		return "", err
 	}
@@ -523,13 +446,13 @@ func objectType(document *ir.Document, schema map[string]any, direction projecti
 // TypeScript has no regex-key type, so every additional key is represented by
 // the union of the applicable pattern schemas. The exact patterns stay in the
 // generated documentation/contract metadata.
-func objectAdditionalType(document *ir.Document, schema map[string]any, direction projection) (string, error) {
+func objectAdditionalType(document *ir.Document, schema map[string]any, direction projection, scope typeRenderScope) (string, error) {
 	var values []string
 	if additional, exists := schema["additionalProperties"]; exists {
 		if boolean, ok := additional.(bool); ok && !boolean {
 			return "", nil
 		}
-		value, err := schemaType(document, additional, direction)
+		value, err := schemaTypeForScope(document, additional, direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -542,7 +465,7 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 	}
 	sort.Strings(patternNames)
 	for _, pattern := range patternNames {
-		typeValue, err := schemaType(document, patterns[pattern], direction)
+		typeValue, err := schemaTypeForScope(document, patterns[pattern], direction, scope)
 		if err != nil {
 			return "", err
 		}
@@ -551,8 +474,8 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 	return strings.Join(uniqueStrings(values), " | "), nil
 }
 
-func referencedType(document *ir.Document, name string, direction projection) (string, error) {
-	schema, exists := document.ComponentSchemas[name]
+func referencedType(document *ir.Document, name string, direction projection, scope typeRenderScope) (string, error) {
+	_, exists := document.ComponentSchemas[name]
 	if !exists {
 		if compiled, ok := document.Schemas[name]; ok {
 			if boolean, ok := compiled.Value.(bool); ok {
@@ -562,18 +485,9 @@ func referencedType(document *ir.Document, name string, direction projection) (s
 				return "never", nil
 			}
 		}
-		return naming.Public(name)
+		return componentProjectionTypeExpression(name, direction).render(scope), nil
 	}
-	declarations := componentDeclarations(name, schema)
-	selected := declarations[0]
-	if len(declarations) > 1 {
-		if direction == projectionInput {
-			selected = declarations[0]
-		} else {
-			selected = declarations[1]
-		}
-	}
-	return naming.Public(selected.name)
+	return componentProjectionTypeExpression(name, direction).render(scope), nil
 }
 
 func isSuccessResponseStatus(status string) bool {
@@ -581,6 +495,22 @@ func isSuccessResponseStatus(status string) bool {
 }
 
 func operationOutputType(document *ir.Document, operation ir.Operation) (string, error) {
+	return operationOutputTypeForScope(document, operation, typeRenderLocal)
+}
+
+func operationOutputTypeExpression(document *ir.Document, operation ir.Operation) (typeExpression, error) {
+	local, err := operationOutputTypeForScope(document, operation, typeRenderLocal)
+	if err != nil {
+		return typeExpression{}, err
+	}
+	contract, err := operationOutputTypeForScope(document, operation, typeRenderContract)
+	if err != nil {
+		return typeExpression{}, err
+	}
+	return scopedTypeExpression(local, contract), nil
+}
+
+func operationOutputTypeForScope(document *ir.Document, operation ir.Operation, scope typeRenderScope) (string, error) {
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
@@ -632,7 +562,7 @@ func operationOutputType(document *ir.Document, operation ir.Operation) (string,
 					schema = dataSchema
 				}
 			}
-			valueType, err := schemaType(document, schema, projectionOutput)
+			valueType, err := schemaTypeForScope(document, schema, projectionOutput, scope)
 			if err != nil {
 				return "", err
 			}
@@ -646,6 +576,10 @@ func operationOutputType(document *ir.Document, operation ir.Operation) (string,
 }
 
 func operationRawResponseType(document *ir.Document, operation ir.Operation) (string, error) {
+	return operationRawResponseTypeForScope(document, operation, typeRenderLocal)
+}
+
+func operationRawResponseTypeForScope(document *ir.Document, operation ir.Operation, scope typeRenderScope) (string, error) {
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
@@ -666,7 +600,7 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 			statusType = status
 		}
 		content, _ := response["content"].(map[string]any)
-		headerType, err := responseHeaderType(document, response)
+		headerType, err := responseHeaderType(document, response, scope)
 		if err != nil {
 			return "", err
 		}
@@ -699,7 +633,7 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 							schema = dataSchema
 						}
 					}
-					valueType, err = schemaType(document, schema, projectionOutput)
+					valueType, err = schemaTypeForScope(document, schema, projectionOutput, scope)
 					if err != nil {
 						return "", err
 					}
@@ -714,7 +648,7 @@ func operationRawResponseType(document *ir.Document, operation ir.Operation) (st
 	return strings.Join(uniqueStrings(result), " | "), nil
 }
 
-func responseHeaderType(document *ir.Document, response map[string]any) (string, error) {
+func responseHeaderType(document *ir.Document, response map[string]any, scope typeRenderScope) (string, error) {
 	headers, _ := response["headers"].(map[string]any)
 	if len(headers) == 0 {
 		return "Readonly<Record<string, never>>", nil
@@ -731,7 +665,7 @@ func responseHeaderType(document *ir.Document, response map[string]any) (string,
 		if err != nil {
 			return "", err
 		}
-		valueType, err := schemaType(document, schema, projectionOutput)
+		valueType, err := schemaTypeForScope(document, schema, projectionOutput, scope)
 		if err != nil {
 			return "", err
 		}
@@ -766,6 +700,10 @@ func responseHeaderSchema(document *ir.Document, header map[string]any) (any, st
 }
 
 func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (map[string]string, error) {
+	return operationMediaOutputTypesForScope(document, operation, typeRenderLocal)
+}
+
+func operationMediaOutputTypesForScope(document *ir.Document, operation ir.Operation, scope typeRenderScope) (map[string]string, error) {
 	responses, _ := operation.Raw["responses"].(map[string]any)
 	statusCodes := make([]string, 0, len(responses))
 	for status := range responses {
@@ -802,7 +740,7 @@ func operationMediaOutputTypes(document *ir.Document, operation ir.Operation) (m
 							schema = dataSchema
 						}
 					}
-					valueType, err = schemaType(document, schema, projectionOutput)
+					valueType, err = schemaTypeForScope(document, schema, projectionOutput, scope)
 					if err != nil {
 						return nil, err
 					}
@@ -894,6 +832,10 @@ func operationSuccessSchema(document *ir.Document, operation ir.Operation) (map[
 }
 
 func operationItemType(document *ir.Document, operation ir.Operation) (string, error) {
+	return operationItemTypeForScope(document, operation, typeRenderLocal)
+}
+
+func operationItemTypeForScope(document *ir.Document, operation ir.Operation, scope typeRenderScope) (string, error) {
 	schema, found, err := operationSuccessSchema(document, operation)
 	if err != nil {
 		return "", err
@@ -905,7 +847,7 @@ func operationItemType(document *ir.Document, operation ir.Operation) (string, e
 	if len(items) == 0 {
 		return "unknown", nil
 	}
-	return schemaType(document, items, projectionOutput)
+	return schemaTypeForScope(document, items, projectionOutput, scope)
 }
 
 func findItemsSchema(document *ir.Document, schema map[string]any, seen map[string]bool) map[string]any {
@@ -968,22 +910,6 @@ func operationInputTypes(document *ir.Document, operation ir.Operation) ([]strin
 	return result, nil
 }
 
-func isStructuralSchema(schema map[string]any) bool {
-	for _, value := range schemaTypes(schema["type"]) {
-		if value == "object" || value == "array" {
-			return true
-		}
-	}
-	_, hasProperties := schema["properties"]
-	_, hasOneOf := schema["oneOf"]
-	_, hasAllOf := schema["allOf"]
-	return hasProperties || hasOneOf || hasAllOf
-}
-
-func isDirectionNeutral(name string) bool {
-	return strings.HasSuffix(name, "Error") || strings.HasSuffix(name, "Code") || name == "Pagination"
-}
-
 func schemaTypes(value any) []string {
 	switch typed := value.(type) {
 	case string:
@@ -1021,35 +947,19 @@ func schemaEnum(schema map[string]any) []string {
 	return result
 }
 
-func stringEnum(schema map[string]any) ([]string, bool) {
-	values, exists := schema["enum"].([]any)
-	if !exists || len(values) == 0 {
-		return nil, false
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		text, ok := value.(string)
-		if !ok {
-			return nil, false
-		}
-		result = append(result, text)
-	}
-	return result, true
-}
-
-func unionType(document *ir.Document, variants []any, direction projection) (string, error) {
-	parts, err := schemaListTypes(document, variants, direction)
+func unionType(document *ir.Document, variants []any, direction projection, scope typeRenderScope) (string, error) {
+	parts, err := schemaListTypes(document, variants, direction, scope)
 	if err != nil {
 		return "", err
 	}
 	return strings.Join(uniqueStrings(parts), " | "), nil
 }
 
-func schemaListTypes(document *ir.Document, variants []any, direction projection) ([]string, error) {
+func schemaListTypes(document *ir.Document, variants []any, direction projection, scope typeRenderScope) ([]string, error) {
 	parts := make([]string, 0, len(variants))
 	for _, variant := range variants {
 		schema, _ := variant.(map[string]any)
-		part, err := schemaType(document, schema, direction)
+		part, err := schemaTypeForScope(document, schema, direction, scope)
 		if err != nil {
 			return nil, err
 		}

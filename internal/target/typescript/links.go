@@ -339,18 +339,18 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		if err != nil {
 			return "", err
 		}
-		output, err := operationOutputType(document, link.TargetOperation)
+		output, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
 		if err != nil {
 			return "", err
 		}
 		targetInputs[input] = true
 		targetOptions[operationTypeName(link.TargetOperation.OperationID)+"Options"] = true
-		targetOutputs[qualifyClientType(document, output)] = true
+		targetOutputs[output] = true
 		statusProperty, err := linkStatusProperty(link.Status)
 		if err != nil {
 			return "", err
 		}
-		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationTypeName(group.SourceOperation.OperationID)+"RawResponse | APIError, invocation?: LinkInvocation<"+input+", "+operationTypeName(link.TargetOperation.OperationID)+"Options, "+sourceInput+">) => Promise<"+qualifyClientType(document, output)+">")
+		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationTypeName(group.SourceOperation.OperationID)+"RawResponse | APIError, invocation?: LinkInvocation<"+input+", "+operationTypeName(link.TargetOperation.OperationID)+"Options, "+sourceInput+">) => Promise<"+output+">")
 	}
 	return "{ (response: " + operationTypeName(group.SourceOperation.OperationID) + "RawResponse | APIError, invocation?: LinkInvocation<" + sortedStringSet(targetInputs) + ", " + sortedStringSet(targetOptions) + ", " + sourceInput + ">): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
 }
@@ -419,11 +419,10 @@ func emitLinkValues(output *bytes.Buffer, document *ir.Document, links []generat
 		if len(sourceInputs) != 0 {
 			sourceInput = sourceName + "Input"
 		}
-		targetOutput, err := operationOutputType(document, link.TargetOperation)
+		targetOutput, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
 		if err != nil {
 			return err
 		}
-		targetOutput = qualifyClientType(document, targetOutput)
 		options := "invocation.options"
 		if link.ServerURL != "" {
 			options = "{ ...(invocation.options ?? {}), baseURL: new URL(" + quoteTS(link.ServerURL) + ", response.response.url).href }"
@@ -465,13 +464,13 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		if err != nil {
 			return err
 		}
-		output, err := operationOutputType(document, link.TargetOperation)
+		output, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
 		if err != nil {
 			return err
 		}
 		targetInputs[input] = true
 		targetOptions[operationTypeName(link.TargetOperation.OperationID)+"Options"] = true
-		targetOutputs[qualifyClientType(document, output)] = true
+		targetOutputs[output] = true
 	}
 	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %sRawResponse | APIError, invocation: LinkInvocation<%s, %s, %s> = {}): Promise<%s> => {\n", variable, contract, operationTypeName(group.SourceOperation.OperationID), sortedStringSet(targetInputs), sortedStringSet(targetOptions), sourceInput, sortedStringSet(targetOutputs))
 	for _, link := range group.Links {

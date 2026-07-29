@@ -63,22 +63,26 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 
 	typesSource := string(artifacts["generated/types.ts"])
 	for _, expected := range []string{
-		"export type ProductInput =",
-		"export type ProductOutput =",
+		`readonly "Product": {`,
+		"readonly input:",
+		"readonly output:",
 		"readonly note?: string | undefined",
-		`export type MixedLiteral = "ready" | 2 | null`,
-		"export type CoordinateInput = readonly [number, number, ...unknown[]]",
-		"export type CoordinateOutput = readonly [number, number, ...unknown[]]",
+		`readonly input: "ready" | 2 | null`,
+		"readonly input: readonly [number, number, ...unknown[]]",
+		"readonly output: readonly [number, number, ...unknown[]]",
+		`export type ComponentInput<Name extends keyof Components> = Components[Name]["input"]`,
+		`export type ComponentOutput<Name extends keyof Components> = Components[Name]["output"]`,
 	} {
 		if !strings.Contains(typesSource, expected) {
 			t.Errorf("types missing %q\n%s", expected, typesSource)
 		}
 	}
-	productInputStart := strings.Index(typesSource, "export type ProductInput =")
-	productOutputStart := strings.Index(typesSource, "export type ProductOutput =")
-	pageStart := strings.Index(typesSource, "export type ProductPageInput =")
-	productInput := typesSource[productInputStart:productOutputStart]
-	productOutput := typesSource[productOutputStart:pageStart]
+	productStart := strings.Index(typesSource, `readonly "Product": {`)
+	pageStart := strings.Index(typesSource, `readonly "ProductPage": {`)
+	product := typesSource[productStart:pageStart]
+	productOutputStart := strings.Index(product, "/** Response/output projection. */")
+	productInput := product[:productOutputStart]
+	productOutput := product[productOutputStart:]
 	if strings.Contains(productInput, "readonly id:") || !strings.Contains(productInput, "readonly secret:") {
 		t.Fatalf("input readOnly/writeOnly projection is wrong:\n%s", productInput)
 	}
@@ -96,8 +100,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Format: `opaque-id`.",
 		"@default \"legacy\"",
 		"@deprecated This OpenAPI value is deprecated.",
-		"Map of every public OpenAPI component name",
-		"readonly id: Identifier",
+		"Type catalog keyed by exact OpenAPI component schema names",
+		`readonly id: ComponentOutput<"Identifier">`,
 	} {
 		if !strings.Contains(typesSource, expected) {
 			t.Fatalf("type JSDoc missing %q:\n%s", expected, typesSource)
@@ -155,7 +159,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Output of `createProduct` (`POST /products`).",
-		"Schema: {@link Contract.ProductOutput}.",
+		`Type: ` + "`Contract.ComponentOutput<\"Product\">`.",
 		"Operation ID: `createProduct`.",
 		"HTTP: `POST /products`.",
 		"* ```ts\n * await api.products.create({ body }, { idempotencyKey })\n * ```",
@@ -184,7 +188,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "POST /products") {
 		t.Fatalf("operation JSDoc missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, "AsyncIterable<Contract.ProductOutput>") || !strings.Contains(clientSource, `createPaginator<Contract.ProductOutput`) {
+	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<Contract.ComponentOutput<"Product">`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
 	if !strings.Contains(clientSource, `export type CreateProductOptions = Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch"> & {`) || !strings.Contains(clientSource, "Required idempotency key") || !strings.Contains(clientSource, "readonly idempotencyKey: string") {
@@ -220,7 +224,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if len(manifest.Operations) != 4 || manifest.Operations[0].OperationID != "hiddenAudit" || manifest.Operations[1].OperationID != "listProducts" || manifest.Operations[2].OperationID != "createProduct" || manifest.Operations[3].OperationID != "getProduct" {
 		t.Fatalf("manifest operations = %#v", manifest.Operations)
 	}
-	if manifest.Operations[2].CallExpression != "api.products.create({ body }, { idempotencyKey })" || manifest.Operations[2].OutputType != "ProductOutput" {
+	if manifest.Operations[2].CallExpression != "api.products.create({ body }, { idempotencyKey })" || manifest.Operations[2].OutputType != `ComponentOutput<"Product">` {
 		t.Fatalf("create manifest = %#v", manifest.Operations[2])
 	}
 	if manifest.Operations[2].Description != "Creates one catalog product from the supplied body." {
@@ -320,7 +324,7 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
 	for _, expected := range []string{
 		"export interface OrderCreatedWebhookContext extends InboundRequestContext",
-		"readonly body: Contract.OrderInput",
+		`readonly body: Contract.ComponentInput<"Order">`,
 		"export interface WebhookHandlers",
 		"orderCreated?: (context: OrderCreatedWebhookContext)",
 		"export type WebhookRoutes = Readonly<Partial<Record<keyof WebhookHandlers, string>>>",
@@ -339,7 +343,7 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 			t.Fatalf("server runtime missing %q:\n%s", expected, runtime)
 		}
 	}
-	if !strings.Contains(string(artifactByPath(t, artifacts, "generated/types.ts")), "export type OrderInput") {
+	if !strings.Contains(string(artifactByPath(t, artifacts, "generated/types.ts")), `readonly "Order": {`) {
 		t.Fatal("webhook body component was not emitted into shared generated types")
 	}
 }

@@ -22,7 +22,7 @@ func TestSchemaTypeMapsCompositeOpenAPISchemas(t *testing.T) {
 		{name: "tuple", schema: map[string]any{"type": "array", "prefixItems": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer"}}, "items": map[string]any{"type": "boolean"}}, want: "readonly [string, number, ...(boolean)[]]"},
 		{name: "union", schema: map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer"}, map[string]any{"type": "string"}}}, want: "string | number"},
 		{name: "intersection", schema: map[string]any{"allOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}}}, want: "string & null"},
-		{name: "reference sibling", schema: map[string]any{"$ref": "#/components/schemas/Widget", "type": "object", "additionalProperties": map[string]any{"type": "string"}}, want: "(WidgetInput) & (Readonly<Record<string, string>>)"},
+		{name: "reference sibling", schema: map[string]any{"$ref": "#/components/schemas/Widget", "type": "object", "additionalProperties": map[string]any{"type": "string"}}, want: `(ComponentInput<"Widget">) & (Readonly<Record<string, string>>)`},
 		{name: "pattern properties", schema: map[string]any{"type": "object", "properties": map[string]any{"fixed": map[string]any{"type": "string"}}, "patternProperties": map[string]any{"^x-": map[string]any{"type": "integer"}}}, want: "({\n  /**\n   * OpenAPI property `fixed`.\n   */\n  readonly fixed?: string | undefined\n}) & (Readonly<Record<string, number>>)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestSourceArtifactsGenerateRecursiveComponentSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, "readonly next?: Node") {
+	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, `readonly next?: ComponentInput<"Node">`) || !strings.Contains(source, `readonly next?: ComponentOutput<"Node">`) {
 		t.Fatalf("recursive schema missing from generated types:\n%s", source)
 	}
 }

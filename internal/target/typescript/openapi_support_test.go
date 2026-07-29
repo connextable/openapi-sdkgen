@@ -438,9 +438,9 @@ func TestSourceArtifactsGenerateAcrossSupportedOpenAPIVersionLines(t *testing.T)
 		schema  string
 		want    string
 	}{
-		{"3.0.3", `{"type":"string","nullable":true}`, "export type Item = string | null"},
-		{"3.1.1", `{"type":["string","null"]}`, "export type Item = string | null"},
-		{"3.2.0", `{"const":"stable"}`, `export type Item = "stable"`},
+		{"3.0.3", `{"type":"string","nullable":true}`, "readonly input: string | null"},
+		{"3.1.1", `{"type":["string","null"]}`, "readonly input: string | null"},
+		{"3.2.0", `{"const":"stable"}`, `readonly input: "stable"`},
 	} {
 		t.Run(test.version, func(t *testing.T) {
 			input := fmt.Sprintf(`{
@@ -477,7 +477,7 @@ func TestSourceArtifactsDoesNotApplyOpenAPI30NullableToOpenAPI31Schemas(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, "export type Item = string") || strings.Contains(source, "export type Item = string | null") {
+	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, "readonly input: string") || strings.Contains(source, "readonly input: string | null") {
 		t.Fatalf("unexpected nullable 3.1 lowering:\n%s", source)
 	}
 }

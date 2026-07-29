@@ -19,7 +19,7 @@ func TestSourceArtifactsRejectsCollidingOperationSymbols(t *testing.T) {
 	}
 }
 
-func TestValidateComponentSymbolsRejectsNormalizedAndGeneratedNameCollisions(t *testing.T) {
+func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *testing.T) {
 	for name, schema := range map[string]map[string]map[string]any{
 		"normalized": {
 			"foo-bar": map[string]any{"type": "string"},
@@ -32,8 +32,17 @@ func TestValidateComponentSymbolsRejectsNormalizedAndGeneratedNameCollisions(t *
 	} {
 		t.Run(name, func(t *testing.T) {
 			document := &ir.Document{ComponentSchemas: schema}
-			if err := validateComponentSymbols(document, []string{"Product", "ProductInput", "foo-bar", "foo_bar"}); err == nil || !strings.Contains(err.Error(), "generates TypeScript symbol") {
-				t.Fatalf("error = %v", err)
+			source, err := emitTypes(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for component := range schema {
+				if !strings.Contains(string(source), "readonly "+quoteTS(component)+": {") {
+					t.Fatalf("component %q missing from exact-key catalog:\n%s", component, source)
+				}
+			}
+			if strings.Contains(string(source), "export type ProductInput =") || strings.Contains(string(source), "export type FooBar =") {
+				t.Fatalf("flat normalized component alias leaked:\n%s", source)
 			}
 		})
 	}
@@ -88,8 +97,8 @@ func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 	}
 }
 
-func TestEmitTypesRejectsCollidingEnumValueAliases(t *testing.T) {
-	_, err := emitTypes(&ir.Document{
+func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
+	source, err := emitTypes(&ir.Document{
 		ComponentSchemas: map[string]map[string]any{
 			"Status": {"type": "string", "enum": []any{"foo-bar", "foo_bar"}},
 		},
@@ -105,8 +114,11 @@ func TestEmitTypesRejectsCollidingEnumValueAliases(t *testing.T) {
 			},
 		}}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "both generate TypeScript key") {
-		t.Fatalf("error = %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `"foo-bar" | "foo_bar"`) {
+		t.Fatalf("enum values missing:\n%s", source)
 	}
 }
 
@@ -159,7 +171,7 @@ func TestValidateSourceExportSymbolsRejectsCrossModuleCollision(t *testing.T) {
 	}
 }
 
-func TestSourceArtifactsRejectsComponentAndOperationExportCollision(t *testing.T) {
+func TestSourceArtifactsSeparatesComponentAndOperationNamespaces(t *testing.T) {
 	document := &ir.Document{
 		ContractVersion: "1.0.0",
 		ComponentSchemas: map[string]map[string]any{
@@ -182,9 +194,14 @@ func TestSourceArtifactsRejectsComponentAndOperationExportCollision(t *testing.T
 			},
 		}},
 	}
-	_, err := SourceArtifacts(document)
-	if err == nil || !strings.Contains(err.Error(), "generated source export") {
-		t.Fatalf("error = %v", err)
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := string(artifactByPath(t, artifacts, "generated/types.ts"))
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	if !strings.Contains(types, `readonly "APIError": {`) || !strings.Contains(client, `Contract.ComponentOutput<"APIError">`) {
+		t.Fatalf("component namespace was not preserved:\n%s\n%s", types, client)
 	}
 }
 

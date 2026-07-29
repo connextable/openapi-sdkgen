@@ -210,19 +210,17 @@ func inboundResponseDefinition(document *ir.Document, operation map[string]any, 
 			schema, _ := media["schema"].(map[string]any)
 			bodyType := "ArrayBuffer | Blob | ArrayBufferView"
 			if isJSONMediaType(mediaType) || strings.Contains(strings.ToLower(mediaType), "xml") {
-				bodyType, err = schemaType(document, schema, projectionOutput)
+				bodyType, err = schemaTypeForScope(document, schema, projectionOutput, typeRenderContract)
 				if err != nil {
 					return "", "", fmt.Errorf("%s/responses/%s/content/%s/schema: %w", path, status, mediaType, err)
 				}
-				bodyType = qualifyClientType(document, bodyType)
 			} else if isTextMedia(mediaType) {
 				bodyType = "string"
 			} else if !isBinaryMedia(mediaType, schema) {
-				bodyType, err = schemaType(document, schema, projectionOutput)
+				bodyType, err = schemaTypeForScope(document, schema, projectionOutput, typeRenderContract)
 				if err != nil {
 					return "", "", fmt.Errorf("%s/responses/%s/content/%s/schema: %w", path, status, mediaType, err)
 				}
-				bodyType = qualifyClientType(document, bodyType)
 			}
 			contentType := ""
 			if len(mediaTypes) > 1 || !isJSONMediaType(mediaType) || !strings.EqualFold(mediaType, "application/json") {
@@ -266,7 +264,7 @@ func inboundResponseHeaderValuesType(document *ir.Document, response map[string]
 		if err != nil {
 			return "", err
 		}
-		valueType, err := schemaType(document, schema, projectionOutput)
+		valueType, err := schemaTypeForScope(document, schema, projectionOutput, typeRenderContract)
 		if err != nil {
 			return "", err
 		}
@@ -278,7 +276,7 @@ func inboundResponseHeaderValuesType(document *ir.Document, response map[string]
 		if boolValue(resolved, "required") {
 			optional = ""
 		}
-		fields = append(fields, "readonly "+property+optional+": "+qualifyClientType(document, valueType))
+		fields = append(fields, "readonly "+property+optional+": "+valueType)
 	}
 	return "Readonly<{ " + strings.Join(fields, "; ") + " }>", nil
 }
@@ -504,7 +502,7 @@ func inboundBodyPlan(document *ir.Document, mediaType string, media map[string]a
 			return "", "", fmt.Errorf("%s/requestBody/content/%s: sequential stream requires itemSchema", path, mediaType)
 		}
 		var err error
-		value, err = schemaType(document, itemSchema, projectionInput)
+		value, err = schemaTypeForScope(document, itemSchema, projectionInput, typeRenderContract)
 		if err != nil {
 			return "", "", fmt.Errorf("%s/requestBody/content/%s/itemSchema: %w", path, mediaType, err)
 		}
@@ -515,7 +513,7 @@ func inboundBodyPlan(document *ir.Document, mediaType string, media map[string]a
 		}
 	} else if !isBinaryMedia(mediaType, schema) {
 		var err error
-		value, err = schemaType(document, schemaValue, projectionInput)
+		value, err = schemaTypeForScope(document, schemaValue, projectionInput, typeRenderContract)
 		if err != nil {
 			return "", "", fmt.Errorf("%s/requestBody/content/%s/schema: %w", path, mediaType, err)
 		}
@@ -533,9 +531,7 @@ func inboundBodyPlan(document *ir.Document, mediaType string, media map[string]a
 		itemContentType, _ = itemEncoding["contentType"].(string)
 	}
 	if stream {
-		value = "AsyncIterable<" + qualifyClientType(document, value) + ">"
-	} else {
-		value = qualifyClientType(document, value)
+		value = "AsyncIterable<" + value + ">"
 	}
 	plan := "{ contentType: " + quoteTS(mediaType) + ", binary: " + fmt.Sprint(isBinaryMedia(mediaType, schema)) + ", stream: " + fmt.Sprint(stream) + ", itemContentType: " + quoteTS(itemContentType) + ", schema: " + string(schemaSource) + ", wireSchema: " + wireSchema + " }"
 	encodings, err := requestBodyWireEncodings(document, media)

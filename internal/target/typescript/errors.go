@@ -149,11 +149,11 @@ func errorContracts(document *ir.Document) ([]errorContract, map[string][]errorC
 		}
 		detailsType := "unknown"
 		if len(detailsSchema) > 0 {
-			value, err := schemaType(document, detailsSchema, projectionOutput)
+			value, err := schemaTypeForScope(document, detailsSchema, projectionOutput, typeRenderContract)
 			if err != nil {
 				return nil, nil, fmt.Errorf("error %s details: %w", schemaName, err)
 			}
-			detailsType = qualifyClientType(document, value)
+			detailsType = value
 		}
 		category, _ := schema["x-error-category"].(string)
 		description, _ := schema["description"].(string)
