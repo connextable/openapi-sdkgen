@@ -160,7 +160,7 @@ func TestGenerateDoesNotPublishOutputWhenInputIsMalformed(t *testing.T) {
 	standardInput = strings.NewReader("not: [valid")
 	t.Cleanup(func() { standardInput = previous })
 	err := run([]string{"generate", "--input", "-", "--target", "typescript", "--output", output})
-	if err == nil || !strings.Contains(err.Error(), "compile") {
+	if err == nil || !strings.Contains(err.Error(), "SDKGEN-E110") {
 		t.Fatalf("generate error = %v", err)
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
@@ -361,7 +361,7 @@ func TestRunRejectsInvalidArgumentsWithoutCreatingOutput(t *testing.T) {
 		{name: "unknown command", args: []string{"publish"}, want: "unknown command"},
 		{name: "missing flags", args: []string{"generate"}, want: "required"},
 		{name: "unexpected positional", args: []string{"generate", "extra"}, want: "unexpected arguments"},
-		{name: "missing input", args: []string{"generate", "--input", filepath.Join(directory, "missing.json"), "--target", "typescript", "--output", output}, want: "compile"},
+		{name: "missing input", args: []string{"generate", "--input", filepath.Join(directory, "missing.json"), "--target", "typescript", "--output", output}, want: "SDKGEN-E100"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := run(test.args)

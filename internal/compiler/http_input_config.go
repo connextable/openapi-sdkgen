@@ -8,11 +8,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 var (
@@ -27,7 +28,7 @@ type httpInputConfig struct {
 	tlsConfig         *tls.Config
 	protected         bool
 	privateTLS        bool
-	warningWriter     io.Writer
+	diagnostics       *diagnostic.Collector
 	hasHeaderMappings bool
 }
 
@@ -66,7 +67,7 @@ func configureHTTPInput(options CompileOptions) (*httpInputConfig, error) {
 		tlsConfig:         tlsConfig,
 		protected:         len(headers) != 0 || tlsConfig != nil,
 		privateTLS:        tlsConfig != nil,
-		warningWriter:     options.HTTPWarningWriter,
+		diagnostics:       options.diagnostics,
 		hasHeaderMappings: len(options.HTTPHeaderEnv) != 0,
 	}, nil
 }

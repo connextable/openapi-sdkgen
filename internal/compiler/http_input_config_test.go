@@ -19,6 +19,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 func TestHTTPHeaderEnvValidation(t *testing.T) {
@@ -192,40 +194,42 @@ func TestHTTPInputHeaderWarningIsSecretFreeAndOptional(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var warnings bytes.Buffer
+	collector := &diagnostic.Collector{}
 	if _, err := loadInputSource(server.URL, CompileOptions{
-		HTTPHeaderEnv:     []string{"Authorization=SDKGEN_HTTP_TOKEN"},
-		HTTPWarningWriter: &warnings,
+		HTTPHeaderEnv: []string{"Authorization=SDKGEN_HTTP_TOKEN"},
+		diagnostics:   collector,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if count := strings.Count(warnings.String(), "warning:"); count != 1 {
-		t.Fatalf("warning count = %d: %q", count, warnings.String())
+	values := collector.Diagnostics()
+	if len(values) != 1 || values[0].Code != "SDKGEN-W101" {
+		t.Fatalf("warnings = %#v", values)
 	}
-	if strings.Contains(warnings.String(), secret) {
-		t.Fatalf("warning leaked secret: %q", warnings.String())
+	if strings.Contains(diagnostic.RenderHuman(values, nil), secret) {
+		t.Fatalf("warning leaked secret: %#v", values)
 	}
 	if _, err := loadInputSource(server.URL, CompileOptions{HTTPHeaderEnv: []string{"Authorization=SDKGEN_HTTP_TOKEN"}}); err != nil {
-		t.Fatalf("nil warning writer failed: %v", err)
+		t.Fatalf("nil diagnostic collector failed: %v", err)
 	}
 }
 
-func TestHTTPInputHeaderWarningFailurePreventsRequest(t *testing.T) {
+func TestDeprecatedHTTPWarningWriterIsNotUsed(t *testing.T) {
 	t.Setenv("SDKGEN_HTTP_TOKEN", "credential-sentinel")
 	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		called = true
+		_, _ = response.Write([]byte("openapi: 3.2.0\ninfo: {title: Example, version: '1'}\npaths: {}\n"))
 	}))
 	defer server.Close()
 	_, err := loadInputSource(server.URL, CompileOptions{
 		HTTPHeaderEnv:     []string{"Authorization=SDKGEN_HTTP_TOKEN"},
 		HTTPWarningWriter: failingWriter{},
 	})
-	if err == nil || !strings.Contains(err.Error(), "write HTTP input security warning") {
-		t.Fatalf("warning write error = %v", err)
+	if err != nil {
+		t.Fatalf("input error = %v", err)
 	}
-	if called {
-		t.Fatal("request proceeded after warning write failure")
+	if !called {
+		t.Fatal("request did not proceed")
 	}
 }
 

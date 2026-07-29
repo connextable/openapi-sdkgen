@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 const (
@@ -196,10 +198,15 @@ func validateHTTPInputTransport(display string, value *url.URL, config *httpInpu
 	if !strings.EqualFold(value.Scheme, "https") && config.privateTLS {
 		return errors.New("--tls-client-cert, --tls-client-key, and --tls-ca-file require an HTTPS OpenAPI input")
 	}
-	if strings.EqualFold(value.Scheme, "http") && config.hasHeaderMappings && config.warningWriter != nil {
-		if _, err := fmt.Fprintln(config.warningWriter, "warning: --http-header-env sends credentials over HTTP; use HTTPS to protect request headers"); err != nil {
-			return fmt.Errorf("write HTTP input security warning for %s: %w", display, err)
-		}
+	if strings.EqualFold(value.Scheme, "http") && config.hasHeaderMappings && config.diagnostics != nil {
+		config.diagnostics.Add(diagnostic.Diagnostic{
+			Severity: diagnostic.SeverityWarning,
+			Code:     "SDKGEN-W101",
+			Phase:    diagnostic.PhaseInput,
+			Location: diagnostic.Location{Source: sanitizedHTTPDocumentURL(value), Pointer: "#"},
+			Message:  "--http-header-env sends request headers over unencrypted HTTP",
+			Hint:     "Use HTTPS to protect request headers.",
+		})
 	}
 	return nil
 }

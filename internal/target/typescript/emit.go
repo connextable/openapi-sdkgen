@@ -8,6 +8,7 @@ import (
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 )
 
@@ -28,9 +29,53 @@ func (Generator) SupportsAddon(addon generator.Addon) bool {
 	return addon == generator.AddonServer
 }
 
-// Generate emits source files relative to the selected output directory.
-func (Generator) Generate(document *ir.Document, options generator.Options) ([]generator.Artifact, error) {
-	return sourceArtifacts(document, options.HasAddon(generator.AddonServer))
+type sourcePlan struct {
+	document      *ir.Document
+	includeServer bool
+}
+
+// Prepare validates author input for the TypeScript target.
+func (Generator) Prepare(document *ir.Document, options generator.Options) (generator.Plan, []diagnostic.Diagnostic, error) {
+	if document == nil {
+		return generator.Plan{}, nil, fmt.Errorf("internal TypeScript target: IR document is nil")
+	}
+	plan, err := prepareSourcePlan(document, options.HasAddon(generator.AddonServer))
+	if err != nil {
+		return generator.Plan{}, []diagnostic.Diagnostic{{
+			Severity: diagnostic.SeverityError,
+			Code:     "SDKGEN-E500",
+			Phase:    diagnostic.PhaseTarget,
+			Target:   "typescript",
+			Message:  "The OpenAPI contract cannot be represented by the TypeScript target.",
+			Cause:    err.Error(),
+		}}, nil
+	}
+	return generator.NewPlan("typescript", plan), nil, nil
+}
+
+// Emit emits a previously validated TypeScript plan.
+func (Generator) Emit(plan generator.Plan) ([]generator.Artifact, error) {
+	value, err := plan.Value("typescript")
+	if err != nil {
+		return nil, fmt.Errorf("internal TypeScript target: %w", err)
+	}
+	prepared, ok := value.(*sourcePlan)
+	if !ok {
+		return nil, fmt.Errorf("internal TypeScript target: unexpected plan type %T", value)
+	}
+	return emitSourcePlan(prepared)
+}
+
+// Generate is the compatibility convenience for direct target callers.
+func (target Generator) Generate(document *ir.Document, options generator.Options) ([]generator.Artifact, error) {
+	plan, diagnostics, err := target.Prepare(document, options)
+	if err != nil {
+		return nil, err
+	}
+	if diagnostic.HasErrors(diagnostics) {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(diagnostic.RenderHuman(diagnostics, nil)))
+	}
+	return target.Emit(plan)
 }
 
 type Manifest struct {
@@ -83,6 +128,14 @@ func SourceArtifacts(document *ir.Document) ([]Artifact, error) {
 }
 
 func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, error) {
+	plan, err := prepareSourcePlan(document, includeServer)
+	if err != nil {
+		return nil, err
+	}
+	return emitSourcePlan(plan)
+}
+
+func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, error) {
 	if document == nil {
 		return nil, fmt.Errorf("IR document is nil")
 	}
@@ -100,6 +153,12 @@ func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, err
 	if err := validateOperationIdentities(document); err != nil {
 		return nil, err
 	}
+	return &sourcePlan{document: document, includeServer: includeServer}, nil
+}
+
+func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
+	document := plan.document
+	includeServer := plan.includeServer
 	manifest, err := buildManifest(document)
 	if err != nil {
 		return nil, err

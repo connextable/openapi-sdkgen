@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 	"github.com/connextable/openapi-sdkgen/internal/generator"
 	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
 )
@@ -89,7 +90,7 @@ func generate(args []string) error {
 	if err := generator.ValidateTargetOptions(target, options); err != nil {
 		return err
 	}
-	document, err := compiler.CompileInputWithOptions(*input, compiler.CompileOptions{
+	compiled, err := compiler.CompileInputResultWithOptions(*input, compiler.CompileOptions{
 		InputBase:                *inputBase,
 		InputReader:              standardInput,
 		RemoteRefAllowlist:       remoteRefs,
@@ -101,14 +102,20 @@ func generate(args []string) error {
 		TLSClientCert:            *tlsClientCert,
 		TLSClientKey:             *tlsClientKey,
 		TLSCAFile:                *tlsCAFile,
-		HTTPWarningWriter:        standardError,
 	})
 	if err != nil {
-		return fmt.Errorf("compile %s: %w", *input, err)
+		return fmt.Errorf("internal compiler failure for %s: %w", *input, err)
 	}
-	artifacts, err := target.Generate(document, options)
+	prepared, err := generator.PrepareCompilation(target, compiled, options)
 	if err != nil {
-		return fmt.Errorf("generate %s SDK: %w", target.Name(), err)
+		return fmt.Errorf("internal %s preparation failure: %w", target.Name(), err)
+	}
+	if diagnostic.HasErrors(prepared.Diagnostics) {
+		return errors.New(strings.TrimSpace(diagnostic.RenderHuman(prepared.Diagnostics, prepared.SkippedPhases)))
+	}
+	artifacts, err := target.Emit(prepared.Plan)
+	if err != nil {
+		return fmt.Errorf("internal %s emission failure: %w", target.Name(), err)
 	}
 	if err := writeArtifacts(*output, artifacts); err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 // Artifact is one file emitted by a target, relative to the requested output directory.
@@ -108,10 +109,33 @@ func ValidateTargetOptions(target Target, options Options) error {
 	return nil
 }
 
-// Target emits client source files from the language-neutral OpenAPI IR.
+// Plan is an opaque validated target plan. Its fields are deliberately private
+// so the orchestrator can pass it from Prepare to Emit without mutation.
+type Plan struct {
+	target string
+	value  any
+}
+
+// NewPlan constructs an opaque target plan.
+func NewPlan(target string, value any) Plan {
+	return Plan{target: target, value: value}
+}
+
+// Value returns the target-owned plan value after verifying its owner.
+func (plan Plan) Value(target string) (any, error) {
+	if plan.target != target || plan.value == nil {
+		return nil, fmt.Errorf("generation plan belongs to %q, not %q", plan.target, target)
+	}
+	return plan.value, nil
+}
+
+// Target prepares and emits client source files from language-neutral IR.
+// Expected author problems are diagnostics; errors are reserved for unexpected
+// target failures.
 type Target interface {
 	Name() string
-	Generate(*ir.Document, Options) ([]Artifact, error)
+	Prepare(*ir.Document, Options) (Plan, []diagnostic.Diagnostic, error)
+	Emit(Plan) ([]Artifact, error)
 }
 
 // Registry holds the built-in SDK targets available to the CLI.

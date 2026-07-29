@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 const (
@@ -65,9 +67,11 @@ type CompileOptions struct {
 	// TLSCAFile contains additional PEM certificate authorities trusted for an
 	// HTTPS input or stdin with an HTTPS InputBase.
 	TLSCAFile string
-	// HTTPWarningWriter receives non-secret diagnostics about HTTP input
-	// transport risks. A nil writer disables diagnostics for library callers.
+	// HTTPWarningWriter is retained for source compatibility. Structured
+	// compiler result diagnostics are authoritative.
 	HTTPWarningWriter io.Writer
+
+	diagnostics *diagnostic.Collector
 
 	// Tests may replace the remote transport and DNS resolver without exposing
 	// those hooks through the CLI contract.

@@ -5,13 +5,18 @@ import (
 	"testing"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 )
 
 type testTarget string
 
 func (target testTarget) Name() string { return string(target) }
 
-func (testTarget) Generate(*ir.Document, Options) ([]Artifact, error) { return nil, nil }
+func (target testTarget) Prepare(*ir.Document, Options) (Plan, []diagnostic.Diagnostic, error) {
+	return NewPlan(target.Name(), target), nil, nil
+}
+
+func (testTarget) Emit(Plan) ([]Artifact, error) { return nil, nil }
 
 func TestRegistryLooksUpTargetsInStableOrder(t *testing.T) {
 	registry, err := NewRegistry(testTarget("typescript"), testTarget("swift"))
