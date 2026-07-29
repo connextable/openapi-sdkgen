@@ -28,7 +28,7 @@ if (widgetIDs.join(",") !== "widget-1,widget-2") {
 // Query arrays, explicit headers, cookies, client authorization, and raw metadata.
 const created = await api.widgets.create.raw({
   query: { tag: ["example", "raw"] },
-  headerParams: { xTraceID: "trace-1" },
+  headerParams: { "X-Trace-Id": "trace-1" },
   cookieParams: { session: "example-session" },
   body: { name: "Created widget" },
 });
@@ -50,7 +50,7 @@ await api.uploads.post({ body: new Uint8Array([1, 2, 3]) });
 const validation = await api.widgets
   .create({
     query: {},
-    headerParams: { xTraceID: "trace-1" },
+    headerParams: { "X-Trace-Id": "trace-1" },
     cookieParams: { session: "example-session" },
     body: { name: "" },
   })
