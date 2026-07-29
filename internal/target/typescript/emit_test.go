@@ -164,9 +164,9 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"HTTP: `POST /products`.",
 		"* ```ts\n * await api.products.create({ body }, { idempotencyKey })\n * ```",
 		"Sends the request and returns the decoded response body.",
-		"@returns Decoded response body as {@link CreateProductOutput}.",
+		"@returns Decoded response body as",
 		"Sends the request and returns the decoded body with HTTP response metadata.",
-		"@returns Decoded response and HTTP metadata as {@link CreateProductRawResponse}.",
+		"@returns Decoded response and HTTP metadata as",
 		"Creates one catalog product from the supplied body.",
 		"Product values accepted during creation.",
 		"Product identifier.",
@@ -178,7 +178,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"`201 application/json` — Created",
 		"Creates a generated API client.",
 		"Type catalog keyed by OpenAPI operation ID.",
-		"Lazily iterates every item from {@link Operations.listProducts} pagination.",
+		"Lazily iterates every item from",
 		"@deprecated This operation is deprecated.",
 	} {
 		if !strings.Contains(clientSource, expected) {
@@ -191,13 +191,13 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<Contract.ComponentOutput<"Product">`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, `export type CreateProductOptions = Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch"> & {`) || !strings.Contains(clientSource, "Required idempotency key") || !strings.Contains(clientSource, "readonly idempotencyKey: string") {
+	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "idempotencyKey" | "ifMatch"> & {`) || !strings.Contains(clientSource, "Required idempotency key") || !strings.Contains(clientSource, "readonly idempotencyKey: string") {
 		t.Fatalf("required idempotency option missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "readonly createProduct: CreateProductCall") || !strings.Contains(clientSource, "(input: CreateProductInput, options: CreateProductOptions): Promise<CreateProductOutput>") {
+	if !strings.Contains(clientSource, `readonly "createProduct": Operations["createProduct"]["call"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "(productID: string): {") || !strings.Contains(clientSource, "bindPathOperation<GetProductInput, GetProductResourceInput") {
+	if !strings.Contains(clientSource, "(productID: string): {") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
 		t.Fatalf("instance resource builder missing:\n%s", clientSource)
 	}
 	for _, expected := range []string{
@@ -361,11 +361,11 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	for _, expected := range []string{
 		"readonly auth: {",
 		"readonly login: {",
-		"readonly post: LoginCall",
+		`readonly post: Operations["login"]["call"]`,
 		"readonly sessions: {",
 		"(sessionID: string): {",
-		"readonly delete: RevokeSessionResourceCall",
-		"login: {\n      post: login,",
+		`readonly delete: Operations["revokeSession"]["resourceCall"]`,
+		"login: {\n      post: __sdkgen_",
 		"sessions: Object.assign(",
 	} {
 		if !strings.Contains(client, expected) {
@@ -420,8 +420,8 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		"readonly get: GetServiceIndexCall",
-		"get: getServiceIndex,",
+		`readonly get: Operations["getServiceIndex"]["call"]`,
+		"get: __sdkgen_",
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("root resource surface missing %q:\n%s", expected, client)

@@ -97,9 +97,6 @@ func sourceArtifacts(document *ir.Document, includeServer bool) ([]Artifact, err
 	if err := validateOpenAPISupportWithServer(document, "TypeScript", includeServer); err != nil {
 		return nil, err
 	}
-	if err := validateOperationSymbols(document); err != nil {
-		return nil, err
-	}
 	manifest, err := buildManifest(document)
 	if err != nil {
 		return nil, err
@@ -230,29 +227,6 @@ func exportedSymbols(source string) map[string]bool {
 	return result
 }
 
-func validateOperationSymbols(document *ir.Document) error {
-	aliases := make(map[string]string)
-	for _, operation := range document.Operations {
-		if operation.Visibility == "hidden" {
-			continue
-		}
-		typeName := operationTypeName(operation.OperationID)
-		if previous, exists := aliases["type\x00"+typeName]; exists {
-			return fmt.Errorf("operations %q and %q both generate TypeScript type name %q", previous, operation.OperationID, typeName)
-		}
-		aliases["type\x00"+typeName] = operation.OperationID
-		property, err := naming.Property(operation.OperationID)
-		if err != nil {
-			return fmt.Errorf("operation %s: %w", operation.OperationID, err)
-		}
-		if previous, exists := aliases["property\x00"+property]; exists {
-			return fmt.Errorf("operations %q and %q both generate TypeScript property %q", previous, operation.OperationID, property)
-		}
-		aliases["property\x00"+property] = operation.OperationID
-	}
-	return nil
-}
-
 func buildManifest(document *ir.Document) (Manifest, error) {
 	manifest := Manifest{
 		Operations: make([]ManifestOperation, 0, len(document.Operations)),
@@ -347,11 +321,7 @@ func operationCall(operation ir.Operation, inputTypes []string) (string, []strin
 		return "", nil, err
 	}
 	if operation.Visibility == "internal" {
-		operationName, err := naming.Property(operation.OperationID)
-		if err != nil {
-			return "", nil, err
-		}
-		return "api.$operations." + operationName + callInput(operation, inputTypes, false, operation.PathParameterOrder), segments, nil
+		return "api.$operations[" + quoteTS(operation.OperationID) + "]" + callInput(operation, inputTypes, false, operation.PathParameterOrder), segments, nil
 	}
 	return chain + "." + terminal + callInput(operation, inputTypes, len(operation.PathParameterOrder) > 0, operation.PathParameterOrder), segments, nil
 }
@@ -495,11 +465,7 @@ func isTerminalAction(operation ir.Operation, parts []string, index int) bool {
 }
 
 func operationTypeName(operationID string) string {
-	name, err := naming.Public(operationID)
-	if err != nil {
-		return "Operation"
-	}
-	return name
+	return stablePrivateIdentifier("operation-type", operationID)
 }
 
 func operationAuth(operation ir.Operation) string {

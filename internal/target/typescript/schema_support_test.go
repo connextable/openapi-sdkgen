@@ -64,7 +64,7 @@ func TestSourceArtifactsEmitsBooleanSchemaFromAnOpenAPI31Document(t *testing.T) 
 		if !strings.Contains(source, "boolean: false") {
 			t.Fatalf("boolean schema descriptor missing:\n%s", source)
 		}
-		for _, expected := range []string{"bindOperation<never, unknown", "export type CreateValueBodyInput = unknown"} {
+		for _, expected := range []string{"bindOperation<never, unknown", "BodyInput = unknown"} {
 			if !strings.Contains(source, expected) {
 				t.Fatalf("boolean schema type missing %q:\n%s", expected, source)
 			}

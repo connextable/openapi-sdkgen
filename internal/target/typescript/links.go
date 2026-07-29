@@ -339,20 +339,17 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		if err != nil {
 			return "", err
 		}
-		output, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
-		if err != nil {
-			return "", err
-		}
+		output := operationSlotType(link.TargetOperation.OperationID, "output")
 		targetInputs[input] = true
-		targetOptions[operationTypeName(link.TargetOperation.OperationID)+"Options"] = true
+		targetOptions[operationSlotType(link.TargetOperation.OperationID, "options")] = true
 		targetOutputs[output] = true
 		statusProperty, err := linkStatusProperty(link.Status)
 		if err != nil {
 			return "", err
 		}
-		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationTypeName(group.SourceOperation.OperationID)+"RawResponse | APIError, invocation?: LinkInvocation<"+input+", "+operationTypeName(link.TargetOperation.OperationID)+"Options, "+sourceInput+">) => Promise<"+output+">")
+		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(group.SourceOperation.OperationID, "rawResponse")+" | APIError, invocation?: LinkInvocation<"+input+", "+operationSlotType(link.TargetOperation.OperationID, "options")+", "+sourceInput+">) => Promise<"+output+">")
 	}
-	return "{ (response: " + operationTypeName(group.SourceOperation.OperationID) + "RawResponse | APIError, invocation?: LinkInvocation<" + sortedStringSet(targetInputs) + ", " + sortedStringSet(targetOptions) + ", " + sourceInput + ">): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
+	return "{ (response: " + operationSlotType(group.SourceOperation.OperationID, "rawResponse") + " | APIError, invocation?: LinkInvocation<" + sortedStringSet(targetInputs) + ", " + sortedStringSet(targetOptions) + ", " + sourceInput + ">): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
 }
 
 func linkSourceInputType(document *ir.Document, operation ir.Operation) (string, error) {
@@ -363,7 +360,7 @@ func linkSourceInputType(document *ir.Document, operation ir.Operation) (string,
 	if len(inputs) == 0 {
 		return "never", nil
 	}
-	return operationTypeName(operation.OperationID) + "Input", nil
+	return operationSlotType(operation.OperationID, "input"), nil
 }
 
 func linkTargetInputType(document *ir.Document, operation ir.Operation) (string, error) {
@@ -401,37 +398,32 @@ func emitLinkValues(output *bytes.Buffer, document *ir.Document, links []generat
 		if err != nil {
 			return err
 		}
-		targetProperty, err := naming.Property(link.TargetOperation.OperationID)
-		if err != nil {
-			return err
-		}
+		targetProperty := operationValueName(link.TargetOperation.OperationID)
 		targetInputs, err := operationInputTypes(document, link.TargetOperation)
 		if err != nil {
 			return err
 		}
-		targetName := operationTypeName(link.TargetOperation.OperationID)
-		sourceName := operationTypeName(link.SourceOperation.OperationID)
+		targetInput := operationSlotType(link.TargetOperation.OperationID, "input")
+		targetOptions := operationSlotType(link.TargetOperation.OperationID, "options")
+		sourceRawResponse := operationSlotType(link.SourceOperation.OperationID, "rawResponse")
 		sourceInputs, err := operationInputTypes(document, link.SourceOperation)
 		if err != nil {
 			return err
 		}
 		sourceInput := "never"
 		if len(sourceInputs) != 0 {
-			sourceInput = sourceName + "Input"
+			sourceInput = operationSlotType(link.SourceOperation.OperationID, "input")
 		}
-		targetOutput, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
-		if err != nil {
-			return err
-		}
+		targetOutput := operationSlotType(link.TargetOperation.OperationID, "output")
 		options := "invocation.options"
 		if link.ServerURL != "" {
 			options = "{ ...(invocation.options ?? {}), baseURL: new URL(" + quoteTS(link.ServerURL) + ", response.response.url).href }"
 		}
 		if len(targetInputs) == 0 {
-			fmt.Fprintf(output, "  const %s = (response: %sRawResponse | APIError, invocation: LinkInvocation<never, %sOptions, %s> = {}): Promise<%s> => { resolveLinkInput<never>(response, %s, invocation.sourceInput); return %s(%s) }\n", name, sourceName, targetName, sourceInput, targetOutput, link.Definition, targetProperty, options)
+			fmt.Fprintf(output, "  const %s = (response: %s | APIError, invocation: LinkInvocation<never, %s, %s> = {}): Promise<%s> => { resolveLinkInput<never>(response, %s, invocation.sourceInput); return %s(%s) }\n", name, sourceRawResponse, targetOptions, sourceInput, targetOutput, link.Definition, targetProperty, options)
 			continue
 		}
-		fmt.Fprintf(output, "  const %s = (response: %sRawResponse | APIError, invocation: LinkInvocation<%sInput, %sOptions, %s> = {}): Promise<%s> => %s(mergeLinkInput(resolveLinkInput<%sInput>(response, %s, invocation.sourceInput), invocation.input), %s)\n", name, sourceName, targetName, targetName, sourceInput, targetOutput, targetProperty, targetName, link.Definition, options)
+		fmt.Fprintf(output, "  const %s = (response: %s | APIError, invocation: LinkInvocation<%s, %s, %s> = {}): Promise<%s> => %s(mergeLinkInput(resolveLinkInput<%s>(response, %s, invocation.sourceInput), invocation.input), %s)\n", name, sourceRawResponse, targetInput, targetOptions, sourceInput, targetOutput, targetProperty, targetInput, link.Definition, options)
 	}
 	for _, source := range linkSourceOperations(links) {
 		for _, group := range linkGroupsForSource(links, source.OperationID) {
@@ -464,15 +456,12 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		if err != nil {
 			return err
 		}
-		output, err := operationOutputTypeForScope(document, link.TargetOperation, typeRenderContract)
-		if err != nil {
-			return err
-		}
+		output := operationSlotType(link.TargetOperation.OperationID, "output")
 		targetInputs[input] = true
-		targetOptions[operationTypeName(link.TargetOperation.OperationID)+"Options"] = true
+		targetOptions[operationSlotType(link.TargetOperation.OperationID, "options")] = true
 		targetOutputs[output] = true
 	}
-	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %sRawResponse | APIError, invocation: LinkInvocation<%s, %s, %s> = {}): Promise<%s> => {\n", variable, contract, operationTypeName(group.SourceOperation.OperationID), sortedStringSet(targetInputs), sortedStringSet(targetOptions), sourceInput, sortedStringSet(targetOutputs))
+	fmt.Fprintf(output, "  const %s: %s = Object.assign(async (response: %s | APIError, invocation: LinkInvocation<%s, %s, %s> = {}): Promise<%s> => {\n", variable, contract, operationSlotType(group.SourceOperation.OperationID, "rawResponse"), sortedStringSet(targetInputs), sortedStringSet(targetOptions), sourceInput, sortedStringSet(targetOutputs))
 	for _, link := range group.Links {
 		if link.Status == "default" {
 			continue

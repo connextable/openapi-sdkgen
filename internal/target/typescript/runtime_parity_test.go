@@ -1290,19 +1290,49 @@ await api.$operations.getQuery();
 await api.$operations.getOAuth();
 await api.$operations.getOpenID();
 await api.$operations.getCookie().then(() => { throw new Error("cookie security unexpectedly dispatched"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
-await api.$operations.getMtls().then(() => { throw new Error("mTLS security unexpectedly dispatched"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
+await api.$operations.getMTLS().then(() => { throw new Error("mTLS security unexpectedly dispatched"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
 const capable = createClient({ baseURL: "https://api.example.test", credentials, transport: { capabilities: { cookieJar: true, mutualTLS: true }, fetch: async (input, init) => {
   const url = new URL(String(input));
   if (url.pathname === "/cookie" && new Headers(init.headers).get("cookie") !== "session=cookie-value") throw new Error("cookie capability was not used");
   return new Response(null, { status: 204 });
 } } });
 await capable.$operations.getCookie();
-await capable.$operations.getMtls();
+await capable.$operations.getMTLS();
 const invalid = createClient({ baseURL: "https://api.example.test", credentials: ({ alternatives }) => ({ alternative: alternatives.Bearer, values: { Basic: { kind: "http-basic", username: "a", password: "b" } } }), fetch: async () => { throw new Error("invalid credentials reached fetch"); } });
 await invalid.$operations.getBearer().then(() => { throw new Error("invalid credential set was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript security-shape runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimeDispatchesNormalizationEquivalentExactOperationIDs(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Exact operations", "version": "1"},
+  "paths": {
+    "/modern": {"get": {"operationId": "get-pet", "responses": {"204": {"description": "OK"}}}},
+    "/legacy": {"get": {"operationId": "get_pet", "responses": {"204": {"description": "OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const paths = [];
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input) => {
+  paths.push(new URL(String(input)).pathname);
+  return new Response(null, { status: 204 });
+} });
+await api.$operations["get-pet"]();
+await api.$operations["get_pet"]();
+if (paths.join(",") !== "/modern,/legacy") throw new Error("exact operation dispatch mismatch: " + paths.join(","));
+`
+	if result, runErr := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); runErr != nil {
+		t.Fatalf("execute exact-operation runtime test: %v\n%s", runErr, result)
 	}
 }
 

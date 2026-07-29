@@ -8,14 +8,21 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 )
 
-func TestSourceArtifactsRejectsCollidingOperationSymbols(t *testing.T) {
+func TestSourceArtifactsPreservesNormalizationEquivalentOperationIDs(t *testing.T) {
 	document := &ir.Document{ContractVersion: "1.0.0", Operations: []ir.Operation{
-		{OperationID: "get-pet", Method: "GET", Path: "/pets"},
-		{OperationID: "get_pet", Method: "GET", Path: "/pets"},
+		{OperationID: "get-pet", Method: "GET", Path: "/pets/modern"},
+		{OperationID: "get_pet", Method: "GET", Path: "/pets/legacy"},
 	}}
-	_, err := SourceArtifacts(document)
-	if err == nil || !strings.Contains(err.Error(), "both generate TypeScript") {
-		t.Fatalf("error = %v", err)
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, operationID := range []string{"get-pet", "get_pet"} {
+		if !strings.Contains(source, "readonly "+quoteTS(operationID)+": {") ||
+			!strings.Contains(source, `["`+operationID+`", __sdkgen_`) {
+			t.Fatalf("exact operation %q missing:\n%s", operationID, source)
+		}
 	}
 }
 

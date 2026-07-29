@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 type generatedStream struct {
@@ -76,19 +75,16 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 	output.WriteString("  /** Lazy typed response streams keyed by OpenAPI operation ID. */\n")
 	output.WriteString("  readonly $streams: {\n")
 	for _, stream := range streams {
-		property, err := naming.Property(stream.Operation.OperationID)
-		if err != nil {
-			return err
-		}
 		inputs, err := operationInputTypes(document, stream.Operation)
 		if err != nil {
 			return err
 		}
-		name := operationTypeName(stream.Operation.OperationID)
+		inputType := operationSlotType(stream.Operation.OperationID, "input")
+		optionsType := operationSlotType(stream.Operation.OperationID, "options")
 		if len(inputs) == 0 {
-			fmt.Fprintf(output, "    readonly %s: (options?: %sOptions) => AsyncIterable<%s>\n", property, name, stream.ItemType)
+			fmt.Fprintf(output, "    readonly %s: (options?: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), optionsType, stream.ItemType)
 		} else {
-			fmt.Fprintf(output, "    readonly %s: (input: %sInput, options?: %sOptions) => AsyncIterable<%s>\n", property, name, name, stream.ItemType)
+			fmt.Fprintf(output, "    readonly %s: (input: %s, options?: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), inputType, optionsType, stream.ItemType)
 		}
 	}
 	output.WriteString("  }\n")
@@ -97,10 +93,6 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 
 func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []generatedStream) error {
 	for _, stream := range streams {
-		property, err := naming.Property(stream.Operation.OperationID)
-		if err != nil {
-			return err
-		}
 		definition, err := operationDefinition(document, stream.Operation, ManifestOperation{OperationID: stream.Operation.OperationID, Method: stream.Operation.Method, Path: stream.Operation.Path, Envelope: stream.Operation.Envelope})
 		if err != nil {
 			return err
@@ -109,14 +101,14 @@ func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []gen
 		if err != nil {
 			return err
 		}
-		name := operationTypeName(stream.Operation.OperationID)
-		variable := "stream" + name
+		inputType := operationSlotType(stream.Operation.OperationID, "input")
+		optionsType := operationSlotType(stream.Operation.OperationID, "options")
+		variable := stablePrivateIdentifier("stream-value", stream.Operation.OperationID)
 		if len(inputs) == 0 {
-			fmt.Fprintf(output, "  const %s = (options?: %sOptions): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, name, stream.ItemType, stream.ItemType, definition)
+			fmt.Fprintf(output, "  const %s = (options?: %s): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, optionsType, stream.ItemType, stream.ItemType, definition)
 		} else {
-			fmt.Fprintf(output, "  const %s = (input: %sInput, options?: %sOptions): AsyncIterable<%s> => request.stream<%s>(%s, input, options)\n", variable, name, name, stream.ItemType, stream.ItemType, definition)
+			fmt.Fprintf(output, "  const %s = (input: %s, options?: %s): AsyncIterable<%s> => request.stream<%s>(%s, input, options)\n", variable, inputType, optionsType, stream.ItemType, stream.ItemType, definition)
 		}
-		_ = property
 	}
 	return nil
 }
@@ -125,15 +117,14 @@ func emitStreamReturnValue(output *bytes.Buffer, streams []generatedStream) erro
 	if len(streams) == 0 {
 		return nil
 	}
-	output.WriteString("    $streams: {\n")
+	values := make([]runtimeProperty, 0, len(streams))
 	for _, stream := range streams {
-		property, err := naming.Property(stream.Operation.OperationID)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(output, "      %s: stream%s,\n", property, operationTypeName(stream.Operation.OperationID))
+		values = append(values, runtimeProperty{
+			key:   stream.Operation.OperationID,
+			value: stablePrivateIdentifier("stream-value", stream.Operation.OperationID),
+		})
 	}
-	output.WriteString("    },\n")
+	fmt.Fprintf(output, "    $streams: %s,\n", runtimeObjectExpression(values))
 	return nil
 }
 

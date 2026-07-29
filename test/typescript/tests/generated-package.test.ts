@@ -8,7 +8,7 @@ import {
   isErrorCategory,
   isErrorCode,
 } from "../fixtures/generated/client/index.js";
-import type { UploadWidgetBodyInput } from "../fixtures/generated/client/index.js";
+import type { Operations } from "../fixtures/generated/client/index.js";
 import { openapi } from "../fixtures/generated/client/metadata.js";
 
 type Expect<Value extends true> = Value;
@@ -27,7 +27,7 @@ describe("generated TypeScript source", () => {
   });
 
   it("accepts binary request values exposed by generated body types", () => {
-    const body: UploadWidgetBodyInput = new Uint8Array([1, 2, 3]);
+    const body: Operations["uploadWidget"]["input"]["body"] = new Uint8Array([1, 2, 3]);
     expect(body).toBeInstanceOf(Uint8Array);
   });
 

@@ -95,18 +95,48 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		property, err := naming.Property(operation.OperationID)
-		if err != nil {
-			return nil, err
+		operationName := operationTypeName(operation.OperationID)
+		inputType := operationInputAlias(operation)
+		resourceInputType := inputType
+		if len(operation.PathParameterOrder) > 0 {
+			resourceInputType = operationName + "ResourceInput"
+		}
+		paginationType := "never"
+		callType := operationName + "Call"
+		if operation.Pagination != "" {
+			itemType, err := operationItemTypeForScope(document, operationsByID[operation.OperationID], typeRenderContract)
+			if err != nil {
+				return nil, err
+			}
+			paginationType = paginationFunctionType(operation, itemType)
+			callType = "(" + callType + ") & { readonly paginate: " + paginationType + " }"
+		}
+		resourceCallType := callType
+		if operation.Visibility == "internal" {
+			resourceCallType = "never"
+		} else if len(operation.PathParameterOrder) > 0 {
+			resourceCallType = operationName + "ResourceCall"
 		}
 		emitOperationCatalogJSDoc(&output, "  ", operation)
-		fmt.Fprintf(&output, "  readonly %s: {\n", property)
+		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(operation.OperationID))
 		fmt.Fprintf(&output, "    /** Complete generated input type. */\n")
-		fmt.Fprintf(&output, "    readonly input: %s\n", operationInputAlias(operation))
+		fmt.Fprintf(&output, "    readonly input: %s\n", inputType)
+		fmt.Fprintf(&output, "    /** Input remaining after resource path binding. */\n")
+		fmt.Fprintf(&output, "    readonly resourceInput: %s\n", resourceInputType)
+		fmt.Fprintf(&output, "    /** Per-request transport options. */\n")
+		fmt.Fprintf(&output, "    readonly options: %sOptions\n", operationName)
 		fmt.Fprintf(&output, "    /** Decoded successful output type. */\n")
 		fmt.Fprintf(&output, "    readonly output: %s\n", operation.renderOutput(typeRenderContract))
 		fmt.Fprintf(&output, "    /** Generated server and transport error union. */\n")
 		fmt.Fprintf(&output, "    readonly error: %s\n", operation.renderError(typeRenderContract))
+		fmt.Fprintf(&output, "    /** Successful raw response union. */\n")
+		fmt.Fprintf(&output, "    readonly rawResponse: %sRawResponse\n", operationName)
+		fmt.Fprintf(&output, "    /** Exact operation call including fixed capabilities. */\n")
+		fmt.Fprintf(&output, "    readonly call: %s\n", callType)
+		fmt.Fprintf(&output, "    /** Resource-oriented call after path binding, when available. */\n")
+		fmt.Fprintf(&output, "    readonly resourceCall: %s\n", resourceCallType)
+		fmt.Fprintf(&output, "    /** Pagination capability, when declared. */\n")
+		fmt.Fprintf(&output, "    readonly pagination: %s\n", paginationType)
 		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n\n")
@@ -119,12 +149,8 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		property, err := naming.Property(operation.OperationID)
-		if err != nil {
-			return nil, err
-		}
 		emitOperationJSDoc(&output, "    ", operation)
-		fmt.Fprintf(&output, "    readonly %s: %s\n", property, operationFunctionType(document, operation))
+		fmt.Fprintf(&output, "    readonly %s: Operations[%s][\"call\"]\n", quoteTS(operation.OperationID), quoteTS(operation.OperationID))
 	}
 	output.WriteString("  }\n")
 	if err := emitLinkInterface(&output, document, links); err != nil {
@@ -157,9 +183,10 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		property, err := naming.Property(operation.OperationID)
-		if err != nil {
-			return nil, err
+		binding := operationValueName(operation.OperationID)
+		baseBinding := binding
+		if operation.Pagination != "" {
+			baseBinding = operationBaseValueName(operation.OperationID)
 		}
 		outputType := operation.renderOutput(typeRenderContract)
 		definition, err := operationDefinition(document, operationsByID[operation.OperationID], operation)
@@ -172,13 +199,15 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 			inputType = operationTypeName(operation.OperationID) + "Input"
 			hasInput = true
 		}
-		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", property, inputType, outputType, operationTypeName(operation.OperationID), operationTypeName(operation.OperationID), definition, hasInput, operationTypeName(operation.OperationID))
-		if operation.Pagination != "" && len(operation.PathParameterOrder) == 0 {
+		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(operation.OperationID), operationTypeName(operation.OperationID), definition, hasInput, operationTypeName(operation.OperationID))
+		if operation.Pagination != "" {
 			itemType, err := operationItemTypeForScope(document, operationsByID[operation.OperationID], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&output, "  const paginate%s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", operationTypeName(operation.OperationID), itemType, operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), property, quoteTS(operation.Pagination))
+			paginationBinding := operationPaginationValueName(operation.OperationID)
+			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, %s, %s, %sOptions>(%s, %s)\n", paginationBinding, itemType, operationTypeName(operation.OperationID), outputType, quoteTS(operation.Pagination), operationTypeName(operation.OperationID), baseBinding, quoteTS(operation.Pagination))
+			fmt.Fprintf(&output, "  const %s = Object.assign(%s, { paginate: %s }) as Operations[%s][\"call\"]\n", binding, baseBinding, paginationBinding, quoteTS(operation.OperationID))
 		}
 	}
 	if err := emitLinkValues(&output, document, links); err != nil {
@@ -192,15 +221,14 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		return nil, err
 	}
 	output.WriteString("\n  return {\n")
-	output.WriteString("    $operations: {\n")
+	operationValues := make([]runtimeProperty, 0)
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
 			continue
 		}
-		property, _ := naming.Property(operation.OperationID)
-		fmt.Fprintf(&output, "      %s,\n", property)
+		operationValues = append(operationValues, runtimeProperty{key: operation.OperationID, value: operationValueName(operation.OperationID)})
 	}
-	output.WriteString("    },\n")
+	fmt.Fprintf(&output, "    $operations: %s,\n", runtimeObjectExpression(operationValues))
 	if err := emitLinkReturnValue(&output, links); err != nil {
 		return nil, err
 	}
@@ -215,7 +243,7 @@ func emitClient(document *ir.Document, manifest Manifest) ([]byte, error) {
 		output.WriteString(",\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(tree); ok {
-		fmt.Fprintf(&output, "    paginate: paginate%s,\n", operationTypeName(paginated.OperationID))
+		fmt.Fprintf(&output, "    paginate: %s,\n", operationPaginationValueName(paginated.OperationID))
 	}
 	for _, name := range sortedResourceChildNames(tree) {
 		fmt.Fprintf(&output, "    %s,\n", name)
@@ -272,11 +300,11 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 			bodyDescription = "Request body for `" + operation.OperationID + "` (`" + operation.Method + " " + operation.Path + "`)."
 		}
 		fmt.Fprintf(output, "/**\n * %s\n *\n * Type: %s\n */\n", sanitizeComment(bodyDescription), jsDocTypeReference(bodyType))
-		fmt.Fprintf(output, "export type %sBodyInput = %s\n\n", operationName, bodyType)
+		fmt.Fprintf(output, "type %sBodyInput = %s\n\n", operationName, bodyType)
 	}
 	if len(item.InputTypes) > 0 {
 		fmt.Fprintf(output, "/** Complete input for `%s` (`%s %s`). */\n", operation.OperationID, operation.Method, operation.Path)
-		fmt.Fprintf(output, "export interface %sInput {\n", operationName)
+		fmt.Fprintf(output, "interface %sInput {\n", operationName)
 		for _, inputType := range item.InputTypes {
 			field := strings.TrimPrefix(inputType, operationName)
 			field = strings.TrimSuffix(field, "Input")
@@ -308,7 +336,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 			resourceInput = "Omit<" + operationName + "Input, \"path\">"
 		}
 		fmt.Fprintf(output, "/** Input remaining after the resource path is bound for `%s`. */\n", operation.OperationID)
-		fmt.Fprintf(output, "export type %sResourceInput = %s\n\n", operationName, resourceInput)
+		fmt.Fprintf(output, "type %sResourceInput = %s\n\n", operationName, resourceInput)
 	}
 
 	outputType := item.renderOutput(typeRenderContract)
@@ -319,9 +347,9 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 	if err := emitRawResponseJSDoc(output, document, operation); err != nil {
 		return err
 	}
-	fmt.Fprintf(output, "export type %sRawResponse = %s\n\n", operationName, rawResponseType)
+	fmt.Fprintf(output, "type %sRawResponse = %s\n\n", operationName, rawResponseType)
 	emitOutputJSDoc(output, operation, item, outputType)
-	fmt.Fprintf(output, "export type %sOutput = %s\n", operationName, outputType)
+	fmt.Fprintf(output, "type %sOutput = %s\n", operationName, outputType)
 	output.WriteString("\n")
 	if err := emitOperationCallTypes(output, document, operation, item); err != nil {
 		return err
@@ -376,7 +404,7 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 		mediaTypes = append(mediaTypes, mediaType)
 	}
 	sort.Strings(mediaTypes)
-	fmt.Fprintf(output, "export interface %s {\n", callName)
+	fmt.Fprintf(output, "interface %s {\n", callName)
 	if len(mediaTypes) > 1 {
 		for _, mediaType := range mediaTypes {
 			optionsType := "Omit<" + operationName + "Options, \"accept\"> & { readonly accept: " + quoteTS(mediaType) + " }"
@@ -454,7 +482,7 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 	}
 	locationLabel := strings.ToUpper(location[:1]) + location[1:]
 	fmt.Fprintf(output, "/** %s parameters for `%s` (`%s %s`). */\n", locationLabel, operation.OperationID, operation.Method, operation.Path)
-	fmt.Fprintf(output, "export interface %s {\n", typeName)
+	fmt.Fprintf(output, "interface %s {\n", typeName)
 	for _, parameter := range parameters {
 		valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 		if err != nil {
@@ -525,7 +553,7 @@ func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operation
 		output.WriteString(" * @deprecated This operation is deprecated.\n")
 	}
 	output.WriteString(" */\n")
-	fmt.Fprintf(output, "export type %sOptions = %s\n\n", operationName, strings.Join(parts, " & "))
+	fmt.Fprintf(output, "type %sOptions = %s\n\n", operationName, strings.Join(parts, " & "))
 	return nil
 }
 
@@ -648,7 +676,7 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 	if len(filters) > 0 {
 		filterType := operationName + "FilterInput"
 		fmt.Fprintf(output, "/** Filter query parameters for `%s` (`%s %s`). */\n", operation.OperationID, operation.Method, operation.Path)
-		fmt.Fprintf(output, "export type %s = {\n", filterType)
+		fmt.Fprintf(output, "type %s = {\n", filterType)
 		for _, parameter := range filters {
 			valueType, err := schemaTypeForScope(document, parameter.Schema, projectionInput, typeRenderContract)
 			if err != nil {
@@ -673,7 +701,7 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 			quoted = append(quoted, quoteTS(field))
 		}
 		fmt.Fprintf(output, "/** Sort expression for `%s`. */\n", operation.OperationID)
-		fmt.Fprintf(output, "export type %s = {\n", sortType)
+		fmt.Fprintf(output, "type %s = {\n", sortType)
 		fmt.Fprintf(output, "  /** OpenAPI field selected for sorting. */\n  readonly field: %s\n", strings.Join(quoted, " | "))
 		output.WriteString("  /** Sort direction. */\n  readonly direction: Contract.SortDirection\n")
 		output.WriteString("}\n\n")
@@ -692,7 +720,7 @@ func emitQueryTypes(output *bytes.Buffer, document *ir.Document, operation ir.Op
 		}
 	}
 	output.WriteString(" */\n")
-	fmt.Fprintf(output, "export type %sQueryInput = %s\n\n", operationName, strings.Join(parts, " & "))
+	fmt.Fprintf(output, "type %sQueryInput = %s\n\n", operationName, strings.Join(parts, " & "))
 	return nil
 }
 
@@ -951,7 +979,7 @@ func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "  /** Lazily iterates every item from {@link Operations.%s} pagination. */\n", paginated.OperationID)
+		fmt.Fprintf(output, "  /** Lazily iterates every item from exact operation `%s` pagination. */\n", sanitizeComment(paginated.OperationID))
 		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, itemType))
 	}
 	for _, name := range sortedResourceChildNames(root) {
@@ -982,7 +1010,7 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(output, "%s/** Lazily iterates every item from {@link Operations.%s} pagination. */\n", memberIndent, paginated.OperationID)
+		fmt.Fprintf(output, "%s/** Lazily iterates every item from exact operation `%s` pagination. */\n", memberIndent, sanitizeComment(paginated.OperationID))
 		fmt.Fprintf(output, "%sreadonly paginate: %s\n", memberIndent, paginationFunctionType(paginated, itemType))
 	}
 	for _, name := range sortedResourceChildNames(node) {
@@ -1075,7 +1103,7 @@ func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *r
 		output.WriteString(",\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
-		fmt.Fprintf(output, "%spaginate: paginate%s,\n", memberIndent, operationTypeName(paginated.OperationID))
+		fmt.Fprintf(output, "%spaginate: %s,\n", memberIndent, operationPaginationValueName(paginated.OperationID))
 	}
 	for _, name := range sortedResourceChildNames(node) {
 		fmt.Fprintf(output, "%s%s: ", memberIndent, name)
@@ -1089,10 +1117,7 @@ func emitResourceNodeObject(output *bytes.Buffer, document *ir.Document, node *r
 }
 
 func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, operation ManifestOperation, bound map[string]string) error {
-	property, err := naming.Property(operation.OperationID)
-	if err != nil {
-		return err
-	}
+	property := operationValueName(operation.OperationID)
 	if len(operation.PathParameterOrder) == 0 {
 		output.WriteString(property)
 		return nil
@@ -1134,11 +1159,11 @@ func sortedManifestOperationNames(operations map[string]ManifestOperation) []str
 }
 
 func operationFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return operationTypeName(operation.OperationID) + "Call"
+	return "Operations[" + quoteTS(operation.OperationID) + "][\"call\"]"
 }
 
 func operationResourceFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return operationTypeName(operation.OperationID) + "ResourceCall"
+	return "Operations[" + quoteTS(operation.OperationID) + "][\"resourceCall\"]"
 }
 
 func operationInputAlias(operation ManifestOperation) string {
@@ -1155,6 +1180,22 @@ func paginationFunctionType(operation ManifestOperation, itemType string) string
 		optional = ""
 	}
 	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ">, options" + optional + ": " + operationName + "Options) => AsyncIterable<" + itemType + ">"
+}
+
+func operationValueName(operationID string) string {
+	return stablePrivateIdentifier("operation-value", operationID)
+}
+
+func operationSlotType(operationID, slot string) string {
+	return "Operations[" + quoteTS(operationID) + "][" + quoteTS(slot) + "]"
+}
+
+func operationBaseValueName(operationID string) string {
+	return stablePrivateIdentifier("operation-base-value", operationID)
+}
+
+func operationPaginationValueName(operationID string) string {
+	return stablePrivateIdentifier("operation-pagination-value", operationID)
 }
 
 func hasVisibleInputSchemas(document *ir.Document) bool {
