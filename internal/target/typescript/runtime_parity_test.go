@@ -100,6 +100,9 @@ const api = createClient({ baseURL: "https://api.example.test", fetch: async () 
 await api.$operations.setValues({ body: { constant: -0, choice: -0, items: [0, 1] } });
 try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: [0, -0] } }); throw new Error("signed-zero uniqueItems duplicate was accepted"); }
 catch (error) { if (!String(error).includes("unique items") && !String(error.cause).includes("unique items")) throw error; }
+const sparse = Array(2); sparse[1] = null;
+try { await api.$operations.setValues({ body: { constant: 0, choice: 0, items: sparse } }); throw new Error("sparse array was accepted"); }
+catch (error) { if (!String(error).includes("sparse items") && !String(error.cause).includes("sparse items") && !String(error.cause).includes("cannot contain undefined")) throw error; }
 if (calls !== 1) throw new Error("signed-zero validation reached fetch unexpectedly: " + calls);
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -390,8 +393,6 @@ func TestGeneratedLinksAndStreamsRequireTargetOptions(t *testing.T) {
 			t.Fatalf("required option contract missing %q:\n%s", expected, client)
 		}
 	}
-	typecheckDirectory := t.TempDir()
-	writeTargetArtifacts(t, typecheckDirectory, artifacts)
 	probe := `import { createClient, type Operations } from "./index.js"
 declare const api: ReturnType<typeof createClient>
 declare const response: Operations["getSource"]["rawResponse"]
@@ -400,23 +401,7 @@ api.$links.getSource.follow(response, { options: {} })
 api.$links.getSource.follow(response, { options: { idempotencyKey: "idem", ifMatch: "v1" } })
 api.$links.getSource.follow.byStatus.status201(response)
 `
-	if err := os.WriteFile(filepath.Join(typecheckDirectory, "required-links.probe.ts"), []byte(probe), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(typecheckDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(typecheckDirectory, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
-	if _, err := os.Stat(tsc); err != nil {
-		t.Skipf("TypeScript compiler unavailable for required link test: %v", err)
-	}
-	if output, err := exec.Command("node", tsc, "--project", filepath.Join(typecheckDirectory, "tsconfig.json")).CombinedOutput(); err != nil {
-		t.Fatalf("compile required link contracts: %v\n%s", err, output)
-	}
-	output := compileTypeScriptArtifacts(t, document)
+	output := compileTypeScriptArtifactsWithProbe(t, document, "required-links.probe.ts", probe)
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
@@ -562,6 +547,81 @@ if (typeof api.users.list.raw !== "function" || seen.join(",") !== "/users,/user
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute callable resource namespace test: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testing.T) {
+	plain := func(operationID, method, path string) ir.Operation {
+		return ir.Operation{
+			OperationID: operationID,
+			Method:      method,
+			Path:        path,
+			Raw:         map[string]any{"responses": map[string]any{"204": map[string]any{"description": "OK"}}},
+		}
+	}
+	parameterized := func(operationID, path, parameter string, schema map[string]any) ir.Operation {
+		operation := pathOperation(operationID, "GET", path, parameter, schema)
+		operation.Raw["responses"] = map[string]any{"204": map[string]any{"description": "OK"}}
+		return operation
+	}
+	listWidgets := plain("listWidgets", "GET", "/widgets")
+	listWidgets.Pagination = "cursor"
+	document := &ir.Document{Operations: []ir.Operation{
+		plain("getModern", "GET", "/foo-bar"),
+		plain("getLegacy", "GET", "/foo_bar"),
+		plain("getDuplicateOne", "GET", "/dupe"),
+		plain("getDuplicateTwo", "GET", "/dupe"),
+		parameterized("getTenant", "/{tenant}", "tenant", map[string]any{"type": "string"}),
+		parameterized("getProfile", "/teams/{id}/profile", "id", map[string]any{"type": "string"}),
+		parameterized("getSettings", "/teams/{teamID}/settings", "teamID", map[string]any{"type": "integer"}),
+		listWidgets,
+		plain("getPaginate", "GET", "/widgets/paginate"),
+		plain("getRaw", "GET", "/widgets/list/raw"),
+	}}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, operationID := range []string{
+		"getModern", "getLegacy", "getDuplicateOne", "getDuplicateTwo", "getTenant",
+		"getProfile", "getSettings", "getPaginate", "getRaw",
+	} {
+		start := strings.Index(client, `readonly `+quoteTS(operationID)+`: {`)
+		if start < 0 {
+			t.Fatalf("operation %q missing from catalog:\n%s", operationID, client)
+		}
+		entry := client[start:]
+		if end := strings.Index(entry, "\n  }"); end >= 0 {
+			entry = entry[:end]
+		}
+		if !strings.Contains(entry, "readonly resourceCall: never") {
+			t.Fatalf("operation %q retained ambiguous resource call:\n%s", operationID, entry)
+		}
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const paths = [];
+const api = createClient({ baseURL: "https://api.example.test", fetch: async (input) => {
+  paths.push(new URL(String(input)).pathname);
+  return new Response(null, { status: 204 });
+} });
+await api.$operations.getModern();
+await api.$operations.getLegacy();
+await api.$operations.getDuplicateOne();
+await api.$operations.getDuplicateTwo();
+await api.$operations.getTenant({ path: { tenant: "acme" } });
+await api.$operations.getProfile({ path: { id: "team" } });
+await api.$operations.getSettings({ path: { teamID: 7 } });
+await api.$operations.getPaginate();
+await api.$operations.getRaw();
+const expected = ["/foo-bar","/foo_bar","/dupe","/dupe","/acme","/teams/team/profile","/teams/7/settings","/widgets/paginate","/widgets/list/raw"];
+if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error("resource fallback dispatch mismatch: " + JSON.stringify(paths));
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute resource collision fallback matrix: %v\n%s", err, output)
 	}
 }
 
@@ -750,8 +810,10 @@ func TestRuntimeUsesAsyncCustomCodecsForParameterContent(t *testing.T) {
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let calls = 0;
 const codec = { encodeParameter: async (value) => "cbor:" + value.id };
 const api = createClient({ baseURL: "https://api.example.test", codecs: { "application/cbor": codec }, transport: { capabilities: { cookieJar: true }, fetch: async (input, init) => {
+  calls++;
   const url = new URL(String(input));
   if (url.pathname !== "/records/cbor%3Apath" || url.searchParams.get("filter") !== "cbor:query" || !url.search.includes("cbor%3Awhole")) throw new Error("custom path/query codec was not applied");
   const headers = new Headers(init.headers);
@@ -759,6 +821,9 @@ const api = createClient({ baseURL: "https://api.example.test", codecs: { "appli
   return new Response(null, { status: 204 });
 } } });
 await api.$operations.getRecord({ path: { record: { id: "path" } }, query: { filter: { id: "query" } }, querystring: { whole: { id: "whole" } }, headerParams: { "X-Filter": { id: "header" } }, cookieParams: { crumb: { id: "cookie" } } });
+try { await api.$operations.getRecord({ path: { record: { id: "path" } }, querystring: { whole: {} } }); throw new Error("invalid async querystring value was accepted"); }
+catch (error) { if (!String(error).includes("required property id") && !String(error.cause).includes("required property id")) throw error; }
+if (calls !== 1) throw new Error("invalid async querystring value reached fetch");
 let fetched = false;
 const missing = createClient({ baseURL: "https://api.example.test", transport: { capabilities: { cookieJar: true }, fetch: async () => { fetched = true; throw new Error("fetch must not run"); } } });
 try { await missing.$operations.getRecord({ path: { record: { id: "path" } } }); throw new Error("missing parameter codec was accepted"); }
@@ -767,6 +832,41 @@ if (fetched) throw new Error("fetch ran without a required parameter codec");
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript custom-parameter-codec runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestObjectParametersOmitUndefinedOptionalProperties(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.0","info":{"title":"Undefined object properties","version":"1"},
+  "paths":{"/objects/{id}":{"get":{"operationId":"getObject","parameters":[
+    {"name":"id","in":"path","required":true,"style":"matrix","explode":true,"schema":{"type":"object","required":["keep"],"properties":{"keep":{"type":"string"},"omit":{"type":"string"}}}},
+    {"name":"id","in":"header","required":true,"style":"simple","explode":true,"schema":{"type":"object","required":["keep"],"properties":{"keep":{"type":"string"},"omit":{"type":"string"}}}},
+    {"name":"id","in":"cookie","required":true,"style":"form","explode":true,"schema":{"type":"object","required":["keep"],"properties":{"keep":{"type":"string"},"omit":{"type":"string"}}}}
+  ],"responses":{"204":{"description":"OK"}}}}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const api = createClient({ baseURL: "https://api.example.test", transport: { capabilities: { cookieJar: true }, fetch: async (input, init) => {
+  const url = new URL(String(input));
+  const headers = new Headers(init.headers);
+  if (url.pathname !== "/objects/;keep=path" || url.pathname.includes("undefined")) throw new Error("path serialized undefined: " + url.pathname);
+  if (headers.get("id") !== "keep=header" || headers.get("id")?.includes("undefined")) throw new Error("header serialized undefined: " + headers.get("id"));
+  if (headers.get("cookie") !== "keep=cookie" || headers.get("cookie")?.includes("undefined")) throw new Error("cookie serialized undefined: " + headers.get("cookie"));
+  return new Response(null, { status: 204 });
+} } });
+await api.$operations.getObject({
+  path: { id: { keep: "path", omit: undefined } },
+  headerParams: { id: { keep: "header", omit: undefined } },
+  cookieParams: { id: { keep: "cookie", omit: undefined } },
+});
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute undefined object-parameter test: %v\n%s", err, output)
 	}
 }
 
@@ -784,7 +884,19 @@ func TestGeneratedClientKeepsSameParameterNameAcrossAllLocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := compileTypeScriptArtifacts(t, document)
+	probe := `import { createClient } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+api.$operations.getItem({
+  path: { id: "path-id" },
+  query: { id: 2 },
+  querystring: { id: "raw=value" },
+  headerParams: { id: true },
+  cookieParams: { id: "cookie-id" },
+})
+// @ts-expect-error every repeated id retains its location-specific type
+api.$operations.getItem({ path: { id: 1 }, query: { id: "2" }, querystring: { id: 3 }, headerParams: { id: "true" }, cookieParams: { id: false } })
+`
+	output := compileTypeScriptArtifactsWithProbe(t, document, "repeated-parameters.probe.ts", probe)
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
@@ -1961,6 +2073,10 @@ if (responseBody === "null" ? output !== undefined : JSON.stringify(output) !== 
 }
 
 func compileTypeScriptArtifacts(t *testing.T, document *ir.Document) string {
+	return compileTypeScriptArtifactsWithProbe(t, document, "", "")
+}
+
+func compileTypeScriptArtifactsWithProbe(t *testing.T, document *ir.Document, probeName, probe string) string {
 	t.Helper()
 	artifacts, err := SourceArtifacts(document)
 	if err != nil {
@@ -1969,6 +2085,11 @@ func compileTypeScriptArtifacts(t *testing.T, document *ir.Document) string {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source")
 	writeTargetArtifacts(t, source, artifacts)
+	if probeName != "" {
+		if err := os.WriteFile(filepath.Join(source, probeName), []byte(probe), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(source, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -869,6 +869,9 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 			continue
 		}
 		operation := findOperation(document, item.OperationID)
+		if hasDuplicateStrings(operation.PathParameterOrder) {
+			continue
+		}
 		parameters, err := parametersIn(document, operation, "path")
 		if err != nil {
 			return nil, err
@@ -881,8 +884,12 @@ func buildResourceTree(document *ir.Document, manifest Manifest) (*resourceNode,
 		omitted := false
 		parts := resourcePathParts(operation.Path)
 		for index, part := range parts {
-			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-				name := strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}")
+			name, parameterPart, supported := resourcePathPart(part)
+			if !supported {
+				omitted = true
+				break
+			}
+			if parameterPart {
 				parameter, ok := byName[name]
 				if !ok {
 					return nil, fmt.Errorf("resource path %s has undeclared parameter %q", operation.Path, name)
@@ -957,6 +964,9 @@ func validateTemplatedResourcePaths(document *ir.Document) error {
 	rawPaths, _ := document.Raw["paths"].(map[string]any)
 	sourcePaths := make([]string, 0, len(rawPaths))
 	for path := range rawPaths {
+		if !strings.HasPrefix(path, "/") {
+			continue
+		}
 		sourcePaths = append(sourcePaths, path)
 	}
 	if len(sourcePaths) == 0 {

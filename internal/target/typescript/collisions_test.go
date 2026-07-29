@@ -308,6 +308,57 @@ func TestTemplatedResourcePathValidationPreservesRawPathShape(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "identical templated shape") {
 		t.Fatalf("embedded-template collision error = %v", err)
 	}
+	if err := validateTemplatedResourcePaths(&ir.Document{Raw: map[string]any{"paths": map[string]any{
+		"x-{id}":   map[string]any{},
+		"x-{name}": map[string]any{},
+	}}}); err != nil {
+		t.Fatalf("templated Paths extensions were treated as URL paths: %v", err)
+	}
+}
+
+func TestEmbeddedPathTemplateFallsBackToExactOperationCatalog(t *testing.T) {
+	operation := pathOperation("getJSONFile", "GET", "/files/{id}.json", "id", map[string]any{"type": "string"})
+	document := &ir.Document{
+		Raw:        map[string]any{"paths": map[string]any{operation.Path: map[string]any{}}},
+		Operations: []ir.Operation{operation},
+	}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Operations) != 1 || manifest.Operations[0].ResourceSegments != nil ||
+		!strings.HasPrefix(manifest.Operations[0].CallExpression, `api.$operations["getJSONFile"]`) {
+		t.Fatalf("embedded-template manifest = %#v", manifest.Operations)
+	}
+	if _, err := SourceArtifacts(document); err != nil {
+		t.Fatalf("embedded-template exact fallback failed generation: %v", err)
+	}
+}
+
+func TestRepeatedPathParameterFallsBackToExactOperationCatalog(t *testing.T) {
+	operation := pathOperation("getAlias", "GET", "/users/{id}/aliases/{id}", "id", map[string]any{"type": "string"})
+	operation.PathParameterOrder = []string{"id", "id"}
+	document := &ir.Document{Operations: []ir.Operation{
+		operation,
+		{OperationID: "listUsers", Method: "GET", Path: "/users"},
+	}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := manifestCalls(manifest)
+	if !strings.HasPrefix(calls["getAlias"], `api.$operations["getAlias"]`) || calls["listUsers"] != "api.users.list()" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	start := strings.Index(client, `readonly "getAlias": {`)
+	if start < 0 || !strings.Contains(client[start:], "readonly resourceCall: never") {
+		t.Fatalf("repeated path parameter retained a resource call:\n%s", client)
+	}
 }
 
 func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *testing.T) {

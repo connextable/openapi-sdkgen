@@ -191,7 +191,11 @@ func resolvePathItem(document, pathItem map[string]any, resolving map[string]boo
 
 func localPathItemReference(document map[string]any, reference string) (map[string]any, error) {
 	var value any = document
-	for _, token := range strings.Split(strings.TrimPrefix(reference, "#/"), "/") {
+	pointer, err := url.PathUnescape(strings.TrimPrefix(reference, "#"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid path item reference %q: invalid URI fragment escape", reference)
+	}
+	for _, token := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
 		name, err := jsonPointerToken(token)
 		if err != nil {
 			return nil, fmt.Errorf("invalid path item reference %q: %w", reference, err)

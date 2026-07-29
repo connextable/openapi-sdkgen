@@ -314,6 +314,9 @@ func (operation ManifestOperation) renderError(scope typeRenderScope) string {
 }
 
 func operationCall(document *ir.Document, operation ir.Operation, inputTypes []string) (string, []string, error) {
+	if hasDuplicateStrings(operation.PathParameterOrder) {
+		return exactOperationCall(document, operation, inputTypes), nil, nil
+	}
 	pathBindings, err := operationPathBindings(document, operation)
 	if err != nil {
 		return "", nil, err
@@ -322,13 +325,16 @@ func operationCall(document *ir.Document, operation ir.Operation, inputTypes []s
 	segments := make([]string, 0, len(parts))
 	chain := "api"
 	for _, part := range parts {
-		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-			name := strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}")
-			parameter := pathBindings[name]
-			if parameter == "" {
+		name, parameterPart, supported := resourcePathPart(part)
+		if !supported {
+			return exactOperationCall(document, operation, inputTypes), nil, nil
+		}
+		if parameterPart {
+			binding := pathBindings[name]
+			if binding == "" {
 				return exactOperationCall(document, operation, inputTypes), nil, nil
 			}
-			chain += "(" + parameter + ")"
+			chain += "(" + binding + ")"
 			continue
 		}
 		property, err := naming.Property(part)
@@ -359,6 +365,28 @@ func resourcePathParts(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func resourcePathPart(part string) (string, bool, bool) {
+	if !strings.ContainsAny(part, "{}") {
+		return part, false, true
+	}
+	if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") &&
+		strings.Count(part, "{") == 1 && strings.Count(part, "}") == 1 && len(part) > 2 {
+		return strings.TrimSuffix(strings.TrimPrefix(part, "{"), "}"), true, true
+	}
+	return "", false, false
+}
+
+func hasDuplicateStrings(values []string) bool {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if seen[value] {
+			return true
+		}
+		seen[value] = true
+	}
+	return false
 }
 
 // resourceTerminalName keeps literal path segments as namespaces. For example,

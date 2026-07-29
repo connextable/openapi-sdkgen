@@ -301,6 +301,21 @@ func TestBuildResolvesLocalPathsPathItemReferences(t *testing.T) {
 	}
 }
 
+func TestResolvePathItemDecodesURIFragmentBeforeJSONPointer(t *testing.T) {
+	document := map[string]any{
+		"paths": map[string]any{
+			"/shared%20hook": map[string]any{"get": map[string]any{"operationId": "shared"}},
+		},
+	}
+	resolved, err := ResolvePathItem(document, map[string]any{"$ref": "#/paths/~1shared%2520hook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolved["get"].(map[string]any); !ok {
+		t.Fatalf("resolved path item = %#v", resolved)
+	}
+}
+
 func TestBuildRegistersLosslessSchemaResources(t *testing.T) {
 	document := &openapidoc.Document{Raw: map[string]any{
 		"openapi":           "3.2.0",

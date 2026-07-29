@@ -2767,6 +2767,9 @@ export function validateWireValue(
 		validateWireValue(decodeSchemaContent(value, schema, components), schema.contentSchema, components, direction, scope);
 	}
   if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index)) throw new TypeError("must not contain sparse items");
+    }
     if (schema.minItems !== undefined && value.length < schema.minItems) throw new TypeError(`must contain at least ${schema.minItems} items`);
     if (schema.maxItems !== undefined && value.length > schema.maxItems) throw new TypeError(`must contain at most ${schema.maxItems} items`);
     if (schema.uniqueItems && !hasUniqueWireValues(value)) throw new TypeError("must contain unique items");
@@ -2776,10 +2779,10 @@ export function validateWireValue(
 			if (matches < minimum) throw new TypeError(`must contain at least ${minimum} matching items`);
 			if (schema.maxContains !== undefined && matches > schema.maxContains) throw new TypeError(`must contain at most ${schema.maxContains} matching items`);
 		}
-    value.forEach((item, index) => {
+    for (const [index, item] of value.entries()) {
       const itemSchema = schema.prefixItems?.[index] ?? schema.items;
       if (itemSchema !== undefined) validateWireValue(item, itemSchema, components, direction, scope);
-    });
+    }
 		if (schema.unevaluatedItems !== undefined) {
 			const evaluated = evaluatedArrayIndexes(value, schema, components, direction, scope);
 			for (const [index, item] of value.entries()) {
@@ -3071,7 +3074,12 @@ function wireValueEquals(left: unknown, right: unknown): boolean {
   if (typeof left === "number" && typeof right === "number") return left === right;
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((item, index) => wireValueEquals(item, right[index]));
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      if (Object.hasOwn(left, index) !== Object.hasOwn(right, index)) return false;
+      if (Object.hasOwn(left, index) && !wireValueEquals(left[index], right[index])) return false;
+    }
+    return true;
   }
   if (isRecord(left) && isRecord(right)) {
     const leftKeys = Object.keys(left).sort();
@@ -3082,7 +3090,12 @@ function wireValueEquals(left: unknown, right: unknown): boolean {
 }
 
 function hasUniqueWireValues(values: readonly unknown[]): boolean {
-  return values.every((value, index) => !values.slice(0, index).some((previous) => wireValueEquals(previous, value)));
+  for (let index = 0; index < values.length; index++) {
+    for (let previous = 0; previous < index; previous++) {
+      if (wireValueEquals(values[previous], values[index])) return false;
+    }
+  }
+  return true;
 }
 
 function isMultipleOf(value: number, divisor: number): boolean {
@@ -3118,7 +3131,7 @@ async function appendQuery(
     if (value === undefined) continue;
     const parameter = findParameterByProperty(operation, location, property);
 		if (parameter?.location === "querystring") {
-			await appendQuerystring(result, value, parameter, operation.inputSchemas ?? {}, codecs);
+			await appendQuerystring(result, encodeParameterWireValue(operation, parameter, value), parameter, operation.inputSchemas ?? {}, codecs);
 			continue;
 		}
 		await appendQueryParameter(
@@ -3308,7 +3321,7 @@ async function serializePathParameter(
       .join("");
   }
   if (isRecord(value) && explode) {
-    return Object.entries(value)
+    return Object.entries(value).filter((entry) => entry[1] !== undefined)
       .map(([key, item]) => `;${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`)
       .join("");
   }
@@ -3323,7 +3336,7 @@ function serializePathParameterSync(parameter: ParameterDefinition | undefined, 
   if (style === "label") return `.${encoded}`;
   if (style !== "matrix") return encoded;
   if (Array.isArray(value) && explode) return value.map((item) => `;${encodeURIComponent(name)}=${encodeURIComponent(String(item))}`).join("");
-  if (isRecord(value) && explode) return Object.entries(value).map(([key, item]) => `;${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`).join("");
+  if (isRecord(value) && explode) return Object.entries(value).filter((entry) => entry[1] !== undefined).map(([key, item]) => `;${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`).join("");
   return `;${encodeURIComponent(name)}=${encoded}`;
 }
 
@@ -3333,7 +3346,7 @@ function serializePathValue(value: unknown, explode: boolean, arraySeparator: st
       .map((item) => encodeURIComponent(String(item)))
       .join(explode ? arraySeparator : ",");
   if (isRecord(value)) {
-    return Object.entries(value)
+    return Object.entries(value).filter((entry) => entry[1] !== undefined)
       .flatMap(([key, item]) =>
         explode
           ? `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
@@ -3347,7 +3360,7 @@ function serializePathValue(value: unknown, explode: boolean, arraySeparator: st
 function serializeSimpleValue(value: unknown, explode: boolean): string {
   if (Array.isArray(value)) return value.map(String).join(",");
   if (isRecord(value)) {
-    return Object.entries(value)
+    return Object.entries(value).filter((entry) => entry[1] !== undefined)
       .flatMap(([key, item]) => (explode ? `${key}=${String(item)}` : [key, String(item)]))
       .join(",");
   }
@@ -3406,7 +3419,7 @@ async function serializeCookie(
     return [pair(name, value.map(String).join(","))];
   }
   if (isRecord(value) && (parameter?.explode ?? true)) {
-    return Object.entries(value).map(([key, item]) => pair(key, item));
+    return Object.entries(value).filter((entry) => entry[1] !== undefined).map(([key, item]) => pair(key, item));
   }
   return [pair(name, serializeSimpleValue(value, false))];
 }
@@ -3419,7 +3432,7 @@ function serializeCookieSync(operation: OperationDefinition, property: string, v
   value = encodeParameterWireValue(operation, parameter, value);
   if (parameter?.contentType !== undefined) return [pair(name, serializeContentParameterSync(value, parameter.contentType, parameter.schema, operation.inputSchemas ?? {}))];
   if (Array.isArray(value)) return parameter?.explode ?? true ? value.map((item) => pair(name, item)) : [pair(name, value.map(String).join(","))];
-  if (isRecord(value) && (parameter?.explode ?? true)) return Object.entries(value).map(([key, item]) => pair(key, item));
+  if (isRecord(value) && (parameter?.explode ?? true)) return Object.entries(value).filter((entry) => entry[1] !== undefined).map(([key, item]) => pair(key, item));
   return [pair(name, serializeSimpleValue(value, false))];
 }
 
