@@ -76,3 +76,21 @@ func TestCountOperationsRejectsCyclicPathItems(t *testing.T) {
 		})
 	}
 }
+
+func TestCountOperationsDoesNotFailOnExternalPathItemReference(t *testing.T) {
+	root := map[string]any{
+		"paths": map[string]any{
+			"/external": map[string]any{
+				"$ref": "./path-items/external.json",
+				"post": map[string]any{},
+			},
+		},
+	}
+	got, err := countOperations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 1; got != want {
+		t.Fatalf("operation count = %d, want sibling count %d", got, want)
+	}
+}

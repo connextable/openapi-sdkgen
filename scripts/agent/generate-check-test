@@ -399,6 +399,29 @@ assert_contains "$local_relative_output" "generation exit: 0"
 assert_contains "$local_relative_output" "typecheck exit: 0"
 assert_clean_temporary_root
 
+relative_path_item_root="$test_root/relative-path-item"
+mkdir -p "$relative_path_item_root/path-items"
+cat >"$relative_path_item_root/openapi.json" <<'EOF'
+{
+  "openapi":"3.2.0",
+  "info":{"title":"Relative Path Item ref","version":"1"},
+  "paths":{"/external":{"$ref":"./path-items/external.json"}}
+}
+EOF
+cat >"$relative_path_item_root/path-items/external.json" <<'EOF'
+{"get":{"operationId":"getExternalItem","responses":{"204":{"description":"OK"}}}}
+EOF
+relative_path_item_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$test_root/snapshot" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$test_root/openapi-sdkgen" \
+  "$ROOT/scripts/agent/generate-check" "$relative_path_item_root/openapi.json"
+)"
+assert_contains "$relative_path_item_output" "generation exit: 0"
+assert_contains "$relative_path_item_output" "typecheck exit: 0"
+assert_clean_temporary_root
+
 newline_root="$test_root/newline"
 mkdir -p "$newline_root/schemas"
 newline_input="$newline_root/openapi.json"$'\n'

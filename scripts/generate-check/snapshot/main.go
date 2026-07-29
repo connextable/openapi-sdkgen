@@ -161,22 +161,29 @@ func countOperations(root map[string]any) (int, error) {
 }
 
 func countPathItemOperations(root, pathItem map[string]any) (int, error) {
+	if reference, _ := pathItem["$ref"].(string); reference != "" && !strings.HasPrefix(reference, "#/") {
+		return countUnresolvedPathItemOperations(pathItem), nil
+	}
 	resolved, err := ir.ResolvePathItem(root, pathItem)
 	if err != nil {
 		return 0, err
 	}
+	return countUnresolvedPathItemOperations(resolved), nil
+}
+
+func countUnresolvedPathItemOperations(pathItem map[string]any) int {
 	total := 0
-	for method := range resolved {
+	for method := range pathItem {
 		switch strings.ToLower(method) {
 		case "get", "put", "post", "delete", "options", "head", "patch", "trace", "query":
 			total++
 		}
 	}
-	additional, _ := resolved["additionalOperations"].(map[string]any)
+	additional, _ := pathItem["additionalOperations"].(map[string]any)
 	for _, value := range additional {
 		if _, ok := value.(map[string]any); ok {
 			total++
 		}
 	}
-	return total, nil
+	return total
 }
