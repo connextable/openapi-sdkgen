@@ -761,20 +761,29 @@ export interface RequestFunction {
   ): AsyncIterable<Item>;
 }
 
+type RequiredKeys<Value> = {
+  [Key in keyof Value]-?: Record<never, never> extends Pick<Value, Key> ? never : Key;
+}[keyof Value];
+
+type OperationOptionsArguments<Options extends RequestOptions> =
+  [RequiredKeys<Options>] extends [never]
+    ? [options?: Options]
+    : [options: Options];
+
 /** Callable generated operation that requires typed input. */
 export interface InputOperationCall<Input, Output, Options extends RequestOptions, Raw> {
   /** Sends the request and returns the decoded response body. */
-  (input: Input, options?: Options): Promise<Output>;
+  (input: Input, ...options: OperationOptionsArguments<Options>): Promise<Output>;
   /** Sends the request and returns decoded data with HTTP response metadata. */
-  raw(input: Input, options?: Options): Promise<Raw>;
+  raw(input: Input, ...options: OperationOptionsArguments<Options>): Promise<Raw>;
 }
 
 /** Callable generated operation with no input object. */
 export interface NoInputOperationCall<Output, Options extends RequestOptions, Raw> {
   /** Sends the request and returns the decoded response body. */
-  (options?: Options): Promise<Output>;
+  (...options: OperationOptionsArguments<Options>): Promise<Output>;
   /** Sends the request and returns decoded data with HTTP response metadata. */
-  raw(options?: Options): Promise<Raw>;
+  raw(...options: OperationOptionsArguments<Options>): Promise<Raw>;
 }
 
 /**
@@ -808,11 +817,11 @@ export function bindOperation<
   hasInput: boolean,
 ): OperationCall<Input, Output, Options, Raw> {
   const call = hasInput
-    ? (input: Input, options?: Options) => request<Output>(operation, input, options)
-    : (options?: Options) => request<Output>(operation, undefined, options);
+    ? (input: Input, ...options: OperationOptionsArguments<Options>) => request<Output>(operation, input, options[0])
+    : (...options: OperationOptionsArguments<Options>) => request<Output>(operation, undefined, options[0]);
   const raw = hasInput
-    ? (input: Input, options?: Options) => request.raw<Output>(operation, input, options)
-    : (options?: Options) => request.raw<Output>(operation, undefined, options);
+    ? (input: Input, ...options: OperationOptionsArguments<Options>) => request.raw<Output>(operation, input, options[0])
+    : (...options: OperationOptionsArguments<Options>) => request.raw<Output>(operation, undefined, options[0]);
   return Object.assign(call, { raw }) as OperationCall<Input, Output, Options, Raw>;
 }
 
@@ -838,11 +847,11 @@ export function bindPathOperation<
       path,
     }) as FullInput;
   const call = hasInput
-    ? (input: Input, options?: Options) => operation(mergeInput(input), options)
-    : (options?: Options) => operation(mergeInput(undefined), options);
+    ? (input: Input, ...options: OperationOptionsArguments<Options>) => operation(mergeInput(input), ...options)
+    : (...options: OperationOptionsArguments<Options>) => operation(mergeInput(undefined), ...options);
   const raw = hasInput
-    ? (input: Input, options?: Options) => operation.raw(mergeInput(input), options)
-    : (options?: Options) => operation.raw(mergeInput(undefined), options);
+    ? (input: Input, ...options: OperationOptionsArguments<Options>) => operation.raw(mergeInput(input), ...options)
+    : (...options: OperationOptionsArguments<Options>) => operation.raw(mergeInput(undefined), ...options);
   return Object.assign(call, { raw }) as OperationCall<Input, Output, Options, Raw>;
 }
 

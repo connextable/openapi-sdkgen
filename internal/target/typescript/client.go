@@ -269,7 +269,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 	}
 	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return err
-	} else if len(parameters) > 0 || operation.Pagination != "" {
+	} else if len(parameters) > 0 || operation.Pagination != "" || len(operationSortFields(operation)) > 0 {
 		if err := emitQueryTypes(output, document, operation, operationName, parameters); err != nil {
 			return err
 		}

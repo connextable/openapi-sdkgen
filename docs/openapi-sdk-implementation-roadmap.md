@@ -463,7 +463,9 @@ The existing Fetch-native public boundary remains the model:
 
 ```ts
 createWebhookRouter(handlers, options)
-createCallbackHandlers(handlers, options).deliveryStatus.fetch(request)
+createCallbackHandlers(handlers, options)
+  .callbacks.createOrder.deliveryStatus["{$request.body#/callbackUrl}"].POST
+  .fetch(request)
 ```
 
 `WebhookRouterOptions` and `CallbackHandlerOptions` accept the same

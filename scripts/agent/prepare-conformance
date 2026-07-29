@@ -8,3 +8,11 @@ agent_run "generate TypeScript fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate
   --input "$TYPESCRIPT_ROOT/fixtures/contract.openapi.json" \
   --target typescript \
   --output "$fixture"
+
+collision_fixture="$TYPESCRIPT_ROOT/fixtures/generated/collisions"
+rm -rf "$collision_fixture"
+agent_run "generate TypeScript collision fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/collisions.openapi.json" \
+  --target typescript \
+  --with server \
+  --output "$collision_fixture"

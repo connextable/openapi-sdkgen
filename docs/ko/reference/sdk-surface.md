@@ -29,11 +29,29 @@ import {
   createClient,
   isTransportError,
   isValidationFailedError,
+  type Components,
   type ClientOptions,
+  type Operations,
 } from "./generated/api";
 ```
 
 `createClient(options)`는 resource API와 안정적인 namespace를 반환합니다.
+
+### 정확한 타입 catalog
+
+`Components`는 모든 component schema key와 입출력 projection을 보존합니다.
+`Operations`는 모든 `operationId`와 그 input, output, raw response, error,
+option, stream item의 관계를 보존합니다.
+
+```ts
+type MoneyInput = Components["Money"]["input"];
+type MoneyOutput = Components["Money"]["output"];
+type GetPetInput = Operations["get-pet"]["input"];
+type GetPetError = Operations["get-pet"]["error"];
+```
+
+정확한 OpenAPI 이름을 정규화한 flat export type alias는 만들지 않습니다.
+Bracket access를 사용하면 `"get-pet"`과 `"get_pet"` 같은 이름도 구분됩니다.
 
 ### Resource property
 
@@ -41,7 +59,9 @@ operation path에서 유도한 읽기 쉬운 resource-oriented 호출입니다.
 
 ### `$operations`
 
-모든 visible OpenAPI `operationId`를 정확한 이름으로 제공합니다.
+모든 visible OpenAPI `operationId`를 정확한 이름으로 빠짐없이 제공합니다.
+예: `api.$operations["get-pet"](...)`. Path에서 유도한 resource tree는 편의 API로
+계속 유지하며, 그 안의 충돌은 `$operations` 항목을 제거하지 않고 결정적으로 해결합니다.
 
 ### `$links`
 
@@ -75,3 +95,7 @@ import { createCallbackHandlers } from "./generated/api/server/callbacks";
 
 이 entry point는 `--with server`로 생성했을 때만 존재합니다. 통합 예시는
 [인바운드 서버 계약](../guide/server.md)에서 확인하세요.
+
+Webhook 이름, callback의 모든 차원, component callback 이름, security scheme 이름은
+OpenAPI 원문 철자를 그대로 사용합니다. TypeScript property identifier로 쓰기 어렵거나
+모호한 이름은 bracket access로 접근하세요.

@@ -480,7 +480,12 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		}
 		output.WriteString("    },\n  }\n")
 	}
-	fmt.Fprintf(&output, "  return { callbacks: %s, componentCallbacks: %s }\n}\n", callbackRuntimeCatalog(operationCatalog), callbackRuntimeCatalog(componentCatalog))
+	fmt.Fprintf(
+		&output,
+		"  return { callbacks: %s as unknown as CallbackEndpoints[\"callbacks\"], componentCallbacks: %s as unknown as CallbackEndpoints[\"componentCallbacks\"] }\n}\n",
+		callbackRuntimeCatalog(operationCatalog),
+		callbackRuntimeCatalog(componentCatalog),
+	)
 	return output.Bytes(), nil
 }
 

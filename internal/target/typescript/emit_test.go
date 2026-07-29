@@ -188,6 +188,10 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "POST /products") {
 		t.Fatalf("operation JSDoc missing:\n%s", clientSource)
 	}
+	sortOnlyName := operationTypeName("listSorted")
+	if !strings.Contains(clientSource, "type "+sortOnlyName+"QueryInput =") {
+		t.Fatalf("sort-only operation query input is missing:\n%s", clientSource)
+	}
 	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<Contract.ComponentOutput<"Product">`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
@@ -217,7 +221,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Operations) != 4 || manifest.Operations[0].OperationID != "hiddenAudit" || manifest.Operations[1].OperationID != "listProducts" || manifest.Operations[2].OperationID != "createProduct" || manifest.Operations[3].OperationID != "getProduct" {
+	if len(manifest.Operations) != 5 || manifest.Operations[0].OperationID != "hiddenAudit" || manifest.Operations[1].OperationID != "listProducts" || manifest.Operations[2].OperationID != "createProduct" || manifest.Operations[3].OperationID != "getProduct" || manifest.Operations[4].OperationID != "listSorted" {
 		t.Fatalf("manifest operations = %#v", manifest.Operations)
 	}
 	if manifest.Operations[2].CallExpression != "api.products.create({ body }, { idempotencyKey })" || manifest.Operations[2].OutputType != `ComponentOutput<"Product">` {
@@ -493,6 +497,13 @@ const emitterFixture = `{
         "x-sdk-visibility": "hidden"
 }
 
+    },
+    "/sorted": {
+      "get": {
+        "operationId": "listSorted",
+        "responses": {"204": {"description": "OK"}},
+        "x-sort": {"fields": ["updatedAt", "id"]}
+      }
     },
     "/products": {
       "get": {

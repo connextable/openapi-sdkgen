@@ -26,10 +26,12 @@ import {
 } from "./generated/api/server/webhooks";
 
 const handlers: WebhookHandlers = {
-  orderCreated: async ({ body }) => ({
-    status: 202,
-    body: { accepted: body.id },
-  }),
+  orderCreated: {
+    POST: async ({ body }) => ({
+      status: 202,
+      body: { accepted: body.id },
+    }),
+  },
 };
 
 const router = createWebhookRouter(handlers, {
@@ -52,14 +54,35 @@ Callback URLs are runtime expressions, so the host mounts an explicit generated
 Fetch handler at its chosen route:
 
 ```ts
-import { createCallbackHandlers } from "./generated/api/server/callbacks";
+import {
+  createCallbackHandlers,
+  type CallbackHandlers,
+} from "./generated/api/server/callbacks";
 
-const callbacks = createCallbackHandlers({
-  orderStatus: async ({ body }) => ({ status: 204 }),
-});
+const handlers: CallbackHandlers = {
+  callbacks: {
+    createOrder: {
+      orderStatus: {
+        "{$request.body#/callbackUrl}": {
+          POST: async ({ body }) => ({ status: 204 }),
+        },
+      },
+    },
+  },
+};
 
-const response = await callbacks.orderStatus.fetch(request);
+const callbacks = createCallbackHandlers(handlers);
+
+const response =
+  await callbacks.callbacks.createOrder.orderStatus[
+    "{$request.body#/callbackUrl}"
+  ].POST.fetch(request);
 ```
+
+The generated callback tree retains the exact source operation ID, Callback
+Object name, runtime expression, and HTTP method. Reusable
+`components.callbacks` are available through the parallel
+`ComponentCallbacks` type and `componentCallbacks` runtime catalog.
 
 This separation keeps the default SDK safe to import in browser bundles while
 making inbound endpoints straightforward to adapt to any Fetch-capable server.

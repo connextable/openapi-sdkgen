@@ -171,7 +171,7 @@ func TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
-	for _, expected := range []string{"createCallbackHandlers", `export interface Callbacks`, `readonly "createOrder"`, `readonly "orderStatus"`, "{$request.body#/callbackURL}", "No route is generated"} {
+	for _, expected := range []string{"createCallbackHandlers", `export interface Callbacks`, `readonly "createOrder"`, `readonly "orderStatus"`, "{$request.body#/callbackURL}", "No route is generated", `as unknown as CallbackEndpoints["callbacks"]`, `as unknown as CallbackEndpoints["componentCallbacks"]`} {
 		if !strings.Contains(callbacks, expected) {
 			t.Fatalf("callback source missing %q:\n%s", expected, callbacks)
 		}

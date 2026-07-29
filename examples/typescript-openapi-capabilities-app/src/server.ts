@@ -47,12 +47,14 @@ const toFetchRequest = async (request: IncomingMessage): Promise<Request> => {
 
 const webhookRouter = createWebhookRouter(
   {
-    itemChanged: async ({ body, operationID, security }) => {
-      if (operationID !== "itemChangedWebhook") throw new Error("unexpected webhook operation");
-      if (JSON.stringify(security) !== JSON.stringify([{ webhookSignature: [] }])) {
-        throw new Error("unexpected webhook security metadata");
-      }
-      return { status: 202, body: { accepted: body.id } };
+    itemChanged: {
+      POST: async ({ body, operationID, security }) => {
+        if (operationID !== "itemChangedWebhook") throw new Error("unexpected webhook operation");
+        if (JSON.stringify(security) !== JSON.stringify([{ webhookSignature: [] }])) {
+          throw new Error("unexpected webhook security metadata");
+        }
+        return { status: 202, body: { accepted: body.id } };
+      },
     },
   },
   {
@@ -64,12 +66,21 @@ const webhookRouter = createWebhookRouter(
   },
 );
 
+const callbackExpression = "{$request.body#/callbackURL}";
 const callbackHandlers = createCallbackHandlers({
-  deliveryStatus: async ({ body, operationID }) => {
-    if (operationID !== "deliveryStatusCallback" || body?.kind !== "changed") {
-      throw new Error("unexpected callback delivery");
-    }
-    return { status: 204, headers: { "x-callback-delivery": "accepted" } };
+  callbacks: {
+    createItem: {
+      deliveryStatus: {
+        [callbackExpression]: {
+          POST: async ({ body, operationID }) => {
+            if (operationID !== "deliveryStatusCallback" || body?.kind !== "changed") {
+              throw new Error("unexpected callback delivery");
+            }
+            return { status: 204, headers: { "x-callback-delivery": "accepted" } };
+          },
+        },
+      },
+    },
   },
 }, {
   authenticate: ({ request }) =>
@@ -200,7 +211,12 @@ const apiServer = createServer(async (request, response) => {
 
 const webhookServer = createServer(async (request, response) => {
 	if (request.method === "POST" && request.url === "/callbacks/delivery") {
-		await writeFetchResponse(response, await callbackHandlers.deliveryStatus.fetch(await toFetchRequest(request)));
+		await writeFetchResponse(
+			response,
+			await callbackHandlers.callbacks.createItem.deliveryStatus[callbackExpression].POST.fetch(
+				await toFetchRequest(request),
+			),
+		);
 		return;
 	}
   if (request.method === "POST" && request.url === "/hooks/items") {

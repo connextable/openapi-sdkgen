@@ -33,11 +33,29 @@ import {
   createClient,
   isTransportError,
   isValidationFailedError,
+  type Components,
   type ClientOptions,
+  type Operations,
 } from "./generated/api";
 ```
 
 `createClient(options)` returns the resource API plus stable namespaces:
+
+### Exact type catalogs
+
+`Components` preserves every component schema key and exposes its directional
+projections. `Operations` preserves every `operationId` and correlates its
+input, output, raw response, errors, options, and stream item:
+
+```ts
+type MoneyInput = Components["Money"]["input"];
+type MoneyOutput = Components["Money"]["output"];
+type GetPetInput = Operations["get-pet"]["input"];
+type GetPetError = Operations["get-pet"]["error"];
+```
+
+Exact OpenAPI names are never normalized into flat exported type aliases.
+Bracket access keeps names such as `"get-pet"` and `"get_pet"` distinct.
 
 ### Resource properties
 
@@ -45,7 +63,10 @@ Ergonomic resource-oriented calls derived from operation paths.
 
 ### `$operations`
 
-Every visible OpenAPI `operationId`, exactly named.
+Every visible OpenAPI `operationId`, exactly named and complete. For example,
+`api.$operations["get-pet"](...)`. The path-derived resource tree remains an
+ergonomic convenience; collisions there are resolved deterministically without
+removing anything from `$operations`.
 
 ### `$links`
 
@@ -81,3 +102,7 @@ import { createCallbackHandlers } from "./generated/api/server/callbacks";
 
 These entry points exist only when generation includes `--with server`. See
 [Inbound server contracts](../guide/server.md) for integration examples.
+
+Webhook names, callback dimensions, component callback names, and security
+scheme names use their exact OpenAPI spellings. Use bracket access whenever a
+name is not a valid or unambiguous TypeScript property identifier.

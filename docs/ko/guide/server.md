@@ -24,10 +24,12 @@ import {
 } from "./generated/api/server/webhooks";
 
 const handlers: WebhookHandlers = {
-  orderCreated: async ({ body }) => ({
-    status: 202,
-    body: { accepted: body.id },
-  }),
+  orderCreated: {
+    POST: async ({ body }) => ({
+      status: 202,
+      body: { accepted: body.id },
+    }),
+  },
 };
 
 const router = createWebhookRouter(handlers, {
@@ -49,14 +51,34 @@ const response = await router.fetch(request);
 Callback URL은 runtime expression이므로 호스트가 선택한 경로에 생성된 Fetch handler를 명시적으로 mount해야 합니다.
 
 ```ts
-import { createCallbackHandlers } from "./generated/api/server/callbacks";
+import {
+  createCallbackHandlers,
+  type CallbackHandlers,
+} from "./generated/api/server/callbacks";
 
-const callbacks = createCallbackHandlers({
-  orderStatus: async ({ body }) => ({ status: 204 }),
-});
+const handlers: CallbackHandlers = {
+  callbacks: {
+    createOrder: {
+      orderStatus: {
+        "{$request.body#/callbackUrl}": {
+          POST: async ({ body }) => ({ status: 204 }),
+        },
+      },
+    },
+  },
+};
 
-const response = await callbacks.orderStatus.fetch(request);
+const callbacks = createCallbackHandlers(handlers);
+
+const response =
+  await callbacks.callbacks.createOrder.orderStatus[
+    "{$request.body#/callbackUrl}"
+  ].POST.fetch(request);
 ```
+
+생성된 callback tree는 source operation ID, Callback Object 이름, runtime expression,
+HTTP method를 정확히 보존합니다. 재사용 가능한 `components.callbacks`는
+`ComponentCallbacks` 타입과 `componentCallbacks` runtime catalog에서 제공합니다.
 
 이 분리는 기본 SDK를 browser bundle에서 안전하게 import할 수 있게 하면서도, Fetch를 지원하는 어떤
 server에도 인바운드 endpoint를 쉽게 연결할 수 있게 합니다.

@@ -1,0 +1,291 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Exact identity collision conformance",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "root-index",
+        "security": [],
+        "responses": { "204": { "description": "OK" } }
+      }
+    },
+    "/pets/modern/{foo-bar}": {
+      "get": {
+        "operationId": "get-pet",
+        "security": [],
+        "parameters": [
+          {
+            "name": "foo-bar",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "foo-bar",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "foo_bar",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact record",
+            "headers": {
+              "foo-bar": { "schema": { "type": "string" } },
+              "foo_bar": { "schema": { "type": "string" } },
+              "__proto__": { "schema": { "type": "string" } },
+              "constructor": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CollisionRecord" }
+              }
+            },
+            "links": {
+              "next-step": { "operationId": "get_pet" },
+              "next_step": { "operationId": "get_pet" },
+              "__proto__": { "operationId": "get_pet" },
+              "constructor": { "operationId": "get_pet" }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/AuthErrorOne" }
+              }
+            }
+          }
+        },
+        "callbacks": {
+          "status-hook": {
+            "{$request.query.callbackURL}": {
+              "post": {
+                "operationId": "status-hook-callback",
+                "responses": { "204": { "description": "OK" } }
+              }
+            }
+          },
+          "status_hook": {
+            "{$request.query.callbackURL}": {
+              "post": {
+                "operationId": "status_hook_callback",
+                "responses": { "204": { "description": "OK" } }
+              }
+            }
+          },
+          "component-status": {
+            "$ref": "#/components/callbacks/Reusable-status"
+          }
+        }
+      }
+    },
+    "/pets/legacy": {
+      "get": {
+        "operationId": "get_pet",
+        "security": [],
+        "responses": {
+          "204": { "description": "No content" },
+          "200": {
+            "description": "Stream",
+            "content": {
+              "application/x-ndjson": {
+                "itemSchema": { "$ref": "#/components/schemas/CollisionRecord" }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/AuthErrorTwo" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/streams/modern": {
+      "get": {
+        "operationId": "stream-pet",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Stream",
+            "content": {
+              "application/x-ndjson": {
+                "itemSchema": { "$ref": "#/components/schemas/CollisionRecord" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/streams/legacy": {
+      "get": {
+        "operationId": "stream_pet",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Stream",
+            "content": {
+              "application/x-ndjson": {
+                "itemSchema": { "$ref": "#/components/schemas/CollisionRecord" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "event-hook": {
+      "post": {
+        "operationId": "event-hook-delivery",
+        "security": [{ "api-key": [] }],
+        "responses": { "204": { "description": "OK" } }
+      }
+    },
+    "event_hook": {
+      "post": {
+        "operationId": "event_hook_delivery",
+        "security": [{ "api_key": [] }],
+        "responses": { "204": { "description": "OK" } }
+      }
+    },
+    "__proto__": {
+      "post": {
+        "operationId": "prototype-delivery",
+        "security": [{ "__proto__": [] }],
+        "responses": { "204": { "description": "OK" } }
+      }
+    },
+    "constructor": {
+      "post": {
+        "operationId": "constructor-delivery",
+        "security": [{ "constructor": [] }],
+        "responses": { "204": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Money": {
+        "type": "object",
+        "required": ["amount", "source", "receipt"],
+        "properties": {
+          "amount": { "type": "number" },
+          "source": { "type": "string", "writeOnly": true },
+          "receipt": { "type": "string", "readOnly": true }
+        }
+      },
+      "MoneyInput": { "type": "string" },
+      "MoneyOutput": { "type": "integer" },
+      "foo-bar": { "type": "string" },
+      "foo_bar": { "type": "number" },
+      "Status": {
+        "enum": ["foo-bar", "foo_bar", { "__proto__": true }, ["x", "y"], null]
+      },
+      "CollisionRecord": {
+        "type": "object",
+        "required": [
+          "foo-bar",
+          "foo_bar",
+          "__proto__",
+          "constructor",
+          "money",
+          "moneyInput",
+          "moneyOutput",
+          "normalizedOne",
+          "normalizedTwo",
+          "status"
+        ],
+        "properties": {
+          "foo-bar": { "type": "string" },
+          "foo_bar": { "type": "string" },
+          "__proto__": { "type": "string" },
+          "constructor": { "type": "string" },
+          "money": { "$ref": "#/components/schemas/Money" },
+          "moneyInput": { "$ref": "#/components/schemas/MoneyInput" },
+          "moneyOutput": { "$ref": "#/components/schemas/MoneyOutput" },
+          "normalizedOne": { "$ref": "#/components/schemas/foo-bar" },
+          "normalizedTwo": { "$ref": "#/components/schemas/foo_bar" },
+          "status": { "$ref": "#/components/schemas/Status" }
+        }
+      },
+      "AuthDetailsOne": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": { "reason": { "type": "string" } }
+      },
+      "AuthDetailsTwo": {
+        "type": "object",
+        "required": ["challenge"],
+        "properties": { "challenge": { "type": "string" } }
+      },
+      "AuthErrorOne": {
+        "type": "object",
+        "x-error-category": "authentication-required",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details"],
+            "properties": {
+              "code": { "const": "authentication_required" },
+              "message": { "type": "string" },
+              "details": { "$ref": "#/components/schemas/AuthDetailsOne" }
+            }
+          }
+        }
+      },
+      "AuthErrorTwo": {
+        "type": "object",
+        "x-error-category": "authentication-required",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details"],
+            "properties": {
+              "code": { "const": "authentication_required" },
+              "message": { "type": "string" },
+              "details": { "$ref": "#/components/schemas/AuthDetailsTwo" }
+            }
+          }
+        }
+      }
+    },
+    "callbacks": {
+      "Reusable-status": {
+        "{$request.query.callbackURL}": {
+          "post": {
+            "operationId": "reusable-status-callback",
+            "responses": { "204": { "description": "OK" } }
+          }
+        }
+      },
+      "__proto__": {
+        "{$request.query.prototypeURL}": {
+          "post": {
+            "operationId": "prototype-component-callback",
+            "responses": { "204": { "description": "OK" } }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "api-key": { "type": "apiKey", "in": "header", "name": "x-api-key-one" },
+      "api_key": { "type": "apiKey", "in": "header", "name": "x-api-key-two" },
+      "__proto__": { "type": "apiKey", "in": "header", "name": "x-api-key-three" },
+      "constructor": { "type": "apiKey", "in": "header", "name": "x-api-key-four" }
+    }
+  }
+}

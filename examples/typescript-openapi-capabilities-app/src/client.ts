@@ -35,7 +35,7 @@ const inspected = await api.$operations.inspectRecord({
     pipes: ["one", "two"],
     query: { scope: "all" },
   },
-  headerParams: { xTraceID: "trace-1" },
+  headerParams: { "X-Trace-ID": "trace-1" },
   cookieParams: { session: "example-session" },
 });
 assert(inspected.id === "item-record", "parameter serialization did not reach the server");

@@ -899,7 +899,7 @@ func operationInputTypes(document *ir.Document, operation ir.Operation) ([]strin
 	}
 	if parameters, err := parametersIn(document, operation, "query"); err != nil {
 		return nil, err
-	} else if len(parameters) > 0 || operation.Pagination != "" || operation.Raw["x-sort"] != nil {
+	} else if len(parameters) > 0 || operation.Pagination != "" || len(operationSortFields(operation)) > 0 {
 		result = append(result, name+"QueryInput")
 	}
 	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {
