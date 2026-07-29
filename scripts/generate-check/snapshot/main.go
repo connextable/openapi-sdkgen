@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
+	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -123,6 +124,10 @@ func describeSnapshot(snapshot compiler.InputSnapshot) (snapshotReport, error) {
 		}
 	}
 	schemas, _ := components["schemas"].(map[string]any)
+	operationCount, err := countOperations(root)
+	if err != nil {
+		return snapshotReport{}, fmt.Errorf("count snapshot operations: %w", err)
+	}
 	digest := sha256.Sum256(snapshot.Data)
 	return snapshotReport{
 		Input:            snapshot.Input,
@@ -133,58 +138,45 @@ func describeSnapshot(snapshot compiler.InputSnapshot) (snapshotReport, error) {
 		Title:            title,
 		Version:          version,
 		OpenAPIVersion:   openapiVersion,
-		OperationCount:   countOperations(root),
+		OperationCount:   operationCount,
 		ComponentCount:   componentCount,
 		ComponentSchemas: len(schemas),
 	}, nil
 }
 
-func countOperations(root map[string]any) int {
+func countOperations(root map[string]any) (int, error) {
 	total := 0
 	for _, field := range []string{"paths", "webhooks"} {
 		items, _ := root[field].(map[string]any)
-		for _, value := range items {
+		for name, value := range items {
 			pathItem, _ := value.(map[string]any)
-			total += countPathItemOperations(root, pathItem, make(map[string]bool))
+			count, err := countPathItemOperations(root, pathItem)
+			if err != nil {
+				return 0, fmt.Errorf("%s %q: %w", field, name, err)
+			}
+			total += count
 		}
 	}
-	return total
+	return total, nil
 }
 
-func countPathItemOperations(root, pathItem map[string]any, resolving map[string]bool) int {
-	if reference, _ := pathItem["$ref"].(string); strings.HasPrefix(reference, "#/components/pathItems/") && !resolving[reference] {
-		resolving[reference] = true
-		components, _ := root["components"].(map[string]any)
-		pathItems, _ := components["pathItems"].(map[string]any)
-		token := strings.TrimPrefix(reference, "#/components/pathItems/")
-		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
-		if target, ok := pathItems[token].(map[string]any); ok {
-			merged := make(map[string]any, len(target)+len(pathItem))
-			for key, value := range target {
-				merged[key] = value
-			}
-			for key, value := range pathItem {
-				if key != "$ref" {
-					merged[key] = value
-				}
-			}
-			delete(resolving, reference)
-			return countPathItemOperations(root, merged, resolving)
-		}
-		delete(resolving, reference)
+func countPathItemOperations(root, pathItem map[string]any) (int, error) {
+	resolved, err := ir.ResolvePathItem(root, pathItem)
+	if err != nil {
+		return 0, err
 	}
 	total := 0
-	for method := range pathItem {
+	for method := range resolved {
 		switch strings.ToLower(method) {
 		case "get", "put", "post", "delete", "options", "head", "patch", "trace", "query":
 			total++
 		}
 	}
-	additional, _ := pathItem["additionalOperations"].(map[string]any)
+	additional, _ := resolved["additionalOperations"].(map[string]any)
 	for _, value := range additional {
 		if _, ok := value.(map[string]any); ok {
 			total++
 		}
 	}
-	return total
+	return total, nil
 }

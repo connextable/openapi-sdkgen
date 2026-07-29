@@ -73,7 +73,8 @@ agent_run "snapshot OpenAPI input" "$snapshot_bin" \
   --report-output "$report" \
   ${snapshot_options[@]+"${snapshot_options[@]}"}
 
-effective_base="$(<"$effective_base_file")"
+effective_base_with_sentinel="$(cat "$effective_base_file"; printf '\x1f')"
+effective_base="${effective_base_with_sentinel%$'\x1f'}"
 generation_status=0
 set +e
 agent_run "generate checked SDK" "$generator_bin" generate \

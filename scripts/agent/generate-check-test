@@ -399,6 +399,28 @@ assert_contains "$local_relative_output" "generation exit: 0"
 assert_contains "$local_relative_output" "typecheck exit: 0"
 assert_clean_temporary_root
 
+newline_root="$test_root/newline"
+mkdir -p "$newline_root/schemas"
+newline_input="$newline_root/openapi.json"$'\n'
+cat >"$newline_input" <<'EOF'
+{
+  "openapi":"3.2.0",
+  "info":{"title":"Newline path refs","version":"1"},
+  "paths":{"/items":{"get":{"operationId":"listItems","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"./schemas/item.json"}}}}}}}}
+}
+EOF
+cp "$relative_root/schemas/item.json" "$newline_root/schemas/item.json"
+newline_path_output="$(
+  TMPDIR="$test_tmp" \
+  SDKGEN_GENERATE_CHECK_SKIP_BUILD=1 \
+  SDKGEN_GENERATE_CHECK_ACQUIRE_BIN="$test_root/snapshot" \
+  SDKGEN_GENERATE_CHECK_GENERATOR_BIN="$test_root/openapi-sdkgen" \
+  "$ROOT/scripts/agent/generate-check" "$newline_input"
+)"
+assert_contains "$newline_path_output" "generation exit: 0"
+assert_contains "$newline_path_output" "typecheck exit: 0"
+assert_clean_temporary_root
+
 set +e
 stdin_transport_output="$(
   TMPDIR="$test_tmp" \
