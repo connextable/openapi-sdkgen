@@ -47,6 +47,7 @@ chmod +x "$repository/scripts/release/publish.sh"
 
 cat >"$repository/scripts/release/check.sh" <<'EOF'
 #!/usr/bin/env bash
+printf 'mock release check progress\n'
 if [[ -n "${RELEASE_TEST_CHECK_MARKER:-}" ]]; then
   printf 'ran\n' >"$RELEASE_TEST_CHECK_MARKER"
 fi
@@ -89,6 +90,7 @@ dry_run_marker="$test_root/dry-run-check"
 output="$(RELEASE_TEST_CHECK_MARKER="$dry_run_marker" run_release --since v1.0.0 --dry-run patch)"
 assert_contains "$output" "Last stable tag v1.0.0"
 assert_contains "$output" "Tag          v1.0.1"
+assert_contains "$output" "mock release check progress"
 assert_contains "$(cat "$dry_run_marker")" "ran"
 
 if output="$(RELEASE_TEST_FAIL_CHECK=1 run_release --since v1.0.0 --dry-run patch 2>&1)"; then

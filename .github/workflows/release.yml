@@ -67,41 +67,9 @@ jobs:
             echo "commit=$(git rev-parse "${TAG}^{commit}")"
           } >> "$GITHUB_OUTPUT"
 
-  verify-release:
-    name: Verify release inputs
-    needs: validate-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ needs.validate-release.outputs.ref }}
-          fetch-depth: 0
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: main
-          path: release-tools
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: "1.26.5"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24.18.0"
-          package-manager-cache: false
-      - name: Enable Corepack pnpm shim
-        run: corepack enable pnpm
-      - name: Verify immutable tag target
-        run: test "$(git rev-parse HEAD)" = "${{ needs.validate-release.outputs.commit }}"
-      - name: Run release checks
-        run: |
-          SOURCE_ROOT="$GITHUB_WORKSPACE" \
-            RELEASE_CHECK_DIR="$GITHUB_WORKSPACE/.tmp/release-check" \
-            bash release-tools/scripts/release/check.sh "${{ needs.validate-release.outputs.version }}"
-
   publish-npm:
     name: Publish npm package
-    needs: [validate-release, verify-release]
+    needs: validate-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -129,18 +97,12 @@ jobs:
           SOURCE_ROOT="$GITHUB_WORKSPACE" \
             NPM_PACKAGE_DIR="$GITHUB_WORKSPACE/.tmp/npm-package" \
             bash release-tools/scripts/npm/package.sh "${{ needs.validate-release.outputs.version }}"
-      - name: Verify npm package
-        run: |
-          SOURCE_ROOT="$GITHUB_WORKSPACE" \
-            NPM_PACKAGE_DIR="$GITHUB_WORKSPACE/.tmp/npm-package" \
-            NPM_TEST_DIR="$GITHUB_WORKSPACE/.tmp/npm-package-install" \
-            bash release-tools/scripts/npm/check.sh "$GITHUB_WORKSPACE/.tmp/npm-package"
       - name: Publish npm package through OIDC
         run: bash release-tools/scripts/npm/publish.sh "$GITHUB_WORKSPACE/.tmp/npm-package" ${{ contains(needs.validate-release.outputs.tag, '-') && 'next' || 'latest' }}
 
   publish-homebrew:
     name: Publish Homebrew formula
-    needs: [validate-release, publish-npm]
+    needs: validate-release
     concurrency:
       group: connextable-homebrew-tap
       cancel-in-progress: false
@@ -154,7 +116,7 @@ jobs:
 
   publish-github-release:
     name: Publish GitHub Release
-    needs: [validate-release, publish-homebrew]
+    needs: validate-release
     runs-on: ubuntu-latest
     permissions:
       contents: write

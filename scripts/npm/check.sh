@@ -12,7 +12,6 @@ if [[ ! -f "$package_dir/package.json" || ! -f "$package_dir/bin/openapi-sdkgen.
 fi
 
 node "$package_dir/bin/openapi-sdkgen.js" --help
-npm pack --dry-run --json "$package_dir"
 test_dir="${NPM_TEST_DIR:-$ROOT/.tmp/npm-package-install}"
 rm -rf "$test_dir"
 mkdir -p "$test_dir"

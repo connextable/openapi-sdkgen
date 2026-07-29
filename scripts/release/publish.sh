@@ -618,12 +618,10 @@ select_bump() {
 run_checks() {
   ui_section "Checks"
   ui_note "Running release checks"
-  local out
-  if out="$(bash "$ROOT/scripts/release/check.sh" "${PATCH_TAG#v}" 2>&1)"; then
+  if bash "$ROOT/scripts/release/check.sh" "${PATCH_TAG#v}"; then
     ui_ok "checks passed"
   else
     ui_error "checks failed"
-    printf '\n%s\n\n' "$out"
     ui_note_err "Checks failed; aborting release."
     exit 1
   fi

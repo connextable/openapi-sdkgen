@@ -5,6 +5,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh
 workflow="$ROOT/.github/workflows/release.yml"
 goreleaser="$ROOT/.goreleaser.yaml"
 release_check="$ROOT/scripts/release/check.sh"
+npm_package="$ROOT/scripts/npm/package.sh"
+npm_check="$ROOT/scripts/npm/check.sh"
 
 require_pattern() {
   local pattern="$1"
@@ -50,14 +52,9 @@ require_pattern 'workflow_dispatch:'
 require_pattern 'run-name: Release'
 require_pattern 'group: openapi-sdkgen-release'
 require_pattern 'Validate release tag'
-require_pattern 'Verify release inputs'
-require_pattern 'Run release checks'
-require_pattern 'scripts/release/check\.sh'
-require_pattern 'Enable Corepack pnpm shim'
-require_pattern 'corepack enable pnpm'
 require_pattern 'Verify immutable tag target'
+require_pattern 'Build npm package'
 require_pattern 'scripts/npm/package\.sh'
-require_pattern 'scripts/npm/check\.sh'
 require_pattern 'scripts/npm/publish\.sh'
 require_pattern '\$GITHUB_WORKSPACE/\.tmp/npm-package'
 require_pattern 'publish-formula\.yml@main'
@@ -71,7 +68,33 @@ fi
 require_pattern 'contents: write'
 reject_pattern 'just agent'
 require_release_check_pattern 'run typecheck'
-require_release_check_pattern 'run test'
+require_release_check_pattern 'run_step "TypeScript test coverage"'
+require_release_check_pattern 'go env GOCACHE'
+require_release_check_pattern 'go env GOMODCACHE'
+require_release_check_pattern 'SECONDS'
+reject_release_check_pattern 'run test'
 reject_release_check_pattern 'run conformance'
+reject_pattern 'Verify npm package'
+reject_pattern 'scripts/npm/check\.sh'
+reject_pattern 'Verify release inputs'
+reject_pattern 'Run release checks'
+reject_pattern 'scripts/release/check\.sh'
+
+parallel_publish_jobs="$(grep -Ec '^[[:space:]]+needs: validate-release$' "$workflow")"
+if [[ "$parallel_publish_jobs" != "3" ]]; then
+  echo "all three publish jobs must start after tag validation, found $parallel_publish_jobs" >&2
+  exit 1
+fi
+
+if ! grep -Eq 'NPM_PACKAGE_BUILD_JOBS' "$npm_package" || ! grep -Eq 'go build .*&$' "$npm_package" || ! grep -Eq 'wait "\$\{build_pids\[\$index\]\}"' "$npm_package"; then
+  echo "npm package builds must use bounded parallel workers" >&2
+  exit 1
+fi
+
+npm_pack_count="$(grep -Ec '^[[:space:]]*npm pack ' "$npm_check")"
+if [[ "$npm_pack_count" != "1" ]]; then
+  echo "npm package check must create exactly one tarball, found $npm_pack_count npm pack commands" >&2
+  exit 1
+fi
 
 agent_note "ok release workflow contract"
