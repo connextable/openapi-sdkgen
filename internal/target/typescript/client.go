@@ -1588,17 +1588,11 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 				"style: " + quoteTS(parameter.Style),
 				fmt.Sprintf("explode: %t", parameter.Explode),
 				fmt.Sprintf("allowReserved: %t", parameter.AllowReserved),
-				fmt.Sprintf("required: %t", parameter.Required),
+				fmt.Sprintf("required: %t", clientParameterRequired(parameter)),
 				"schema: " + descriptor,
 			}
 			if parameter.ContentType != "" {
 				fields = append(fields, "contentType: "+quoteTS(parameter.ContentType))
-			}
-			if parameter.EnvironmentControlled {
-				fields = append(fields, "hostManaged: true")
-			}
-			if parameter.ForbiddenMethodValue {
-				fields = append(fields, "forbiddenMethodValue: true")
 			}
 			if parameter.Sort != nil {
 				values := make([]runtimeProperty, 0, len(parameter.Sort.Values))

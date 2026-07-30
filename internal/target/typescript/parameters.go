@@ -21,7 +21,6 @@ type operationParameter struct {
 	Deprecated            bool
 	AllowReserved         bool
 	EnvironmentControlled bool
-	ForbiddenMethodValue  bool
 	ContentType           string
 	Schema                any
 	Raw                   map[string]any
@@ -34,7 +33,6 @@ type requestHeaderPolicy uint8
 const (
 	requestHeaderCallerManaged requestHeaderPolicy = iota
 	requestHeaderEnvironmentControlled
-	requestHeaderForbiddenMethodValue
 )
 
 var fetchEnvironmentControlledRequestHeaders = map[string]struct{}{
@@ -68,12 +66,7 @@ func classifyFetchRequestHeader(name string) requestHeaderPolicy {
 		strings.HasPrefix(name, "sec-") {
 		return requestHeaderEnvironmentControlled
 	}
-	switch name {
-	case "x-http-method", "x-http-method-override", "x-method-override":
-		return requestHeaderForbiddenMethodValue
-	default:
-		return requestHeaderCallerManaged
-	}
+	return requestHeaderCallerManaged
 }
 
 func operationParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
@@ -152,7 +145,7 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 			merged[key] = operationParameter{
 				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operationRouteKey(operation)+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
 				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
-				EnvironmentControlled: headerPolicy == requestHeaderEnvironmentControlled, ForbiddenMethodValue: headerPolicy == requestHeaderForbiddenMethodValue, Raw: raw, Pointer: pointer, Sort: sortPlan,
+				EnvironmentControlled: headerPolicy == requestHeaderEnvironmentControlled, Raw: raw, Pointer: pointer, Sort: sortPlan,
 			}
 		}
 	}

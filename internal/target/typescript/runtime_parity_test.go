@@ -433,7 +433,7 @@ if (JSON.stringify(seen) !== JSON.stringify([["/source",null,null],["/target","i
 	}
 }
 
-func TestRuntimeEnforcesFetchManagedRequestHeaderPolicy(t *testing.T) {
+func TestRuntimeDelegatesEnvironmentControlledRequestHeadersToFetch(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.2.0",
   "info": {"title": "Fetch managed headers", "version": "1"},
@@ -476,24 +476,22 @@ const fetch = async (_input, init) => {
   dispatched.push(new Headers(init.headers));
   return new Response(null, { status: 204 });
 };
-const expectBlocked = async (pending, header, previousCalls) => {
-  try {
-    await pending;
-    throw new Error("blocked header was accepted: " + header);
-  } catch (error) {
-    if (!String(error.cause).includes(header)) throw error;
-    if (calls !== previousCalls) throw new Error("blocked header reached transport: " + header);
-  }
-};
 
 const api = createClient({ baseURL: "https://api.example.test", fetch });
-await expectBlocked(api.$operations.oauth({ body: {}, headerParams: { Origin: "https://caller.example" } }), "Origin", calls);
-await expectBlocked(createClient({ baseURL: "https://api.example.test", fetch, headers: { Origin: "https://caller.example" } }).$operations.oauth({ body: {} }), "origin", calls);
-await expectBlocked(api.$operations.oauth({ body: {} }, { headers: { "Sec-Fetch-Site": "same-origin" } }), "sec-fetch-site", calls);
+await api.$operations.oauth({ body: {}, headerParams: { Origin: "https://caller.example" } });
+if (dispatched.at(-1)?.get("Origin") !== "https://caller.example") throw new Error("typed Origin was not dispatched");
+await api.$operations.oauth({ body: {} });
+if (dispatched.at(-1)?.has("Origin")) throw new Error("omitted Origin was synthesized by the SDK");
 
 await api.$operations.override({ headerParams: { "X-HTTP-Method-Override": "PATCH" } });
 if (dispatched.at(-1)?.get("X-HTTP-Method-Override") !== "PATCH") throw new Error("safe method override was not dispatched");
-await expectBlocked(api.$operations.override({ headerParams: { "X-HTTP-Method-Override": "PATCH, TRACE" } }), "X-HTTP-Method-Override", calls);
+await api.$operations.override(
+  { headerParams: { "X-HTTP-Method-Override": "PATCH, TRACE" } },
+  { headers: { Origin: "https://raw.example", "Sec-Fetch-Site": "same-origin" } },
+);
+if (dispatched.at(-1)?.get("X-HTTP-Method-Override") !== "PATCH, TRACE") throw new Error("conditional method value was not delegated");
+if (dispatched.at(-1)?.get("Origin") !== "https://raw.example") throw new Error("raw Origin was not dispatched");
+if (dispatched.at(-1)?.get("Sec-Fetch-Site") !== "same-origin") throw new Error("raw Sec header was not dispatched");
 
 const transport = createClient({
   baseURL: "https://api.example.test",
@@ -508,6 +506,7 @@ const transport = createClient({
   },
 });
 await transport.$operations.oauth({ body: {} });
+if (calls !== 4) throw new Error("request dispatch count mismatch: " + calls);
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute Fetch-managed request-header runtime test: %v\n%s", err, output)
@@ -2033,7 +2032,7 @@ await createClient({ baseURL: "https://api.example.test", credentials, headers: 
 	}
 }
 
-func TestRuntimeEnforcesFetchManagedPolicyForHeaderAPIKeys(t *testing.T) {
+func TestRuntimeDelegatesEnvironmentControlledHeaderAPIKeysToFetch(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0",
   "info":{"title":"Fetch-managed security headers","version":"1"},
@@ -2073,21 +2072,12 @@ const api = createClient({
     calls++;
     const url = new URL(String(input));
     const headers = new Headers(init.headers);
-    if (url.pathname === "/override" && headers.get("X-HTTP-Method-Override") !== "PATCH") throw new Error("safe override API key missing");
+    if (url.pathname === "/origin" && headers.get("Origin") !== "https://caller.example") throw new Error("Origin API key missing");
+    if (url.pathname === "/override" && headers.get("X-HTTP-Method-Override") !== override) throw new Error("override API key missing");
     if (url.pathname === "/agent" && headers.get("User-Agent") !== "openapi-sdkgen-test") throw new Error("User-Agent API key missing");
     return new Response(null, { status: 204 });
   },
 });
-const expectBlocked = async (pending, header) => {
-  const previousCalls = calls;
-  await pending.then(
-    () => { throw new Error("blocked security header was accepted: " + header); },
-    (error) => {
-      if (error.code !== "REQUEST_ENCODE_FAILED" || !String(error.cause).includes(header)) throw error;
-      if (calls !== previousCalls) throw new Error("blocked security header reached fetch: " + header);
-    },
-  );
-};
 const previousCalls = calls;
 await api.$operations.getOverride().then(
   () => { throw new Error("non-string API key was accepted"); },
@@ -2097,12 +2087,12 @@ await api.$operations.getOverride().then(
   },
 );
 override = "TRACE";
-await expectBlocked(api.$operations.getOrigin(), "Origin");
-await expectBlocked(api.$operations.getOverride(), "X-HTTP-Method-Override");
+await api.$operations.getOrigin();
+await api.$operations.getOverride();
 override = "PATCH";
 await api.$operations.getOverride();
 await api.$operations.getAgent();
-if (calls !== 2) throw new Error("security header dispatch count mismatch: " + calls);
+if (calls !== 4) throw new Error("security header dispatch count mismatch: " + calls);
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute Fetch-managed security-header runtime test: %v\n%s", err, output)

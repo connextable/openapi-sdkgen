@@ -147,12 +147,15 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 				`readonly "X-Trace": string`,
 				`readonly "X-HTTP-Method-Override"?: string | undefined`,
 				`name: "Origin"`,
-				`hostManaged: true`,
 				`name: "X-HTTP-Method-Override"`,
-				`forbiddenMethodValue: true`,
 			} {
 				if !strings.Contains(client, expected) {
 					t.Fatalf("client missing %q:\n%s", expected, client)
+				}
+			}
+			for _, unexpected := range []string{`hostManaged: true`, `forbiddenMethodValue: true`} {
+				if strings.Contains(client, unexpected) {
+					t.Fatalf("client contains obsolete request-header policy %q:\n%s", unexpected, client)
 				}
 			}
 			managedOnlyName := operationTypeName(operationRouteKey(findOperation(document, "managedOnly")))

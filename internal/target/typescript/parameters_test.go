@@ -40,17 +40,6 @@ func TestClassifyFetchRequestHeader(t *testing.T) {
 		}
 	}
 
-	conditional := []string{
-		"x-http-method",
-		"X-HTTP-Method-Override",
-		"x-method-override",
-	}
-	for _, name := range conditional {
-		if got := classifyFetchRequestHeader(name); got != requestHeaderForbiddenMethodValue {
-			t.Errorf("classifyFetchRequestHeader(%q) = %v, want forbidden method value", name, got)
-		}
-	}
-
 	callerManaged := []string{
 		"authorization",
 		"content-type",
@@ -59,6 +48,9 @@ func TestClassifyFetchRequestHeader(t *testing.T) {
 		"x-origin",
 		"proxy",
 		"security",
+		"x-http-method",
+		"X-HTTP-Method-Override",
+		"x-method-override",
 		"x-http-methods",
 	}
 	for _, name := range callerManaged {

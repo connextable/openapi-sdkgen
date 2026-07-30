@@ -239,10 +239,10 @@ describe("generated runtime", () => {
     expect(seen[1]?.get("if-match")).toBe("typed-version");
   });
 
-  it("rejects Fetch-managed headers from typed and raw caller inputs before transport", async () => {
-    let calls = 0;
-    const fetch = async (): Promise<Response> => {
-      calls++;
+  it("forwards environment-controlled headers from typed and raw caller inputs", async () => {
+    const seen: Headers[] = [];
+    const fetch = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      seen.push(new Headers(init?.headers));
       return new Response(null, { status: 204 });
     };
     const managed = operation({
@@ -254,8 +254,6 @@ describe("generated runtime", () => {
           property: "Origin",
           style: "simple",
           explode: false,
-          required: true,
-          hostManaged: true,
         },
         {
           location: "header",
@@ -263,46 +261,25 @@ describe("generated runtime", () => {
           property: "Sec-Fetch-Site",
           style: "simple",
           explode: false,
-          hostManaged: true,
         },
       ],
     });
     const request = createRequest({ baseURL: "https://api.example.test", fetch });
 
-    for (const headerParams of [
-      { Origin: "https://caller.example" },
-      { "Sec-Fetch-Site": "same-origin" },
-    ]) {
-      await request(managed, { headerParams }).then(
-        () => {
-          throw new Error("typed host-managed header was accepted");
-        },
-        (error: unknown) => {
-          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
-        },
-      );
-    }
-    for (const rawRequest of [
-      () =>
-        createRequest({
-          baseURL: "https://api.example.test",
-          fetch,
-          headers: { Origin: "https://caller.example" },
-        })(operation({ path: "/raw-client" })),
-      () =>
-        request(operation({ path: "/raw-request" }), undefined, {
-          headers: { "Proxy-Authorization": "secret" },
-        }),
-    ]) {
-      await rawRequest().then(
-        () => {
-          throw new Error("raw host-managed header was accepted");
-        },
-        (error: unknown) => {
-          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
-        },
-      );
-    }
+    await request(managed, { headerParams: { Origin: "https://caller.example" } });
+    expect(seen.at(-1)?.get("Origin")).toBe("https://caller.example");
+    await request(managed, { headerParams: { "Sec-Fetch-Site": "same-origin" } });
+    expect(seen.at(-1)?.get("Sec-Fetch-Site")).toBe("same-origin");
+    await createRequest({
+      baseURL: "https://api.example.test",
+      fetch,
+      headers: { Origin: "https://client.example" },
+    })(operation({ path: "/raw-client" }));
+    expect(seen.at(-1)?.get("Origin")).toBe("https://client.example");
+    await request(operation({ path: "/raw-request" }), undefined, {
+      headers: { "Proxy-Authorization": "secret" },
+    });
+    expect(seen.at(-1)?.get("Proxy-Authorization")).toBe("secret");
     for (const name of [
       "Accept-Charset",
       "Accept-Encoding",
@@ -329,17 +306,10 @@ describe("generated runtime", () => {
       "Sec-Future",
     ]) {
       await request(operation({ path: "/raw-fixed" }), undefined, {
-        headers: [[name, "blocked"]],
-      }).then(
-        () => {
-          throw new Error(`raw host-managed header was accepted: ${name}`);
-        },
-        (error: unknown) => {
-          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
-        },
-      );
+        headers: [[name, "forwarded"]],
+      });
+      expect(seen.at(-1)?.get(name)).toBe("forwarded");
     }
-    expect(calls).toBe(0);
 
     await request(operation({ path: "/raw-allowed" }), undefined, {
       headers: {
@@ -348,10 +318,10 @@ describe("generated runtime", () => {
         "X-HTTP-Methods": "TRACE",
       },
     });
-    expect(calls).toBe(1);
+    expect(seen.at(-1)?.get("User-Agent")).toBe("openapi-sdkgen-test");
   });
 
-  it("allows safe method overrides and blocks Fetch-forbidden method values", async () => {
+  it("delegates method override values to Fetch", async () => {
     const seen: Headers[] = [];
     const request = createRequest({
       baseURL: "https://api.example.test",
@@ -369,7 +339,6 @@ describe("generated runtime", () => {
           property: "method",
           style: "simple",
           explode: false,
-          forbiddenMethodValue: true,
         },
       ],
     });
@@ -380,27 +349,13 @@ describe("generated runtime", () => {
     expect(seen[1]?.get("x-http-method-override")).toBe(`"PATCH, TRACE"`);
     await request(override, { headerParams: { method: "RECONNECT" } });
     expect(seen[2]?.get("x-http-method-override")).toBe("RECONNECT");
-    await request(override, { headerParams: { method: "PATCH, TRACE" } }).then(
-      () => {
-        throw new Error("forbidden method override was accepted");
-      },
-      (error: unknown) => {
-        expect(String((error as { cause?: unknown }).cause)).toContain("X-HTTP-Method-Override");
-        expect(String((error as { cause?: unknown }).cause)).not.toContain("PATCH");
-        expect(String((error as { cause?: unknown }).cause)).not.toContain("TRACE");
-      },
-    );
+    await request(override, { headerParams: { method: "PATCH, TRACE" } });
+    expect(seen[3]?.get("x-http-method-override")).toBe("PATCH, TRACE");
     await request(operation({ path: "/raw-override" }), undefined, {
       headers: { "X-Method-Override": "connect" },
-    }).then(
-      () => {
-        throw new Error("raw forbidden method override was accepted");
-      },
-      (error: unknown) => {
-        expect(String((error as { cause?: unknown }).cause)).toContain("x-method-override");
-      },
-    );
-    expect(seen).toHaveLength(3);
+    });
+    expect(seen[4]?.get("x-method-override")).toBe("connect");
+    expect(seen).toHaveLength(5);
   });
 
   it("lets a trusted custom transport inject a host-managed header after encoding", async () => {
@@ -427,8 +382,6 @@ describe("generated runtime", () => {
             property: "Origin",
             style: "simple",
             explode: false,
-            required: true,
-            hostManaged: true,
           },
         ],
       }),

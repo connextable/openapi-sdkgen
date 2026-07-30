@@ -567,10 +567,6 @@ export interface ParameterDefinition {
   readonly allowReserved?: boolean;
   /** Whether the parameter must be present before the request is sent. Defaults to false. */
   readonly required?: boolean;
-  /** Whether Fetch owns this request header instead of generated caller input. */
-  readonly hostManaged?: boolean;
-  /** Whether forbidden HTTP method values require a runtime header guard. */
-  readonly forbiddenMethodValue?: boolean;
   /** Media type for a content-based parameter. */
   readonly contentType?: string;
   /** Schema used for wire-name transformation before serialization. */
@@ -1027,100 +1023,6 @@ const reservedHeaders = new Set([
   "x-csrf-token",
   "x-request-id",
 ]);
-
-const fetchHostManagedRequestHeaders = new Set([
-  "accept-charset",
-  "accept-encoding",
-  "access-control-request-headers",
-  "access-control-request-method",
-  "connection",
-  "content-length",
-  "cookie",
-  "cookie2",
-  "date",
-  "dnt",
-  "expect",
-  "host",
-  "keep-alive",
-  "origin",
-  "referer",
-  "set-cookie",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "via",
-]);
-
-function isFetchHostManagedRequestHeader(name: string): boolean {
-  const normalized = name.toLowerCase();
-  return fetchHostManagedRequestHeaders.has(normalized) || normalized.startsWith("proxy-") || normalized.startsWith("sec-");
-}
-
-function isFetchMethodOverrideHeader(name: string): boolean {
-  switch (name.toLowerCase()) {
-    case "x-http-method":
-    case "x-http-method-override":
-    case "x-method-override":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function splitFetchHeaderValue(value: string): string[] {
-  const values: string[] = [];
-  let position = 0;
-  let temporaryValue = "";
-  while (true) {
-    while (position < value.length && value[position] !== `"` && value[position] !== ",") {
-      temporaryValue += value[position++];
-    }
-    if (value[position] === `"`) {
-      temporaryValue += value[position++];
-      while (position < value.length) {
-        const codePoint = value[position++]!;
-        temporaryValue += codePoint;
-        if (codePoint === "\\" && position < value.length) {
-          temporaryValue += value[position++];
-        } else if (codePoint === `"`) {
-          break;
-        }
-      }
-      if (position < value.length) continue;
-    }
-    values.push(temporaryValue.replace(/^[\t ]+|[\t ]+$/g, ""));
-    temporaryValue = "";
-    if (position >= value.length) return values;
-    position++;
-  }
-}
-
-function asciiUppercase(value: string): string {
-  return value.replace(/[a-z]/g, (codePoint) => String.fromCharCode(codePoint.charCodeAt(0) - 0x20));
-}
-
-function hasForbiddenMethodOverrideValue(value: string): boolean {
-  return splitFetchHeaderValue(value).some((method) => {
-    switch (asciiUppercase(method)) {
-      case "CONNECT":
-      case "TRACE":
-      case "TRACK":
-        return true;
-      default:
-        return false;
-    }
-  });
-}
-
-function assertCallerRequestHeader(name: string, value: string, parameter?: ParameterDefinition): void {
-  if (parameter?.hostManaged || isFetchHostManagedRequestHeader(name)) {
-    throw new TypeError(`Request header ${name} is host-managed by Fetch and cannot be set by SDK callers`);
-  }
-  if ((parameter?.forbiddenMethodValue || isFetchMethodOverrideHeader(name)) && hasForbiddenMethodOverrideValue(value)) {
-    throw new TypeError(`Request header ${name} contains a Fetch-forbidden HTTP method`);
-  }
-}
 
 /**
  * Creates the endpoint-neutral Fetch API request executor used by a generated client.
@@ -1669,7 +1571,6 @@ function applySecurityCredential(
       if (credential.kind !== "api-key" || typeof credential.value !== "string" || credential.value === "") throw securityCredentialError(scheme.name, "api-key value");
       if (scheme.location === "header") {
         if (headers.has(scheme.parameterName!)) throw securityCollision(scheme.name, `header ${scheme.parameterName}`);
-        assertCallerRequestHeader(scheme.parameterName!, credential.value);
         headers.set(scheme.parameterName!, credential.value);
         return;
       }
@@ -1886,11 +1787,7 @@ function encodeRequestSynchronous(
     if (value === undefined) continue;
     const parameter = findParameterByProperty(operation, "header", property);
     const name = parameter?.name ?? property;
-    if (parameter?.hostManaged || isFetchHostManagedRequestHeader(name)) {
-      throw new TypeError(`Request header ${name} is host-managed by Fetch and cannot be set by SDK callers`);
-    }
     const serialized = parameter?.contentType === undefined ? serializeSimpleValue(encodeParameterWireValue(operation, parameter, value), parameter?.explode ?? false) : serializeContentParameterSync(encodeParameterWireValue(operation, parameter, value), parameter.contentType, parameter.schema, operation.inputSchemas ?? {});
-    assertCallerRequestHeader(name, serialized, parameter);
     headers.set(name, serialized);
   }
   setHeader(headers, "Authorization", options.authorization ?? client.authorization);
@@ -1992,15 +1889,11 @@ async function encodeRequestAsync(
     if (value === undefined) continue;
     const parameter = findParameterByProperty(operation, "header", property);
     const name = parameter?.name ?? property;
-    if (parameter?.hostManaged || isFetchHostManagedRequestHeader(name)) {
-      throw new TypeError(`Request header ${name} is host-managed by Fetch and cannot be set by SDK callers`);
-    }
     const encodedValue = encodeParameterWireValue(operation, parameter, value);
     const serialized =
       parameter?.contentType === undefined
         ? serializeSimpleValue(encodedValue, parameter?.explode ?? false)
         : await serializeContentParameter(encodedValue, parameter.contentType, parameter.schema, operation.inputSchemas ?? {}, codecs);
-    assertCallerRequestHeader(name, serialized, parameter);
     headers.set(name, serialized);
   }
   setHeader(headers, "Authorization", options.authorization ?? client.authorization);
@@ -2071,7 +1964,7 @@ function assertRequiredParameters(
   cookieValues: Record<string, unknown>,
 ): void {
   for (const parameter of operation.parameters ?? []) {
-    if (!parameter.required || parameter.hostManaged) continue;
+    if (!parameter.required) continue;
     const values = parameter.location === "path" ? pathValues
       : parameter.location === "query" ? queryValues
       : parameter.location === "querystring" ? querystringValues
@@ -3670,7 +3563,6 @@ function appendRawHeaders(
   const incoming = new Headers(source);
   incoming.forEach((value, name) => {
     const lower = name.toLowerCase();
-    assertCallerRequestHeader(name, value);
     if (reservedHeaders.has(lower) || contractNames.has(lower)) {
       throw new TypeError(`Raw header ${name} must use its typed option`);
     }
