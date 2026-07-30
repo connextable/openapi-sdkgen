@@ -699,11 +699,38 @@ func TestServerAddOnEmitsInboundParameterDefinitions(t *testing.T) {
 	}
 }
 
-func TestServerAddOnPreservesFetchManagedInboundHeaders(t *testing.T) {
+func TestServerAddOnPreservesEnvironmentControlledInboundHeaders(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.2.0",
-  "info": {"title": "Managed inbound headers", "version": "1"},
-  "paths": {},
+  "info": {"title": "Environment-controlled inbound headers", "version": "1"},
+  "paths": {
+    "/managed": {
+      "post": {
+        "operationId": "managedOperation",
+        "security": [],
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}},
+          {"name": "Sec-Fetch-Site", "in": "header", "schema": {"type": "string"}}
+        ],
+        "callbacks": {
+          "managedCallback": {
+            "{$request.body#/callbackURL}": {
+              "post": {
+                "operationId": "managedCallbackOperation",
+                "security": [],
+                "parameters": [
+                  {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}},
+                  {"name": "Sec-Fetch-Site", "in": "header", "schema": {"type": "string"}}
+                ],
+                "responses": {"204": {"description": "Accepted"}}
+              }
+            }
+          }
+        },
+        "responses": {"202": {"description": "Accepted"}}
+      }
+    }
+  },
   "webhooks": {
     "managed": {
       "post": {
@@ -734,6 +761,7 @@ func TestServerAddOnPreservesFetchManagedInboundHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
+	callbacks := string(artifactByPath(t, artifacts, "server/callbacks.ts"))
 	for _, expected := range []string{
 		`readonly "Origin": string`,
 		`readonly "Sec-Fetch-Site"?: string`,
@@ -742,6 +770,18 @@ func TestServerAddOnPreservesFetchManagedInboundHeaders(t *testing.T) {
 	} {
 		if !strings.Contains(webhooks, expected) {
 			t.Fatalf("managed inbound header contract missing %q:\n%s", expected, webhooks)
+		}
+	}
+	for _, expected := range []string{
+		`readonly "managedOperation"`,
+		`readonly "managedCallback"`,
+		`readonly "Origin": string`,
+		`readonly "Sec-Fetch-Site"?: string`,
+		`name: "Origin"`,
+		`required: true`,
+	} {
+		if !strings.Contains(callbacks, expected) {
+			t.Fatalf("callback inbound header contract missing %q:\n%s", expected, callbacks)
 		}
 	}
 
@@ -754,12 +794,18 @@ func TestServerAddOnPreservesFetchManagedInboundHeaders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	probe := `import type { Webhooks } from "./server/webhooks.js"
-declare const params: Webhooks["managed"]["POST"]["context"]["params"]["headerParams"]
-const origin: string = params.Origin
-const site: string | undefined = params["Sec-Fetch-Site"]
-void origin
-void site
+	probe := `import type { Callbacks } from "./server/callbacks.js"
+import type { Webhooks } from "./server/webhooks.js"
+declare const webhookParams: Webhooks["managed"]["POST"]["context"]["params"]["headerParams"]
+declare const callbackParams: Callbacks["managedOperation"]["managedCallback"]["{$request.body#/callbackURL}"]["POST"]["context"]["params"]["headerParams"]
+const webhookOrigin: string = webhookParams.Origin
+const webhookSite: string | undefined = webhookParams["Sec-Fetch-Site"]
+const callbackOrigin: string = callbackParams.Origin
+const callbackSite: string | undefined = callbackParams["Sec-Fetch-Site"]
+void webhookOrigin
+void webhookSite
+void callbackOrigin
+void callbackSite
 `
 	if err := os.WriteFile(filepath.Join(source, "managed-inbound.probe.ts"), []byte(probe), 0o600); err != nil {
 		t.Fatal(err)
@@ -778,6 +824,8 @@ void site
 	script := `
 import { pathToFileURL } from "node:url";
 const { createWebhookRouter } = await import(pathToFileURL(process.argv[1]).href);
+const { createCallbackHandlers } = await import(pathToFileURL(process.argv[2]).href);
+const { openapi } = await import(pathToFileURL(process.argv[3]).href);
 const seen = [];
 const router = createWebhookRouter({
   managed: { POST: async ({ params }) => {
@@ -794,8 +842,42 @@ if (JSON.stringify(seen) !== JSON.stringify([{ Origin: "https://caller.example",
 const missing = await router.fetch(new Request("https://host.test/hooks/managed", { method: "POST" }));
 if (missing.status !== 400 || !String(await missing.text()).includes("Origin")) throw new Error("missing required Origin was not rejected");
 if (seen.length !== 1) throw new Error("missing Origin reached the handler");
+const callbackSeen = [];
+const callback = createCallbackHandlers({
+  callbacks: { managedOperation: { managedCallback: { "{$request.body#/callbackURL}": {
+    POST: async ({ params }) => {
+      callbackSeen.push({ ...params.headerParams });
+      return { status: 204 };
+    },
+  } } } },
+}).callbacks.managedOperation.managedCallback["{$request.body#/callbackURL}"].POST;
+const callbackPresent = await callback.fetch(new Request("https://host.test/callback", {
+  method: "POST",
+  headers: { Origin: "https://caller.example", "Sec-Fetch-Site": "cross-site" },
+}));
+if (callbackPresent.status !== 204) throw new Error("present callback headers were rejected");
+if (JSON.stringify(callbackSeen) !== JSON.stringify([{ Origin: "https://caller.example", "Sec-Fetch-Site": "cross-site" }])) throw new Error("callback headers were not decoded: " + JSON.stringify(callbackSeen));
+const callbackMissing = await callback.fetch(new Request("https://host.test/callback", { method: "POST" }));
+if (callbackMissing.status !== 400 || !String(await callbackMissing.text()).includes("Origin")) throw new Error("missing callback Origin was not rejected");
+if (callbackSeen.length !== 1) throw new Error("missing callback Origin reached the handler");
+const operationHeaders = openapi.document.paths["/managed"].post.parameters;
+const callbackHeaders = openapi.document.paths["/managed"].post.callbacks.managedCallback["{$request.body#/callbackURL}"].post.parameters;
+const webhookHeaders = openapi.document.webhooks.managed.post.parameters;
+for (const [name, parameters] of [["operation", operationHeaders], ["callback", callbackHeaders], ["webhook", webhookHeaders]]) {
+  const origin = parameters.find((parameter) => parameter.name === "Origin");
+  const site = parameters.find((parameter) => parameter.name === "Sec-Fetch-Site");
+  if (origin?.required !== true || Object.hasOwn(site, "required")) throw new Error(name + " metadata changed inbound header requiredness");
+}
 `
-	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js")).CombinedOutput(); err != nil {
+	if output, err := exec.Command(
+		"node",
+		"--input-type=module",
+		"--eval",
+		script,
+		filepath.Join(outputDirectory, "server", "webhooks.js"),
+		filepath.Join(outputDirectory, "server", "callbacks.js"),
+		filepath.Join(outputDirectory, "metadata.js"),
+	).CombinedOutput(); err != nil {
 		t.Fatalf("execute managed inbound header server test: %v\n%s", err, output)
 	}
 }
