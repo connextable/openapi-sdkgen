@@ -68,7 +68,7 @@ line.
 | query-method | `query` | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations` |
 | additional-operations | `additionalOperations` arbitrary methods | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations` |
 | parameter-locations | `path`, `query`, `header`, `cookie` | all | generated | `internal/target/typescript/runtime_parity_test.go::TestVersionedTypeScriptRuntime` |
-| fetch-managed-request-headers | Fetch-forbidden fixed names, `Proxy-*`/`Sec-*`, and value-dependent method-override headers; client projection/runtime policy with generated Webhook/Callback inbound preservation | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDelegatesEnvironmentControlledRequestHeadersToFetch` |
+| fetch-managed-request-headers | Fetch-controlled fixed names and `Proxy-*`/`Sec-*` families as optional explicit caller inputs; method-override values delegated to Fetch; generated Webhook/Callback inbound requiredness preserved | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDelegatesEnvironmentControlledRequestHeadersToFetch` |
 | parameter-serialization | scalar/array `simple`, `label`, `matrix`, `form`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `explode` | all | generated | `test/typescript/tests/runtime.test.ts::serializes paths, query styles, headers, cookies, and wire names` |
 | parameter-delimited-object | `spaceDelimited` and `pipeDelimited` object parameters | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeSerializesDelimitedObjectQueryParameters` |
 | parameter-schema-content | parameter `schema`, single-media `content` | all | generated | `internal/target/typescript/emit_test.go::TestSourceArtifactsStayConsistentAndDeterministic` |
@@ -102,7 +102,7 @@ line.
 | examples | Example `summary`, `description`, `value`, `externalValue` | all | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
 | security-requirements | root/operation requirements, alternatives, and explicit overrides | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesOpenAPISecurityAlternativesAndOperationOverride` |
 | security-schemes | API key, HTTP, OAuth2, OpenID Connect, and mTLS host providers with capability gates | all; mutual TLS 3.1+ | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesEveryHostManagedSecurityCredentialShape` |
-| fetch-managed-header-api-keys | Header API-key credentials follow Fetch-managed fixed-name and conditional method-value policy before transport | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDelegatesEnvironmentControlledHeaderAPIKeysToFetch` |
+| fetch-managed-header-api-keys | Header API-key credentials for environment-controlled names and method-override values are forwarded to Fetch | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDelegatesEnvironmentControlledHeaderAPIKeysToFetch` |
 
 ## Schema Object: OAS 3.0.x
 

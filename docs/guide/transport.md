@@ -28,17 +28,16 @@ Only declare capabilities that the active environment actually provides. The
 client reports an error before sending a request when a required capability is
 missing.
 
-## Caller-owned and host-managed headers
+## Caller inputs and environment-controlled headers
 
-Generated request inputs include headers the application is allowed to set,
-such as `If-Match` and `Idempotency-Key`. Headers reserved by the
-[Fetch Standard](https://fetch.spec.whatwg.org/#forbidden-request-header) stay
-under Fetch or host-environment control. This includes `Origin`, `Host`,
-`Cookie`, `Content-Length`, `Accept-Encoding`, and every `Proxy-*` or `Sec-*`
-header.
+Every declared request header remains available through `headerParams`.
+Names controlled by the active Fetch implementation are optional caller
+inputs, even when OpenAPI marks them as required. This set follows the
+[Fetch Standard forbidden request-header definition](https://fetch.spec.whatwg.org/#forbidden-request-header)
+for fixed names and the `Proxy-*` and `Sec-*` families. It includes `Origin`,
+`Host`, `Cookie`, `Content-Length`, and `Accept-Encoding`.
 
-An OpenAPI declaration can still mark one of these headers as required on the
-wire. The generated browser call does not ask the application to provide it:
+Callers may omit an environment-controlled value:
 
 ```ts
 await api.auth.oauth(provider).post({
@@ -49,29 +48,46 @@ await api.auth.oauth(provider).post({
 });
 ```
 
-Browser Fetch supplies, omits, or rewrites the header according to the browser
-security context. The API server remains responsible for validating the
-header. The original declaration is still available in `metadata.js`, and
-generated Webhook or Callback handlers still receive and validate the full
-inbound header contract.
+They may also provide it explicitly:
 
-Neither `headerParams` nor the raw `headers` option can set a host-managed
-header. Runtime checks also cover JavaScript or `as any` escape hatches before
-the transport runs. `X-HTTP-Method`, `X-HTTP-Method-Override`, and
-`X-Method-Override` remain normal inputs, but a parsed comma-separated method
-item that equals `CONNECT`, `TRACE`, or `TRACK` case-insensitively is rejected.
-Header-located OpenAPI API-key credentials pass through the same policy before
-the transport runs.
+```ts
+await api.auth.oauth(provider).post({
+  headerParams: { Origin: "https://app.example.test" },
+  body: {
+    intent: "login",
+    returnTo,
+  },
+});
+```
 
-After regenerating an existing SDK, remove previously supplied values such as
-`headerParams.Origin`. This is an intentional source-level breaking change; no
-compatibility property is generated.
+The generated runtime forwards explicit typed values through normal `Headers`
+assembly. It also forwards environment-controlled names supplied through raw
+headers when the name is not owned by a declared parameter, and forwards
+header-located API-key credentials. Existing declared/reserved header collision
+checks still apply. `X-HTTP-Method`, `X-HTTP-Method-Override`, and
+`X-Method-Override` keep their OpenAPI requiredness, and their values are passed
+to Fetch without SDK-side method filtering.
 
-### Inject a header in a non-browser transport
+The active Fetch implementation makes the final decision. A browser may ignore,
+rewrite, synthesize, or reject a supplied value according to its security
+context. An injected Fetch implementation may accept it. Generated input types
+therefore describe what the caller may provide, not a guarantee about the final
+wire headers.
 
-A trusted Node or other non-browser transport can add a host-managed header
-after the generated request has been encoded. Keep the value outside public
-operation input and raw header options:
+OpenAPI requiredness remains unchanged in `metadata.js`. Generated Webhook and
+Callback handlers also preserve and validate the full inbound header contract.
+Link request-header expressions read the original invocation input; when the
+caller omitted an optional value, the expression resolves to `undefined`.
+Header values assigned by a Link are forwarded to Fetch normally.
+
+This projection is source-compatible with callers that already pass values such
+as `headerParams.Origin`; callers may now omit them. It is suitable for a patch
+release.
+
+### Normalize a header in a custom transport
+
+A trusted Node or other non-browser transport can still add or normalize a
+header after the generated request has been encoded:
 
 ```ts
 const nodeFetch = globalThis.fetch;
@@ -88,9 +104,9 @@ const api = createClient({
 });
 ```
 
-Use this pattern only when that transport is the trusted owner of the value.
-It does not bypass browser Fetch rules or turn a Fetch-managed header into a
-caller-provided API-key credential.
+Use this pattern when header policy belongs at the transport boundary. It does
+not override restrictions imposed by the Fetch implementation that ultimately
+sends the request.
 
 ## Provide credentials
 

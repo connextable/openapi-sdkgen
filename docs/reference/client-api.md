@@ -97,20 +97,22 @@ const todos = await api.$operations["listTodos"]({
 
 ## Request headers
 
-Declared caller-controlled headers appear under `headerParams`. Fetch-managed
-headers such as `Origin`, `Host`, `Cookie`, and `Sec-*` do not appear in
-resource, `$routes`, or `$operations` input types, even when OpenAPI marks them
-as required. Raw client and request `headers` options cannot add them either.
+Every declared header appears under `headerParams`. Headers controlled by Fetch,
+such as `Origin`, `Host`, `Cookie`, and `Sec-*`, are optional caller inputs even
+when OpenAPI marks them as required. Explicit typed values, undeclared raw
+headers, and header API-key credentials are forwarded to the active Fetch
+implementation. Declared/reserved raw-header collisions remain errors.
 
-The OpenAPI declaration remains available through `openapi.document`.
-Generated Webhook and Callback server-add-on input types preserve the full
-inbound header contract and its requiredness. A Link that tries to read or
-assign a Fetch-managed request header produces a generation diagnostic at that
-Link field.
+Method-override headers retain their OpenAPI requiredness and reach Fetch
+without SDK-side value filtering. Links read request-header sources from the
+original invocation input and forward target values through the same path.
 
-See [Caller-owned and host-managed headers](../guide/transport.md#caller-owned-and-host-managed-headers)
-for browser behavior, migration guidance, conditional method-override headers,
-and trusted non-browser transport injection.
+The original requiredness remains available through `openapi.document`.
+Generated Webhook and Callback server-add-on input types and runtime validation
+preserve the full inbound contract.
+
+See [Caller inputs and environment-controlled headers](../guide/transport.md#caller-inputs-and-environment-controlled-headers)
+for final Fetch behavior and custom transport boundaries.
 
 ## Links and streams
 

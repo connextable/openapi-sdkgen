@@ -97,20 +97,21 @@ const todos = await api.$operations["listTodos"]({
 
 ## 요청 헤더
 
-애플리케이션에서 설정할 수 있는 선언 헤더는 `headerParams`에 생성됩니다.
-`Origin`, `Host`, `Cookie`, `Sec-*`처럼 Fetch가 관리하는 헤더는 OpenAPI에서
-필수로 선언해도 리소스, `$routes`, `$operations` 입력 타입에 포함되지
-않습니다. 클라이언트와 요청 단위의 원시 `headers` 옵션으로도 추가할 수
-없습니다.
+선언된 헤더는 모두 `headerParams`에 생성됩니다. `Origin`, `Host`, `Cookie`,
+`Sec-*`처럼 Fetch가 제어하는 헤더는 OpenAPI에서 필수로 선언해도 호출자
+입력에서는 선택 사항입니다. 명시적인 타입 입력, 선언되지 않은 원시 헤더,
+헤더 기반 API key 인증 정보는 실행 중인 Fetch 구현으로 전달합니다. 선언 및
+예약 헤더와 원시 헤더 사이의 소유권 충돌은 계속 오류입니다.
 
-OpenAPI 원본 선언은 `openapi.document`에 남습니다. 생성된 Webhook과 Callback
-서버 애드온 입력 타입은 인바운드 헤더 전체와 필수 조건을 그대로 유지합니다.
-Link가 Fetch 관리 요청 헤더를 읽거나 대상 요청에 대입하려 하면 해당 Link 필드
-위치에서 생성 오류가 발생합니다.
+Method override 헤더는 OpenAPI의 필수 여부를 유지하며 SDK의 값 필터 없이
+Fetch로 전달됩니다. Link는 원래 호출 입력에서 요청 헤더 소스를 읽고, 대상
+값도 같은 경로로 전달합니다.
 
-브라우저 동작, 마이그레이션, 조건부 method override 헤더, 신뢰할 수 있는
-비브라우저 전송에서 값을 추가하는 방법은
-[애플리케이션 헤더와 실행 환경이 관리하는 헤더](../guide/transport.md#애플리케이션-헤더와-실행-환경이-관리하는-헤더)에서
+원본 필수 여부는 `openapi.document`에 남습니다. 생성된 Webhook과 Callback
+서버 애드온 입력 타입 및 런타임 검사는 전체 인바운드 계약을 유지합니다.
+
+최종 Fetch 동작과 사용자 정의 전송 경계는
+[호출 입력과 실행 환경 제어 헤더](../guide/transport.md#호출-입력과-실행-환경-제어-헤더)에서
 확인하세요.
 
 ## Link와 스트림

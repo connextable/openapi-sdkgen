@@ -26,17 +26,16 @@ const api = createClient({
 `capabilities`에는 실제 실행 환경에서 지원하는 기능만 지정해야 합니다. 필요한
 기능이 없으면 요청을 보내기 전에 오류가 발생합니다.
 
-## 애플리케이션 헤더와 실행 환경이 관리하는 헤더
+## 호출 입력과 실행 환경 제어 헤더
 
-`If-Match`, `Idempotency-Key`처럼 애플리케이션에서 설정할 수 있는 헤더는 생성
-요청의 `headerParams`에 포함됩니다. 반면
-[Fetch 표준](https://fetch.spec.whatwg.org/#forbidden-request-header)이 예약한
-헤더는 Fetch나 실행 환경에서 관리합니다. `Origin`, `Host`, `Cookie`,
-`Content-Length`, `Accept-Encoding`, 모든 `Proxy-*`, `Sec-*` 헤더가 여기에
-해당합니다.
+선언된 요청 헤더는 모두 `headerParams`에 남습니다. 실행 중인 Fetch 구현이
+제어하는 이름은 OpenAPI에서 필수로 선언해도 호출자 입력에서는 선택 사항으로
+생성됩니다. 고정 이름과 `Proxy-*`, `Sec-*` 계열의 분류는
+[Fetch 표준의 forbidden request-header 정의](https://fetch.spec.whatwg.org/#forbidden-request-header)를
+따릅니다. `Origin`, `Host`, `Cookie`, `Content-Length`, `Accept-Encoding` 등이
+여기에 해당합니다.
 
-OpenAPI에서 이런 헤더를 필수로 선언해도 브라우저 호출 코드에 해당 값을 받는
-입력은 생성되지 않습니다.
+호출자는 실행 환경 제어 값을 생략할 수 있습니다.
 
 ```ts
 await api.auth.oauth(provider).post({
@@ -47,27 +46,43 @@ await api.auth.oauth(provider).post({
 });
 ```
 
-브라우저 Fetch는 현재 보안 문맥에 따라 헤더를 추가하거나 생략하고, 필요하면
-값을 다시 씁니다. API 서버는 실제로 받은 헤더를 계속 검사해야 합니다. 원본
-선언은 `metadata.js`에 남고, 생성된 Webhook과 Callback 핸들러에서도 인바운드
-헤더 계약과 필수 검사를 그대로 유지합니다.
+명시적으로 제공할 수도 있습니다.
 
-`headerParams`와 원시 `headers` 옵션으로는 실행 환경이 관리하는 헤더를 넣을 수
-없습니다. JavaScript나 `as any`로 타입을 우회해도 전송 전에 차단됩니다.
-`X-HTTP-Method`, `X-HTTP-Method-Override`, `X-Method-Override`는 입력으로
-사용할 수 있지만, 쉼표로 분리해 파싱한 메서드 항목이 대소문자 구분 없이
-`CONNECT`, `TRACE`, `TRACK`과 정확히 일치하면 차단됩니다.
-헤더에 배치된 OpenAPI API key 인증 정보에도 전송 전에 같은 정책을 적용합니다.
+```ts
+await api.auth.oauth(provider).post({
+  headerParams: { Origin: "https://app.example.test" },
+  body: {
+    intent: "login",
+    returnTo,
+  },
+});
+```
 
-기존 SDK를 다시 생성한 뒤에는 `headerParams.Origin`처럼 직접 전달하던 값을
-호출 코드에서 제거해야 합니다. 이 변경은 의도적인 소스 호환성 변경이며, 이전
-속성을 유지하는 호환 별칭은 생성하지 않습니다.
+생성 런타임은 명시적인 타입 입력을 일반 `Headers` 조립 경로로 전달합니다.
+선언된 매개변수가 소유하지 않는 이름은 원시 헤더로 전달할 수 있고, 헤더 기반
+API key 인증 정보도 같은 방식으로 전달합니다. 선언 헤더 및 예약 헤더의 기존
+소유권 충돌 검사는 유지됩니다. `X-HTTP-Method`, `X-HTTP-Method-Override`,
+`X-Method-Override`는 OpenAPI의 필수 여부를 그대로 따르며, SDK에서 메서드
+값을 거르지 않고 Fetch로 전달합니다.
 
-### 브라우저가 아닌 전송에서 헤더 추가
+최종 판단은 실행 중인 Fetch 구현이 합니다. 브라우저는 보안 문맥에 따라 제공된
+값을 무시하거나 다시 쓰거나 직접 만들거나 거부할 수 있습니다. 주입한 Fetch
+구현은 값을 허용할 수 있습니다. 따라서 생성 입력 타입은 호출자가 제공할 수
+있는 값을 나타내며, 실제 전송 헤더를 보장하지 않습니다.
 
-신뢰할 수 있는 Node 등의 전송 구현은 SDK가 요청을 만든 다음 실행 환경이
-관리하는 헤더를 추가할 수 있습니다. 이 값은 operation 입력이나 원시 헤더
-옵션으로 받지 마세요.
+OpenAPI의 필수 여부는 `metadata.js`에 그대로 남습니다. 생성된 Webhook과
+Callback 핸들러도 전체 인바운드 헤더 계약과 필수 검사를 유지합니다. Link의
+요청 헤더 표현식은 원래 호출 입력을 읽으므로 선택 값을 생략했다면
+`undefined`로 해석합니다. Link가 대상 요청에 지정한 헤더도 Fetch로 그대로
+전달합니다.
+
+`headerParams.Origin`처럼 값을 이미 전달하던 호출 코드는 계속 호환되며, 이제
+해당 값을 생략할 수도 있습니다. 패치 릴리스에 적합한 변경입니다.
+
+### 사용자 정의 전송에서 헤더 정규화
+
+신뢰할 수 있는 Node 등의 전송 구현은 SDK가 요청을 만든 다음 헤더를 추가하거나
+정규화할 수도 있습니다.
 
 ```ts
 const nodeFetch = globalThis.fetch;
@@ -84,9 +99,8 @@ const api = createClient({
 });
 ```
 
-이 방식은 전송 구현이 해당 값을 소유하는 신뢰 경계일 때만 사용하세요. 브라우저
-Fetch의 제한을 우회하거나 Fetch 관리 헤더를 애플리케이션이 제공하는 API key
-인증 정보로 바꾸지는 못합니다.
+헤더 정책이 전송 경계의 책임일 때 이 방식을 사용합니다. 최종 요청을 보내는
+Fetch 구현의 제한을 우회하지는 못합니다.
 
 ## 인증 정보 제공
 
