@@ -9,10 +9,10 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The base output has a client entry point, generated declarations, runtime
-helpers, and an explicit metadata entry. Generated files contain generated-code
-and lint-suppression markers, plus Prettier's `@noprettier` pragma. Enable
-`checkIgnorePragma` in Prettier 3.6.0 or later to respect it:
+The TypeScript target generates a client, types, supporting runtime code, and
+OpenAPI metadata. Generated files include markers that prevent formatters and
+linters from rewriting them. With Prettier 3.6.0 or later, enable
+`checkIgnorePragma` to respect the `@noprettier` marker:
 
 ```json
 {
@@ -23,14 +23,10 @@ and lint-suppression markers, plus Prettier's `@noprettier` pragma. Enable
 For older Prettier versions, ignore the output directory instead, for example
 `src/generated/**` in `.prettierignore`.
 
-The CLI reads the document's
-[OpenAPI Object](https://spec.openapis.org/oas/v3.2.0.html#openapi-object) and
-its reusable [Components Object](https://spec.openapis.org/oas/v3.2.0.html#components-object).
+## Generate Webhook and Callback code
 
-## Inbound server add-on
-
-[Callback Objects](https://spec.openapis.org/oas/v3.2.0.html#callback-object)
-and root Webhooks are host-owned endpoints, so they are opt-in:
+When the OpenAPI file defines a Webhook or Callback that your application
+receives, add `--with server`.
 
 ```sh
 openapi-sdkgen generate \
@@ -40,30 +36,21 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-This adds `server/webhooks.ts` and `server/callbacks.ts`. It does not change
-the client-only root entry point.
+This adds `server/webhooks.ts` and `server/callbacks.ts`.
 
 For most applications, generation ends here: rerun the same command whenever
 the OpenAPI document changes and commit the generated source with the change.
 
-## Preflight diagnostics
+## Generation errors
 
-`generate` validates the standard OpenAPI baseline and any recognized
-[SDK extensions](../reference/extensions.md) before publishing files. There is
-no separate `validate` command.
+`generate` checks the OpenAPI file and selected options before writing code.
+There is no separate `validate` command.
 
-A diagnostic report starts with total error and warning counts, then groups
-findings by pipeline phase and source location. Each finding includes a stable
-diagnostic code, an RFC 6901 pointer when available, and an actionable message.
-If a prerequisite fails, the report also names the phases that could not run.
-Independent findings are accumulated instead of stopping at the first one.
+Errors include the relevant OpenAPI location when available and explain what
+needs to change. Warnings do not stop generation.
 
-Warnings do not prevent generation. Any error prevents publication: a missing
-output directory remains missing, and an existing output directory remains
-byte-for-byte unchanged. An unexpected internal failure prints any findings
-already collected once, then exits with a short phase-specific internal-failure
-label. Private input, extension-process output, credentials, and unbounded cause
-text are not included.
+If any error occurs, the existing output remains unchanged. This prevents a
+failed command from leaving partially generated code.
 
 ## CI
 
@@ -79,14 +66,12 @@ openapi-sdkgen generate \
   --output "$output"
 ```
 
-This checks the document and every requested target/add-on in one pass, so CI
-cannot validate a different configuration from the one it publishes.
+Use the command's exit status as the CI check.
 
 ::: details Advanced: locked remote references
 
-Remote [Reference Object](https://spec.openapis.org/oas/v3.2.0.html#reference-object)
-resolution is disabled by default. Permit an exact HTTPS origin
-and intentionally write the integrity lock on the first generation:
+Remote `$ref` values are disabled by default. Allow the HTTPS origin and create
+the reference lock the first time they are fetched:
 
 ```sh
 openapi-sdkgen generate \
@@ -97,17 +82,14 @@ openapi-sdkgen generate \
   --update-ref-lock
 ```
 
-Later runs verify the locked response digest. `--offline` resolves only from
-the adjacent `.openapi-sdkgen-cache/`; it never opens a network connection.
-Remote URLs require HTTPS, an exact allowlisted origin, public DNS addresses,
-bounded redirects, and no credentials.
+Later runs verify the remote content against the lock. `--offline` uses only
+previously cached references and does not open a network connection.
 :::
 
 ::: details Advanced: custom JSON Schema vocabularies
 
-Required custom vocabularies in a
-[Schema Object](https://spec.openapis.org/oas/v3.2.0.html#schema-object) use an
-explicit checked-in extension manifest:
+When the OpenAPI file uses a required custom JSON Schema vocabulary, provide a
+local extension manifest:
 
 ```sh
 openapi-sdkgen generate \
@@ -118,7 +100,6 @@ openapi-sdkgen generate \
   --update-ref-lock
 ```
 
-The extension runs only while generating. It exchanges versioned JSON-RPC and
-returns a replacement JSON Schema value; generated application code never runs
-the extension. See the [CLI reference](../reference/cli.md) for each flag.
+The extension runs only while generating and is not included in application
+code. See the [CLI reference](../reference/cli.md) for the available options.
 :::

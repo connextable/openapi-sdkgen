@@ -1,8 +1,7 @@
-# 인바운드 서버 계약
+# Webhook과 Callback 처리
 
-OpenAPI 문서에 애플리케이션이 수신할
-[Callback Object](https://spec.openapis.org/oas/v3.2.0.html#callback-object) 또는
-[OpenAPI Object](https://spec.openapis.org/oas/v3.2.0.html#openapi-object)의 root `webhooks`가 있을 때만 이 add-on을 생성하세요.
+애플리케이션이 받아야 할 Webhook이나 Callback이 OpenAPI 파일에 정의되어 있다면
+`--with server`를 추가해 핸들러 타입과 라우터를 생성할 수 있습니다.
 
 ```sh
 openapi-sdkgen generate \
@@ -12,8 +11,8 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-add-on은 Fetch `Request`와 `Response`만 사용합니다. framework별 routing은 애플리케이션 코드에서
-계속 담당합니다.
+생성된 코드는 Fetch `Request`와 `Response`를 사용합니다. Express, Hono, Next.js
+등 웹 프레임워크에 연결하는 코드는 애플리케이션에서 작성합니다.
 
 ## Webhook
 
@@ -43,12 +42,15 @@ const router = createWebhookRouter(handlers, {
 const response = await router.fetch(request);
 ```
 
-애플리케이션은 webhook identifier를 concrete route로 매핑하고 요청 인증을 담당합니다. 생성 코드는
-선언된 payload의 파싱, 검증, 타입 제공을 담당합니다.
+`routes`에는 OpenAPI에 정의된 Webhook 이름과 실제 애플리케이션 경로를
+연결합니다. 요청 인증도 애플리케이션에서 처리해야 합니다. 생성된 라우터는 요청
+본문을 파싱하고 OpenAPI 스키마에 맞는지 검사한 뒤 타입이 지정된 값으로
+핸들러에 전달합니다.
 
 ## Callback
 
-Callback URL은 runtime expression이므로 호스트가 선택한 경로에 생성된 Fetch handler를 명시적으로 mount해야 합니다.
+Callback URL은 요청 데이터에 따라 달라질 수 있으므로 애플리케이션에서 사용할
+경로에 생성된 핸들러를 직접 연결해야 합니다.
 
 ```ts
 import {
@@ -76,9 +78,5 @@ const response =
   ].POST.fetch(request);
 ```
 
-생성된 callback tree는 source operation ID, Callback Object 이름, runtime expression,
-HTTP method를 정확히 보존합니다. 재사용 가능한 `components.callbacks`는
-`ComponentCallbacks` 타입과 `componentCallbacks` runtime catalog에서 제공합니다.
-
-이 분리는 기본 SDK를 browser bundle에서 안전하게 import할 수 있게 하면서도, Fetch를 지원하는 어떤
-server에도 인바운드 endpoint를 쉽게 연결할 수 있게 합니다.
+Callback API의 키는 OpenAPI에 선언된 `operationId`, Callback 이름, 런타임
+표현식, HTTP 메서드를 그대로 사용합니다.

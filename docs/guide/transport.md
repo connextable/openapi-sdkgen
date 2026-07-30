@@ -1,13 +1,14 @@
-# Transport, auth, and streams
+# Transport, authentication, and streams
 
-Most applications need only `baseURL` and, when the API requires it, an
-authorization value or credential provider. Configure a custom transport only
-when the runtime must offer something ordinary Fetch cannot.
+Most applications only need a `baseURL` and the credentials required by the
+API. Configure a custom transport only when the default Fetch implementation
+cannot provide a required feature.
 
-## Default Fetch and custom transports
+## Custom transport
 
-The client uses host `fetch` by default. Supply a transport only when the host
-needs a different Fetch implementation or declares additional capabilities:
+The client uses the environment's `fetch` by default. Configure `transport`
+when you need a different Fetch implementation, a cookie jar, access to
+restricted response headers, or mTLS.
 
 ```ts
 const api = createClient({
@@ -23,19 +24,23 @@ const api = createClient({
 });
 ```
 
-Capabilities are truthful host declarations, not feature toggles. Cookie
-parameters from a
-[Parameter Object](https://spec.openapis.org/oas/v3.2.0.html#parameter-object),
-unreadable response headers, and mutual TLS fail with a typed
-transport-capability error when the active environment cannot provide them.
+Only declare capabilities that the active environment actually provides. The
+client reports an error before sending a request when a required capability is
+missing.
 
-## Credentials
+## Provide credentials
 
-The application owns token acquisition, refresh, storage, and client
-certificate selection. Generated code applies values to the OpenAPI security
-[Security Scheme Object](https://spec.openapis.org/oas/v3.2.0.html#security-scheme-object)
-and [Security Requirement Object](https://spec.openapis.org/oas/v3.2.0.html#security-requirement-object)
-wire locations:
+For a simple Bearer token, set `authorization` when creating the client.
+
+```ts
+const api = createClient({
+  baseURL: "https://api.example.test",
+  authorization: "Bearer example-token",
+});
+```
+
+Use a `credentials` function when the API offers multiple authentication
+alternatives or credentials must be loaded for each request.
 
 ```ts
 const api = createClient({
@@ -52,13 +57,13 @@ const api = createClient({
 });
 ```
 
-The generator supports API keys, HTTP basic/bearer schemes, OAuth2/OpenID
-metadata, and mutual-TLS capability requirements. It never implements login or
-token refresh flows inside the generated SDK.
+Generated clients support API keys, HTTP Basic and Bearer authentication,
+OAuth2, OpenID Connect, and mTLS requirements. Your application remains
+responsible for login, token refresh, and credential storage.
 
-## Cancellation, timeouts, and streams
+## Cancel a request or set a timeout
 
-Per-request options accept normal Fetch cancellation controls:
+Pass an `AbortSignal` or timeout with any request.
 
 ```ts
 const controller = new AbortController();
@@ -69,6 +74,7 @@ const todos = await api.todos.list(
 );
 ```
 
-Streaming operations return `AsyncIterable` values. Fetch backpressure is
-preserved, a consumer can stop iteration naturally, and the generator does not
-silently reconnect Server-Sent Events.
+## Streams
+
+Streaming APIs return `AsyncIterable` values. Stopping iteration also stops
+reading the response. Server-Sent Events do not reconnect automatically.

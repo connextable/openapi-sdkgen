@@ -25,7 +25,7 @@ const englishTheme = {
         text: "Reference",
         items: [
           { text: "CLI", link: "/reference/cli" },
-          { text: "Generated SDK surface", link: "/reference/sdk-surface" },
+          { text: "Generated client API", link: "/reference/client-api" },
           { text: "OpenAPI support", link: "/reference/capabilities" },
           { text: "SDK extensions", link: "/reference/extensions" },
         ],
@@ -39,8 +39,7 @@ const englishTheme = {
     text: "Edit this page on GitHub",
   },
   footer: {
-    message: "Released under the MIT License.",
-    copyright: "Copyright © Connextable",
+    message: "MIT License · © Connextable",
   },
 };
 
@@ -69,9 +68,9 @@ const koreanTheme = {
         text: "레퍼런스",
         items: [
           { text: "CLI", link: "/ko/reference/cli" },
-          { text: "생성 SDK 표면", link: "/ko/reference/sdk-surface" },
+          { text: "생성된 클라이언트 API", link: "/ko/reference/client-api" },
           { text: "OpenAPI 지원 범위", link: "/ko/reference/capabilities" },
-          { text: "SDK extension", link: "/ko/reference/extensions" },
+          { text: "SDK 확장 기능", link: "/ko/reference/extensions" },
         ],
       },
     ],
@@ -108,15 +107,20 @@ const koreanTheme = {
     text: "GitHub에서 이 페이지 수정",
   },
   footer: {
-    message: "MIT License로 배포.",
-    copyright: "Copyright © Connextable",
+    message: "MIT License · © Connextable",
   },
 };
 
 export default defineConfig({
   lang: "en-US",
   title: "openapi-sdkgen",
-  description: "Generate source-mode TypeScript SDKs from OpenAPI 3.x documents.",
+  description: "Generate application SDK source from OpenAPI 3.x documents.",
+  base: "/openapi-sdkgen/",
+  srcExclude: [
+    "openapi-feature-inventory.md",
+    "openapi-feature-matrix.md",
+    "openapi-sdkgen-implementation-roadmap.md",
+  ],
   lastUpdated: true,
   themeConfig: englishTheme,
   locales: {
@@ -130,7 +134,7 @@ export default defineConfig({
       lang: "ko-KR",
       link: "/ko/",
       title: "openapi-sdkgen",
-      description: "OpenAPI 3.x 문서에서 TypeScript SDK 소스를 생성.",
+      description: "OpenAPI 3.x 문서에서 애플리케이션 SDK 소스를 생성.",
       themeConfig: koreanTheme,
     },
   },

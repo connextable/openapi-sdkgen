@@ -1,13 +1,11 @@
 # Getting started
 
-`openapi-sdkgen` turns a valid OpenAPI 3.0.x, 3.1.x, or 3.2.x document into
-ordinary TypeScript source. The generated files are part of the application;
-they are not a separately built npm package.
+`openapi-sdkgen` is a CLI that generates application SDK source from an OpenAPI
+3.x file. This guide uses an OpenAPI JSON or YAML file to generate a TypeScript
+client and make the first API call.
 
-The input is an OpenAPI [OpenAPI Object](https://spec.openapis.org/oas/v3.2.0.html#openapi-object)
-whose [Paths Object](https://spec.openapis.org/oas/v3.2.0.html#paths-object) and
-[Operation Object](https://spec.openapis.org/oas/v3.2.0.html#operation-object)
-describe the calls the client will expose.
+Use `--input` to select the OpenAPI JSON or YAML file and `--output` to select
+an empty directory for the generated code.
 
 ## 1. Install the CLI
 
@@ -43,8 +41,7 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The output directory must be fresh. Generation writes all artifacts to a
-staging area and publishes them only after every artifact succeeds.
+The output directory must be empty.
 
 The root document can also come from a `file://` URL, an HTTP(S) development
 server, or stdin. It is a source, not a remote `$ref`:
@@ -56,8 +53,9 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-Use `--input -` when another command supplies the document. If that document
-uses relative `$ref` values, add `--input-base <path-or-url>`.
+Use `--input -` when another command supplies the OpenAPI file. The `-` means
+standard input (stdin) instead of a file path. If the OpenAPI file uses relative
+`$ref` values, add `--input-base <path-or-url>`.
 
 ## 3. Import the client in your web application
 
@@ -70,8 +68,7 @@ const api = createClient({
 ```
 
 Vite, Next.js, Nuxt, and similar web bundlers resolve the generated directory
-to its `index.ts` entry. No generated package manifest or separate SDK build
-step is required.
+to its `index.ts` entry.
 
 ::: details Direct Node ESM
 
@@ -92,8 +89,8 @@ const page = await api.todos.list({
 });
 ```
 
-Named resources offer the ergonomic API. Every non-hidden operation also
-remains available by exact method and path through `api.$routes`; an explicitly
-declared `operationId` adds the matching `api.$operations` alias.
+Resource methods provide the most readable API for application code. Every API
+can also be called by HTTP method and OpenAPI path through `api.$routes`.
+When an `operationId` is declared, `api.$operations` is also available.
 
 Next: [generate an SDK](./generate.md) or [use the client](./client.md).

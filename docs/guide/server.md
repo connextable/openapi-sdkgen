@@ -1,10 +1,7 @@
-# Inbound server contracts
+# Handle Webhooks and Callbacks
 
-Generate this add-on only when the OpenAPI document contains
-[Callback Objects](https://spec.openapis.org/oas/v3.2.0.html#callback-object)
-or root `webhooks` in the
-[OpenAPI Object](https://spec.openapis.org/oas/v3.2.0.html#openapi-object) that
-the application will receive:
+When the OpenAPI file defines a Webhook or Callback that your application
+receives, add `--with server` to generate handler types and routers.
 
 ```sh
 openapi-sdkgen generate \
@@ -14,8 +11,8 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The add-on uses Fetch `Request` and `Response` only. Framework-specific routing
-stays in application code.
+The generated code uses Fetch `Request` and `Response`. Connect it to Express,
+Hono, Next.js, or another framework in your application.
 
 ## Webhooks
 
@@ -45,13 +42,15 @@ const router = createWebhookRouter(handlers, {
 const response = await router.fetch(request);
 ```
 
-The application maps webhook identifiers to concrete routes and authenticates
-the request. Generated code parses, validates, and types the declared payload.
+Map each OpenAPI Webhook name to an application path in `routes`. Your
+application is also responsible for authenticating incoming requests. The
+generated router parses and validates the request body before passing a typed
+value to the handler.
 
 ## Callbacks
 
-Callback URLs are runtime expressions, so the host mounts an explicit generated
-Fetch handler at its chosen route:
+A Callback URL can depend on request data, so connect the generated handler to
+the path used by your application.
 
 ```ts
 import {
@@ -79,10 +78,5 @@ const response =
   ].POST.fetch(request);
 ```
 
-The generated callback tree retains the exact source operation ID, Callback
-Object name, runtime expression, and HTTP method. Reusable
-`components.callbacks` are available through the parallel
-`ComponentCallbacks` type and `componentCallbacks` runtime catalog.
-
-This separation keeps the default SDK safe to import in browser bundles while
-making inbound endpoints straightforward to adapt to any Fetch-capable server.
+Callback keys preserve the `operationId`, Callback name, runtime expression,
+and HTTP method declared in OpenAPI.

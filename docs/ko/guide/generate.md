@@ -1,6 +1,6 @@
 # SDK 생성
 
-## 기본 클라이언트
+## 기본 명령
 
 ```sh
 openapi-sdkgen generate \
@@ -9,9 +9,18 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-기본 출력에는 클라이언트 진입점, 생성된 선언, 런타임 헬퍼, 명시적인 메타데이터 진입점이 포함됩니다.
-생성 파일에는 generated-code, lint suppression marker, Prettier의 `@noprettier` pragma가 들어갑니다.
-Prettier 3.6.0 이상에서는 아래 설정으로 이 pragma를 적용할 수 있습니다.
+- `--input`: SDK 생성에 사용할 OpenAPI JSON 또는 YAML 파일
+- `--target`: 생성할 SDK 종류
+- `--output`: 생성된 코드를 저장할 빈 디렉터리
+
+TypeScript를 선택하면 클라이언트, 타입, 실행에 필요한 코드, OpenAPI
+메타데이터가 생성됩니다. OpenAPI 파일이 바뀌면 같은 명령을 다시 실행하고 변경된
+생성 코드를 함께 커밋하세요.
+
+## 생성 코드와 포매터
+
+생성된 파일에는 포매터와 린터가 코드를 바꾸지 않도록 표시가 들어 있습니다.
+Prettier 3.6.0 이상에서는 다음 설정으로 해당 표시를 인식할 수 있습니다.
 
 ```json
 {
@@ -19,15 +28,17 @@ Prettier 3.6.0 이상에서는 아래 설정으로 이 pragma를 적용할 수 �
 }
 ```
 
-이전 Prettier를 사용한다면 `.prettierignore`에 `src/generated/**` 같은 경로를 추가하세요.
+이전 버전의 Prettier를 사용한다면 `.prettierignore`에 생성 디렉터리를
+추가하세요.
 
-CLI는 문서의 [OpenAPI Object](https://spec.openapis.org/oas/v3.2.0.html#openapi-object)와 재사용 요소를
-담은 [Components Object](https://spec.openapis.org/oas/v3.2.0.html#components-object)를 읽습니다.
+```text
+src/generated/**
+```
 
-## 인바운드 서버 add-on
+## Webhook과 Callback 코드 생성
 
-[Callback Object](https://spec.openapis.org/oas/v3.2.0.html#callback-object)와 root `webhooks`는
-애플리케이션 호스트가 소유하는 endpoint이므로, 필요한 경우에만 명시적으로 추가합니다.
+OpenAPI 파일에 Webhook 또는 Callback이 있고 애플리케이션에서 이를 받아야 한다면
+`--with server`를 추가합니다.
 
 ```sh
 openapi-sdkgen generate \
@@ -37,32 +48,21 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-이 명령은 `server/webhooks.ts`와 `server/callbacks.ts`를 추가합니다. 클라이언트 전용 루트 진입점은
-그대로 유지되므로 브라우저용 import 경계도 변하지 않습니다.
+이 옵션은 `server/webhooks.ts`와 `server/callbacks.ts`를 추가합니다. 사용법은
+[Webhook과 Callback 처리](./server.md)에서 확인하세요.
 
-대부분의 애플리케이션은 여기까지의 흐름만 따르면 됩니다. OpenAPI 문서가 바뀌면 같은 명령을 다시 실행하고,
-변경된 생성 소스를 문서 변경과 함께 커밋하세요.
+## 생성 오류 확인
 
-## 사전 진단
+`generate`는 코드를 만들기 전에 OpenAPI 파일과 선택한 옵션을 검사합니다.
+문제가 있으면 오류가 발생한 OpenAPI 위치와 수정에 필요한 내용을 함께
+출력합니다.
 
-`generate`는 파일을 게시하기 전에 표준 OpenAPI 기본 계약과 인식하는
-[SDK extension](../reference/extensions.md)을 검증합니다. 별도 `validate` command는 없습니다.
+경고만 있으면 생성이 계속되지만 오류가 하나라도 있으면 생성 결과를 바꾸지
+않습니다. 따라서 실패한 명령 때문에 기존 생성 코드가 일부만 바뀌는 일은
+없습니다.
 
-진단 보고서는 전체 error와 warning 수를 먼저 보여주고, pipeline phase와 source location별로
-항목을 묶습니다. 각 항목에는 stable diagnostic code, 가능한 경우 RFC 6901 pointer,
-수정 방법을 알 수 있는 message가 포함됩니다. 선행 단계가 실패하면 실행하지 못한 phase도
-표시합니다. 서로 독립적인 문제는 첫 오류에서 중단하지 않고 함께 수집합니다.
-
-Warning은 생성을 막지 않습니다. Error가 하나라도 있으면 결과를 게시하지 않습니다.
-기존에 output이 없다면 새로 만들지 않고, 이미 있다면 byte 단위로 그대로 보존합니다.
-예상하지 못한 내부 실패가 나면 그전에 수집한 진단을 한 번 출력한 뒤, 실패 phase를 나타내는
-짧은 내부 오류 label로 종료합니다. 비공개 input, extension process output, credential,
-무제한 cause text는 포함하지 않습니다.
-
-## CI
-
-CI에서도 같은 `generate` command를 실행하고 exit status를 gate로 사용하세요. 검증만 필요하다면
-temporary directory에 생성하고, 생성 source를 저장소에 커밋한다면 그 directory를 비교하거나 복사하세요.
+별도의 `validate` 명령은 없습니다. 생성 가능 여부만 확인하려면 임시 디렉터리를
+출력 경로로 지정하세요.
 
 ```sh
 output="$(mktemp -d)/api"
@@ -72,13 +72,12 @@ openapi-sdkgen generate \
   --output "$output"
 ```
 
-문서와 요청한 target/add-on을 한 번에 검사하므로, 검증한 구성과 실제 게시 구성이 달라지지 않습니다.
+CI에서도 같은 명령의 종료 코드를 사용하면 됩니다.
 
-::: details 심화: 잠긴 원격 참조
+::: details 원격 `$ref` 사용
 
-[Reference Object](https://spec.openapis.org/oas/v3.2.0.html#reference-object)의 원격 `$ref` 해석은
-기본적으로 비활성화되어 있습니다. 처음 생성할 때 정확한 HTTPS origin을 허용하고
-integrity lock을 의도적으로 기록해야 합니다.
+원격 `$ref`는 기본적으로 가져오지 않습니다. 처음 사용할 때 허용할 HTTPS
+origin을 지정하고 참조 잠금 파일을 만드세요.
 
 ```sh
 openapi-sdkgen generate \
@@ -89,15 +88,15 @@ openapi-sdkgen generate \
   --update-ref-lock
 ```
 
-이후 실행은 lock에 기록된 응답 digest를 검증합니다. `--offline`은 인접한 `.openapi-sdkgen-cache/`만
-사용하며 네트워크 연결을 열지 않습니다. 원격 URL은 HTTPS, 정확한 allowlist origin, public DNS,
-제한된 redirect, 자격증명 없는 URL이라는 조건을 모두 만족해야 합니다.
+이후 생성에서는 잠금 파일에 기록된 내용과 실제 응답이 같은지 확인합니다.
+`--offline`을 사용하면 이전에 저장한 참조만 사용하고 네트워크에 연결하지
+않습니다.
 :::
 
-::: details 심화: custom JSON Schema vocabulary
+::: details 사용자 정의 JSON Schema vocabulary
 
-[Schema Object](https://spec.openapis.org/oas/v3.2.0.html#schema-object)의 필수 custom vocabulary는
-저장소에 체크인한 명시적 extension manifest를 사용합니다.
+OpenAPI 파일이 필수 사용자 정의 JSON Schema vocabulary를 사용한다면 저장소에
+둔 확장 매니페스트를 지정할 수 있습니다.
 
 ```sh
 openapi-sdkgen generate \
@@ -108,7 +107,7 @@ openapi-sdkgen generate \
   --update-ref-lock
 ```
 
-extension은 SDK를 생성하는 동안에만 실행됩니다. versioned JSON-RPC로 replacement JSON Schema 값을
-반환하며, 생성된 애플리케이션 코드에서는 실행되지 않습니다. 모든 flag는
-[CLI 레퍼런스](../reference/cli.md)에서 확인할 수 있습니다.
+확장 프로그램은 SDK를 생성할 때만 실행되며 생성된 애플리케이션 코드에는
+포함되지 않습니다. 자세한 옵션은 [CLI 레퍼런스](../reference/cli.md)에서
+확인하세요.
 :::

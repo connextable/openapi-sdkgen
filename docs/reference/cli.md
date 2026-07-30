@@ -1,6 +1,6 @@
 # CLI reference
 
-## Discover commands
+## Help and version
 
 ```sh
 openapi-sdkgen --help
@@ -8,12 +8,11 @@ openapi-sdkgen generate --help
 openapi-sdkgen --version
 ```
 
-Root help lists the available commands. Generate help groups required, common,
-input, remote-reference, and schema-extension options. Its target and add-on
-availability comes from the running binary, so it stays accurate as built-in
-targets are added.
+`openapi-sdkgen --help` lists commands.
+`openapi-sdkgen generate --help` lists every generation target, optional
+feature, and flag supported by the installed CLI.
 
-## Generate command
+## `generate`
 
 ```text
 openapi-sdkgen generate \
@@ -22,16 +21,58 @@ openapi-sdkgen generate \
   --output <directory>
 ```
 
-Use `openapi-sdkgen generate --help` for the complete option list and this page
-for detailed behavior and security constraints.
+### Required options
 
-## Private HTTP(S) inputs
+- `--input <openapi>`: an OpenAPI 3.0.x, 3.1.x, or 3.2.x JSON or YAML file.
+  Use a local path, `file://` URL, HTTP(S) URL, or `-` for stdin.
+- `--target typescript`: generates a TypeScript SDK.
+- `--output <directory>`: an empty directory for generated code.
 
-Use environment-variable mappings to send a request header without placing its
-value in the command line. Repeat `--http-header-env` for multiple headers.
-Each mapping is exactly `Header-Name=ENV_VAR`: header names use HTTP token
-syntax, environment variable names use `[A-Za-z_][A-Za-z0-9_]*`, values must be
-non-empty, and duplicate names are rejected case-insensitively.
+`--output` always expects a directory path. Unlike `--input -`, `--output -`
+does not mean standard output.
+
+## Read an OpenAPI file
+
+Pass a local file or URL to `--input`.
+
+```sh
+# Local file
+openapi-sdkgen generate --input ./openapi.yaml --target typescript --output ./src/generated/api
+
+# file URL
+openapi-sdkgen generate --input file:///workspace/openapi.yaml --target typescript --output ./src/generated/api
+
+# Development server
+openapi-sdkgen generate --input http://localhost:4010/openapi.json --target typescript --output ./src/generated/api
+```
+
+Use `--input -` to read an OpenAPI file from another command. The `-` means
+standard input (stdin) instead of a file path.
+
+```sh
+curl https://api.example.test/openapi.json | \
+  openapi-sdkgen generate \
+    --input - \
+    --target typescript \
+    --output ./src/generated/api
+```
+
+When the OpenAPI file uses relative `$ref` values, use `--input-base` to set
+the base path or URL.
+
+```sh
+curl https://api.example.test/openapi.yaml | \
+  openapi-sdkgen generate \
+    --input - \
+    --input-base https://api.example.test/openapi.yaml \
+    --target typescript \
+    --output ./src/generated/api
+```
+
+## Authenticated URLs
+
+Read HTTP request header values from environment variables so secrets do not
+appear in the command line.
 
 ```sh
 export OPENAPI_TOKEN='...'
@@ -42,14 +83,15 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-`Host`, `Cookie`, connection-management headers, transfer headers, and proxy
-authorization headers are rejected. The configured headers are applied after
-sdkgen's defaults, so a configured `Accept` header replaces the default
-`Accept` value. Header mappings are valid only for an HTTP(S) root input. If a
-mapped header is sent to an `http://` input, sdkgen prints one warning because
-the header is not confidential on that connection.
+`--http-header-env` uses the format `Header-Name=ENV_VAR` and may be repeated.
+Empty values, invalid header names, and duplicate headers are rejected. `Host`,
+`Cookie`, connection-management headers, and proxy authorization headers
+cannot be set.
 
-For private TLS, pass a certificate/key pair and/or a PEM CA bundle:
+The CLI warns when a mapped header is sent over an unencrypted `http://`
+connection.
+
+### Client certificates and private CAs
 
 ```sh
 openapi-sdkgen generate \
@@ -61,112 +103,61 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The client certificate and key must be provided together. The CA file must
-contain only valid PEM `CERTIFICATE` blocks; it augments the system trust store.
-These options do not disable TLS verification.
+The client certificate and key must be provided together. `--tls-ca-file` adds
+a private CA to the system trust store; it does not disable TLS verification.
 
-## Required options
+## Webhooks and Callbacks
 
-- `--input <document>` — An OpenAPI 3.0.x, 3.1.x, or 3.2.x JSON or YAML
-  document. Pass a local path, `file://` URL, HTTP(S) URL, or `-` for stdin.
-- `--target typescript` — The active source-mode target.
-- `--output <directory>` — A fresh application-source directory for generated artifacts.
-
-## Diagnostics
-
-`generate` performs preflight validation and reports all discoverable warnings
-and errors by phase and source. There is no separate `validate` command and no
-validation-only flag. Warnings still publish output; errors leave the output
-unchanged. See [Generate an SDK](../guide/generate.md) for CI usage and
-[SDK extensions](./extensions.md) for the optional contracts it validates.
-
-## Input sources
-
-`--input` names the root document. It is not a `$ref`, so reading an HTTP(S)
-input does not need `--allow-remote-ref` or create a reference-lock entry.
-Loopback and private development endpoints are valid root inputs.
-
-```sh
-# Local file or file URL
-openapi-sdkgen generate --input ./openapi.yaml --target typescript --output ./src/generated/api
-openapi-sdkgen generate --input file:///workspace/openapi.yaml --target typescript --output ./src/generated/api
-
-# HTTP(S) endpoint
-openapi-sdkgen generate --input http://localhost:4010/openapi.json --target typescript --output ./src/generated/api
-
-# Any producer that can write document bytes
-curl https://api.example.test/openapi.json | \
-  openapi-sdkgen generate --input - --target typescript --output ./src/generated/api
+```text
+--with server
 ```
 
-Stdin has no location for relative `$ref` values. Supply the source document
-location through `--input-base` only when stdin input needs one:
+Generate handler types and Fetch-based routers under `server/`. See
+[Handle Webhooks and Callbacks](../guide/server.md) for examples.
+
+## Errors and warnings
+
+`generate` checks the OpenAPI file before writing code. Warnings do not stop
+generation. Errors leave existing generated code unchanged and identify the
+relevant OpenAPI location when possible.
+
+There is no separate `validate` command. See
+[Generate an SDK](../guide/generate.md) for CI use.
+
+## Remote `$ref` values
+
+Relative file references must stay within the OpenAPI file's directory tree.
+To fetch a `$ref` from another server, allow its exact HTTPS origin.
+
+- `--allow-remote-ref <origin>`: allow one HTTPS origin. Repeat the option for
+  more than one origin.
+- `--ref-lock <path>`: set the reference lock file path.
+- `--update-ref-lock`: fetch remote references and create or update the lock.
+- `--offline`: use previously cached references without network access.
 
 ```sh
-curl https://api.example.test/openapi.yaml | \
-  openapi-sdkgen generate \
-    --input - \
-    --input-base https://api.example.test/openapi.yaml \
-    --target typescript \
-    --output ./src/generated/api \
-    --ref-lock ./openapi.refs.lock \
-    --update-ref-lock
+openapi-sdkgen generate \
+  --input ./openapi.json \
+  --target typescript \
+  --output ./src/generated/api \
+  --allow-remote-ref https://schemas.example.test \
+  --update-ref-lock
 ```
 
-## Optional add-ons
+For an HTTP(S) OpenAPI URL, same-origin relative `$ref` values are resolved
+automatically. Update the lock the first time they are fetched. A different
+origin still requires `--allow-remote-ref`.
 
-- `--with server` — Adds Fetch-native Callback and Webhook contracts under
-  `server/`. Repeat `--with` when combining future add-ons.
+Authentication headers, client certificates, and private CAs are only used for
+the same origin as the OpenAPI file. They are never forwarded to a different
+origin or redirect.
 
-## Remote reference policy
+## JSON Schema extensions
 
-- `--allow-remote-ref <origin>` — Permits one exact HTTPS origin for remote
-  `$ref` resolution. Repeat the option to permit more than one origin.
-- `--ref-lock <path>` — Overrides the remote-reference and extension integrity
-  lock path.
-- `--update-ref-lock` — Creates or updates the lock only after a successful
-  compile.
-- `--offline` — Resolves locked remote references only from the local
-  content-addressed cache.
+```text
+--schema-extension <manifest>
+```
 
-Local file references remain contained within the input directory. A reference
-outside that canonical root is rejected. Cross-origin remote resolution is off
-until an exact origin is supplied.
-
-For an HTTP(S) root document, same-origin relative `$ref` values resolve from
-the root URL. They remain remote references, so use `--ref-lock` and
-`--update-ref-lock` on the first run. A `$ref` at another origin still needs
-`--allow-remote-ref`. `--offline` never opens a network connection and rejects
-an HTTP(S) root input; provide a local file or stdin instead.
-
-Header mappings and private TLS settings apply only to the exact root origin:
-scheme, host, and explicit port must all match. Same-origin `$ref` requests
-inherit them; redirects that would leave that origin are rejected. Allowlisted
-cross-origin `$ref` requests never receive those headers, client certificates,
-or added CA roots. With a client certificate or added CA root, sdkgen rejects
-an `https://` proxy selected by the standard proxy environment variables before
-dialing it; ordinary HTTP and SOCKS proxy behavior, including `NO_PROXY`, stays
-available.
-
-Protected same-origin `$ref` bodies use the normal reference lock and cache,
-but sdkgen narrows the cache directory to `0700` and entries to `0600`. Cache
-roots and entries must be non-symlink directory/regular-file paths; unsafe
-paths fail closed both online and offline. Remove the cache if its local
-retention policy is not acceptable. Windows cannot enforce this owner-only
-mode contract, so protected remote-reference caching fails before persistence
-on Windows. On other filesystems without hard-link support, protected caching
-also fails before digest publication; unprotected caching retains its rename
-fallback.
-
-This phase does not implement OAuth/SSO browser flows, cloud-request signing,
-credential stores, custom fetch commands, or cross-origin credential sharing.
-
-## Schema extensions
-
-- `--schema-extension <manifest>` — Registers a trusted local compiler
-  extension for a required custom JSON Schema vocabulary. Repeat the option
-  when registering multiple manifests.
-
-An extension manifest locks its executable digest and vocabulary URIs. The
-extension protocol is compile-time JSON-RPC only: it returns a replacement JSON
-Schema object or boolean, never executable TypeScript or runtime callbacks.
+Register a local extension for a required custom JSON Schema vocabulary.
+Repeat the option to register more than one extension. Extensions run only
+while generating the SDK and are not included in application code.

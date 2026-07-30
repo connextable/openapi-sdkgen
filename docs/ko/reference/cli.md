@@ -1,6 +1,6 @@
 # CLI 레퍼런스
 
-## 명령 찾기
+## 도움말과 버전
 
 ```sh
 openapi-sdkgen --help
@@ -8,12 +8,11 @@ openapi-sdkgen generate --help
 openapi-sdkgen --version
 ```
 
-루트 help는 사용할 수 있는 명령을 보여줍니다. Generate help는 필수 option,
-일반 생성 option, 입력, remote reference, schema extension을 구분해 보여줍니다.
-target과 add-on 목록은 실행 중인 binary의 registry에서 가져오므로 built-in target이
-추가되어도 현재 binary와 일치합니다.
+`openapi-sdkgen --help`는 사용할 수 있는 명령을 보여줍니다.
+`openapi-sdkgen generate --help`에서는 설치된 CLI가 지원하는 생성 대상과 추가
+기능, 전체 옵션을 확인할 수 있습니다.
 
-## Generate 명령
+## `generate`
 
 ```text
 openapi-sdkgen generate \
@@ -22,16 +21,59 @@ openapi-sdkgen generate \
   --output <directory>
 ```
 
-전체 option 목록은 `openapi-sdkgen generate --help`에서 확인하고, 각 option의
-상세 동작과 보안 제약은 이 페이지를 참고하세요.
+### 필수 옵션
 
-## 비공개 HTTP(S) 입력
+- `--input <openapi>`: SDK 생성에 사용할 OpenAPI 3.0.x, 3.1.x, 3.2.x JSON
+  또는 YAML 파일. 로컬 경로, `file://` URL, HTTP(S) URL, 표준 입력을 뜻하는
+  `-`를 사용할 수 있습니다.
+- `--target typescript`: TypeScript SDK를 생성합니다.
+- `--output <directory>`: 생성된 코드를 저장할 빈 디렉터리입니다.
 
-명령줄에 값을 넣지 않고 요청 헤더를 보내려면 환경 변수 매핑을 사용합니다.
-`--http-header-env`는 여러 번 지정할 수 있습니다. 매핑 형식은 정확히
-`Header-Name=ENV_VAR`입니다. 헤더 이름은 HTTP token 문법을, 환경 변수 이름은
-`[A-Za-z_][A-Za-z0-9_]*`를 따라야 합니다. 값은 비어 있으면 안 되며, 대소문자를
-구분하지 않는 중복 헤더 이름은 거부됩니다.
+`--output`은 항상 디렉터리 경로를 받습니다. `--input -`와 달리
+`--output -`는 표준 출력을 뜻하지 않습니다.
+
+## OpenAPI 파일 가져오기
+
+로컬 파일이나 URL을 `--input`에 지정할 수 있습니다.
+
+```sh
+# 로컬 파일
+openapi-sdkgen generate --input ./openapi.yaml --target typescript --output ./src/generated/api
+
+# file URL
+openapi-sdkgen generate --input file:///workspace/openapi.yaml --target typescript --output ./src/generated/api
+
+# 개발 서버
+openapi-sdkgen generate --input http://localhost:4010/openapi.json --target typescript --output ./src/generated/api
+```
+
+다른 명령이 출력한 OpenAPI 파일을 사용하려면 `--input -`를 지정합니다. `-`는
+파일 경로 대신 표준 입력(stdin)을 읽으라는 뜻입니다.
+
+```sh
+curl https://api.example.test/openapi.json | \
+  openapi-sdkgen generate \
+    --input - \
+    --target typescript \
+    --output ./src/generated/api
+```
+
+표준 입력으로 읽은 OpenAPI 파일에 상대 `$ref`가 있다면 기준 경로나 URL을
+`--input-base`로 지정하세요.
+
+```sh
+curl https://api.example.test/openapi.yaml | \
+  openapi-sdkgen generate \
+    --input - \
+    --input-base https://api.example.test/openapi.yaml \
+    --target typescript \
+    --output ./src/generated/api
+```
+
+## 인증이 필요한 URL
+
+HTTP 요청 헤더의 값은 환경 변수에서 읽을 수 있습니다. 토큰을 명령줄에 직접
+넣지 않아도 됩니다.
 
 ```sh
 export OPENAPI_TOKEN='...'
@@ -42,13 +84,14 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-`Host`, `Cookie`, connection 관리 헤더, transfer 헤더, proxy authorization 헤더는
-지정할 수 없습니다. 설정한 헤더는 sdkgen 기본 헤더 뒤에 적용되므로 `Accept`를
-지정하면 기본 `Accept` 값을 대체합니다. 헤더 매핑은 HTTP(S) 루트 입력에서만 쓸 수
-있습니다. `http://` 입력에 매핑 헤더를 보내면 연결에서 기밀성이 보장되지 않으므로
-sdkgen이 한 번 경고를 출력합니다.
+`--http-header-env`는 `Header-Name=ENV_VAR` 형식이며 여러 번 사용할 수
+있습니다. 빈 값, 잘못된 헤더 이름, 중복 헤더는 거부됩니다. `Host`, `Cookie`,
+연결 관리 헤더, 프록시 인증 헤더는 지정할 수 없습니다.
 
-비공개 TLS에는 인증서/키 쌍과 PEM CA bundle을 지정할 수 있습니다.
+`http://` URL에 인증 헤더를 보내면 암호화되지 않은 연결이라는 경고가
+출력됩니다.
+
+### 클라이언트 인증서와 사설 CA
 
 ```sh
 openapi-sdkgen generate \
@@ -60,102 +103,62 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-클라이언트 인증서와 키는 함께 지정해야 합니다. CA 파일에는 유효한 PEM
-`CERTIFICATE` block만 들어갈 수 있으며 system trust store에 추가됩니다. 이 옵션은
-TLS 검증을 끄지 않습니다.
+클라이언트 인증서와 키는 함께 지정해야 합니다. `--tls-ca-file`은 시스템 인증서
+저장소에 사설 CA를 추가하며 TLS 검증을 끄지 않습니다.
 
-## 필수 option
+## Webhook과 Callback
 
-- `--input <document>` — 생성할 OpenAPI 3.0.x, 3.1.x, 3.2.x JSON 또는 YAML 문서입니다.
-  local path, `file://` URL, HTTP(S) URL, stdin을 뜻하는 `-`를 사용할 수 있습니다.
-- `--target typescript` — 현재 지원하는 source-mode target입니다.
-- `--output <directory>` — 생성 artifact를 둘 비어 있는 애플리케이션 소스 디렉터리입니다.
-
-## Diagnostic
-
-`generate`가 사전 검증을 수행하고 발견 가능한 warning과 error를 phase/source별로 출력합니다.
-별도 `validate` command나 validation-only flag는 없습니다. Warning만 있으면 output을 게시하고,
-error가 있으면 output을 변경하지 않습니다. CI 사용법은
-[SDK 생성](../guide/generate.md), 선택적인 검증 계약은
-[SDK extension](./extensions.md)을 참고하세요.
-
-## 입력 source
-
-`--input`은 루트 문서를 지정합니다. `$ref`가 아니므로 HTTP(S) 입력을 읽는 데
-`--allow-remote-ref`가 필요하지 않고 reference lock에도 기록하지 않습니다. loopback과 private
-development endpoint도 루트 입력으로 사용할 수 있습니다.
-
-```sh
-# local file 또는 file URL
-openapi-sdkgen generate --input ./openapi.yaml --target typescript --output ./src/generated/api
-openapi-sdkgen generate --input file:///workspace/openapi.yaml --target typescript --output ./src/generated/api
-
-# HTTP(S) endpoint
-openapi-sdkgen generate --input http://localhost:4010/openapi.json --target typescript --output ./src/generated/api
-
-# 문서 바이트를 출력할 수 있는 모든 producer
-curl https://api.example.test/openapi.json | \
-  openapi-sdkgen generate --input - --target typescript --output ./src/generated/api
+```text
+--with server
 ```
 
-stdin에는 상대 `$ref`의 기준 위치가 없습니다. 필요한 경우에만 `--input-base`로 원본 문서 위치를
-지정하세요.
+OpenAPI에 정의된 Webhook과 Callback을 처리하는 타입과 Fetch 기반 라우터를
+`server/` 아래에 생성합니다. 자세한 사용법은
+[Webhook과 Callback 처리](../guide/server.md)에서 확인하세요.
+
+## 오류와 경고
+
+`generate`는 OpenAPI 파일을 검사한 뒤 코드를 생성합니다. 경고가 있어도 생성은
+계속되지만 오류가 있으면 기존 생성 결과를 바꾸지 않습니다. 오류 메시지에는
+가능한 경우 OpenAPI 파일에서 문제가 발생한 위치가 함께 표시됩니다.
+
+별도의 `validate` 명령은 없습니다. CI에서 생성 가능 여부를 확인하는 방법은
+[SDK 생성](../guide/generate.md)을 참고하세요.
+
+## 원격 `$ref`
+
+로컬 OpenAPI 파일의 상대 `$ref`는 파일이 있는 디렉터리 안에서만 가져올 수
+있습니다. 다른 서버의 `$ref`를 가져오려면 허용할 HTTPS origin을 명시해야
+합니다.
+
+- `--allow-remote-ref <origin>`: 원격 `$ref`를 가져올 HTTPS origin을
+  허용합니다. 여러 origin은 옵션을 반복해서 지정합니다.
+- `--ref-lock <path>`: 참조 잠금 파일의 경로를 지정합니다.
+- `--update-ref-lock`: 원격 참조를 가져온 뒤 잠금 파일을 만들거나 갱신합니다.
+- `--offline`: 네트워크에 연결하지 않고 이전에 저장한 원격 참조만 사용합니다.
 
 ```sh
-curl https://api.example.test/openapi.yaml | \
-  openapi-sdkgen generate \
-    --input - \
-    --input-base https://api.example.test/openapi.yaml \
-    --target typescript \
-    --output ./src/generated/api \
-    --ref-lock ./openapi.refs.lock \
-    --update-ref-lock
+openapi-sdkgen generate \
+  --input ./openapi.json \
+  --target typescript \
+  --output ./src/generated/api \
+  --allow-remote-ref https://schemas.example.test \
+  --update-ref-lock
 ```
 
-## Optional add-on
+HTTP(S) URL로 OpenAPI 파일을 읽을 때 같은 origin의 상대 `$ref`는 자동으로
+해석합니다. 처음 가져올 때는 잠금 파일을 갱신해야 하며, 다른 origin은
+`--allow-remote-ref`로 별도 허용해야 합니다.
 
-- `--with server` — `server/`에 Fetch-native Callback과 Webhook 계약을 추가합니다.
-  미래 add-on을 결합할 수 있도록 `--with`는 반복해서 사용할 수 있습니다.
+인증 헤더, 클라이언트 인증서, 사설 CA는 OpenAPI 파일과 같은 origin에만
+사용됩니다. 다른 origin의 `$ref`나 리디렉션에는 전달하지 않습니다.
 
-## 원격 reference 정책
+## JSON Schema 확장 프로그램
 
-- `--allow-remote-ref <origin>` — 원격 `$ref` 해석을 위해 정확한 HTTPS origin 하나를 허용합니다.
-  여러 origin을 허용하려면 이 option을 반복해서 지정하세요.
-- `--ref-lock <path>` — remote reference와 extension integrity lock 경로를 override합니다.
-- `--update-ref-lock` — 성공한 compile 후에만 lock을 생성하거나 갱신합니다.
-- `--offline` — local content-addressed cache에서만 잠긴 remote reference를 해석합니다.
+```text
+--schema-extension <manifest>
+```
 
-local file reference는 input directory 안에 유지되어야 합니다. canonical root 밖을 가리키는 reference는
-거부됩니다. 정확한 origin을 지정하기 전에는 cross-origin network resolution이 비활성화되어 있습니다.
-
-HTTP(S) 루트 문서의 same-origin 상대 `$ref`는 루트 URL을 기준으로 해석합니다. 이들은 여전히 remote
-reference이므로 처음에는 `--ref-lock`과 `--update-ref-lock`이 필요합니다. 다른 origin의 `$ref`는 계속
-`--allow-remote-ref`를 명시해야 합니다. `--offline`은 network connection을 열지 않으므로 HTTP(S) 루트
-입력과 함께 사용할 수 없습니다. local file 또는 stdin을 사용하세요.
-
-헤더 매핑과 비공개 TLS 설정은 루트와 정확히 같은 origin에만 적용됩니다. scheme, host,
-명시한 port가 모두 같아야 합니다. same-origin `$ref`는 이 설정을 상속하지만, 다른 origin으로
-나가는 redirect는 거부합니다. allowlist로 허용한 cross-origin `$ref`에는 해당 헤더, client
-certificate, 추가 CA root를 전달하지 않습니다. client certificate 또는 추가 CA root를 쓰는
-경우 standard proxy 환경 변수가 선택한 `https://` proxy는 연결하기 전에 거부합니다. 일반 HTTP,
-SOCKS proxy와 `NO_PROXY` 동작은 그대로 사용할 수 있습니다.
-
-보호된 same-origin `$ref` 본문도 일반 reference lock과 cache를 사용합니다. 다만 sdkgen은 cache
-directory 권한을 `0700`, entry 권한을 `0600`으로 줄입니다. cache root와 entry는 symlink가 아닌
-directory/regular file이어야 하며, 안전하지 않은 경로는 online/offline 모두에서 실패합니다. local
-보관 정책이 맞지 않으면 cache를 삭제하세요. Windows는 이 owner-only mode 계약을 강제할 수 없으므로
-보호된 remote reference cache를 저장하기 전에 실패합니다.
-다른 운영체제에서도 filesystem이 hard link를 지원하지 않으면 보호된 cache digest를 게시하기 전에
-실패합니다. 비보호 cache는 기존 rename fallback을 유지합니다.
-
-이번 범위에는 OAuth/SSO browser flow, cloud request signing, credential store, custom fetch command,
-cross-origin credential 공유가 포함되지 않습니다.
-
-## Schema extension
-
-- `--schema-extension <manifest>` — 필수 custom JSON Schema vocabulary용 trusted local compiler
-  extension을 등록합니다. 여러 manifest를 등록하려면 이 option을 반복해서 지정하세요.
-
-extension manifest는 executable digest와 vocabulary URI를 lock합니다. extension protocol은 compile-time
-JSON-RPC만 사용하며, executable TypeScript나 runtime callback 대신 replacement JSON Schema object 또는
-boolean을 반환합니다.
+필수 사용자 정의 JSON Schema vocabulary를 처리할 로컬 확장 프로그램을
+등록합니다. 여러 개를 사용하려면 옵션을 반복해서 지정하세요. 확장 프로그램은
+SDK 생성 중에만 실행되고 생성된 애플리케이션 코드에는 포함되지 않습니다.

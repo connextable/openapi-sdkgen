@@ -10,7 +10,7 @@ behavior.
 ## Goal
 
 Parse every valid OpenAPI 3.x document according to the semantics of its
-declared version and generate a correct TypeScript SDK surface.
+declared version and generate a correct TypeScript SDK.
 Generated code must not silently drop a valid construct. A feature remains an
 explicit diagnostic until its parser, type lowering, wire codec, runtime
 behavior, and tests are all implemented.
@@ -29,7 +29,7 @@ TypeScript inbound Webhook/Callback contracts. The exact present state is
 authoritative in the [feature manifest](openapi-feature-manifest.json).
 
 The work below is intentionally ordered by shared dependencies. Implementing a
-surface feature before its resolver, schema validator, or wire codec would
+user-visible feature before its resolver, schema validator, or wire codec would
 create target-specific shortcuts and inconsistent behavior between OpenAPI
 versions.
 
@@ -142,7 +142,7 @@ application runtime, or silently treats a required vocabulary as an annotation.
 `lower` does not accept executable source, TypeScript snippets, codecs, or
 runtime callbacks. Custom semantics must be represented by the returned JSON
 Schema fragment. Target-specific non-schema lowering remains a separate future
-protocol revision, rather than an unvalidated code-injection surface.
+protocol revision, rather than an unvalidated code-injection boundary.
 
 An unavailable extension, URI/digest mismatch, unsupported target/context, or
 invalid extension output is a feature-path diagnostic. An unknown optional

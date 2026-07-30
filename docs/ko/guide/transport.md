@@ -1,12 +1,13 @@
 # 전송, 인증, 스트림
 
-대부분의 애플리케이션에는 `baseURL`과, API가 요구할 때 authorization 값 또는 credential provider만 있으면
-충분합니다. 일반 Fetch가 제공하지 못하는 기능이 필요한 경우에만 사용자 정의 전송을 설정하세요.
+대부분의 애플리케이션은 `baseURL`과 API 인증 정보만 설정하면 됩니다. 기본
+Fetch로 처리할 수 없는 기능이 있을 때만 사용자 정의 전송을 사용하세요.
 
-## 기본 Fetch와 사용자 정의 전송
+## 사용자 정의 전송
 
-클라이언트는 기본적으로 host `fetch`를 사용합니다. 다른 Fetch 구현을 쓰거나 추가 capability가 필요할 때만
-transport를 제공하세요.
+클라이언트는 실행 환경의 `fetch`를 기본으로 사용합니다. 다른 Fetch 구현이
+필요하거나 쿠키 저장소, 응답 헤더 접근, mTLS 같은 기능을 사용해야 한다면
+`transport`를 설정합니다.
 
 ```ts
 const api = createClient({
@@ -22,17 +23,22 @@ const api = createClient({
 });
 ```
 
-capability는 feature toggle이 아니라 실제 host가 제공한다는 보장입니다.
-[Parameter Object](https://spec.openapis.org/oas/v3.2.0.html#parameter-object)의 호출자가 전달한 cookie parameter,
-읽을 수 없는 response header, mutual TLS는 현재 환경이 제공하지 못하면 typed transport-capability
-error가 발생합니다.
+`capabilities`에는 실제 실행 환경에서 지원하는 기능만 지정해야 합니다. 필요한
+기능이 없으면 요청을 보내기 전에 오류가 발생합니다.
 
-## Credential
+## 인증 정보 제공
 
-토큰 획득·갱신·저장과 클라이언트 인증서 선택은 애플리케이션의 책임입니다. 생성 코드는 OpenAPI
-[Security Scheme Object](https://spec.openapis.org/oas/v3.2.0.html#security-scheme-object)와
-[Security Requirement Object](https://spec.openapis.org/oas/v3.2.0.html#security-requirement-object)의
-wire location에 전달된 값을 적용합니다.
+간단한 Bearer 토큰은 클라이언트를 만들 때 바로 지정할 수 있습니다.
+
+```ts
+const api = createClient({
+  baseURL: "https://api.example.test",
+  authorization: "Bearer example-token",
+});
+```
+
+여러 인증 방식을 선택하거나 토큰을 요청할 때마다 가져와야 한다면
+`credentials` 함수를 사용합니다.
 
 ```ts
 const api = createClient({
@@ -49,12 +55,12 @@ const api = createClient({
 });
 ```
 
-API key, HTTP basic/bearer, OAuth2/OpenID metadata, mutual-TLS capability requirement를 지원합니다.
-다만 생성 SDK가 login 또는 token refresh flow를 직접 구현하지는 않습니다.
+API key, HTTP Basic/Bearer, OAuth2, OpenID Connect, mTLS 요구 사항을 지원합니다.
+로그인, 토큰 갱신, 인증 정보 저장은 애플리케이션에서 구현해야 합니다.
 
-## 취소, timeout, stream
+## 요청 취소와 시간 제한
 
-각 요청의 options는 일반 Fetch 취소 제어를 그대로 사용합니다.
+각 요청에 `AbortSignal`과 시간 제한을 지정할 수 있습니다.
 
 ```ts
 const controller = new AbortController();
@@ -65,5 +71,8 @@ const todos = await api.todos.list(
 );
 ```
 
-streaming operation은 `AsyncIterable`을 반환합니다. Fetch backpressure가 유지되며 consumer는 자연스럽게
-iteration을 멈출 수 있습니다. generator는 Server-Sent Events를 자동으로 reconnect하지 않습니다.
+## 스트림
+
+스트리밍 API는 `AsyncIterable`을 반환합니다. 순회를 중단하면 응답 읽기도
+중단됩니다. Server-Sent Events 연결이 끊어졌을 때 자동으로 다시 연결하지는
+않습니다.

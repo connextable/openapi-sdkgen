@@ -1,55 +1,43 @@
 # OpenAPI support
 
-Use this page when you are deciding whether an OpenAPI document can be generated
-as-is, or when a version-specific feature needs a closer look. You do not need
-the implementation matrix to create and use a normal SDK.
+openapi-sdkgen supports OpenAPI 3.0.x, 3.1.x, and 3.2.x files. Each file is
+interpreted according to its declared OpenAPI version.
 
-Guide links point to the current
-[OpenAPI 3.2 Object reference](https://spec.openapis.org/oas/v3.2.0.html).
-The generator still interprets each document according to its declared 3.0,
-3.1, or 3.2 version; use the matching
-[3.0](https://spec.openapis.org/oas/v3.0.4.html) or
-[3.1](https://spec.openapis.org/oas/v3.1.1.html) specification when a feature
-is version-specific. Standard OpenAPI is the complete baseline; the optional
-[SDK extensions](./extensions.md) add only explicitly requested conveniences.
+## Requests and responses
 
-## What works in an application
+The TypeScript target generates types and client code for:
 
-### Standard request and response shapes
+- API paths, HTTP methods, and parameters
+- JSON, text, binary, form, and multipart request bodies
+- status-specific responses and response headers
+- request and response validation based on OpenAPI schemas
 
-HTTP operations, parameters, JSON/text/binary/form/multipart bodies, and typed
-responses generate a TypeScript client with exact route calls, resource calls,
-and aliases for explicitly declared `operationId` values.
+Call an API through a resource method, its exact HTTP route, or its
+`operationId`.
 
-### Servers, security, Links, and streams
+## Servers and authentication
 
-OpenAPI Servers, security schemes, response headers, Links, and streams become
-generated client behavior. The host still provides transport and credentials
-when the platform owns those concerns.
+OpenAPI Server Objects, security schemes, and operation-specific security
+requirements are supported. Your application provides tokens and certificates.
 
-### Callbacks and Webhooks
+See [transport, authentication, and streams](../guide/transport.md) for
+configuration examples.
 
-Add `--with server` to generate Fetch-native inbound handler contracts.
+## Links and streams
 
-### OpenAPI versions
+OpenAPI Links become typed follow-up request helpers. Streaming responses are
+available as `AsyncIterable` values.
 
-OpenAPI 3.0.x, 3.1.x, and 3.2.x are parsed and generated according to the
-version declared by the document.
+## Webhooks and Callbacks
 
-## When generation stops
+Add `--with server` to generate types and Fetch-based routers for receiving
+Webhooks and Callbacks.
 
-The generator does not silently skip a valid construct. If the selected target
-or add-on cannot represent it, generation stops with a feature-path diagnostic.
-Some source information is deliberately available only from `metadata.js`,
-because exposing it as a fabricated runtime API would be misleading.
+## Unsupported features
 
-## Detailed implementation evidence
+When the selected target cannot generate an OpenAPI feature, generation stops
+with an error that identifies the relevant location. Unsupported features are
+not silently skipped.
 
-The documents below are maintained alongside the compiler and tests. They are
-useful for audits, migration work, and exact feature-level compatibility checks.
-Large tables scroll horizontally within the page on narrow layouts.
-
-- [Capability inventory](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-inventory.md): grouped feature list.
-- [Capability matrix](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-matrix.md): version-specific status and test evidence.
-- [Feature manifest](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-feature-manifest.json): machine-readable source of truth.
-- [Implementation roadmap](https://github.com/connextable/openapi-sdkgen/blob/main/docs/openapi-sdkgen-implementation-roadmap.md): architecture and implementation contract.
+OpenAPI information that does not map to the client API remains available from
+`metadata.js`.

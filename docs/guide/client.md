@@ -1,6 +1,6 @@
 # Use the generated client
 
-## Create one client per API configuration
+## Configure a client
 
 ```ts
 import { createClient } from "./generated/api";
@@ -11,37 +11,43 @@ const api = createClient({
 });
 ```
 
-An explicit `baseURL` wins over OpenAPI
-[Server Objects](https://spec.openapis.org/oas/v3.2.0.html#server-object). If it is omitted, the
-runtime selects the operation server, then path server, then root server.
+When `baseURL` is omitted, the client uses
+[Server Objects](https://spec.openapis.org/oas/v3.2.0.html#server-object) from
+the OpenAPI file. A server declared for a path or operation takes precedence
+over the root server.
 
-## Resource API and exact operations
+Create a separate client for each base URL or set of credentials.
+
+## Call an API
+
+Resource methods are the most readable choice for normal application code.
 
 ```ts
 const created = await api.todos.create({
-  body: { title: "Readable code" },
+  body: { title: "Write documentation" },
 });
+```
 
-const page = await api.$operations.listTodos({
-  query: { limit: 50 },
-});
+Use `$routes` to call an API by its exact HTTP method and OpenAPI path.
 
-const exact = await api.$routes["GET /todos"]({
+```ts
+const todos = await api.$routes["GET /todos"]({
   query: { limit: 50 },
 });
 ```
 
-Use resource calls for application code. `$routes` always exposes every
-non-hidden operation by exact method and path. `$operations` is an alias when
-an explicit `operationId` from an
-[Operation Object](https://spec.openapis.org/oas/v3.2.0.html#operation-object)
-is clearer or does not map cleanly to a resource name.
+When the OpenAPI file declares an `operationId`, the same API is available
+through `$operations`.
 
-## Choose media and inspect raw responses
+```ts
+const todos = await api.$operations.listTodos({
+  query: { limit: 50 },
+});
+```
 
-When a [Request Body Object](https://spec.openapis.org/oas/v3.2.0.html#request-body-object)
-accepts several [Media Type Objects](https://spec.openapis.org/oas/v3.2.0.html#media-type-object), make the representation
-explicit. The raw helper retains status, headers, and the Fetch `Response`.
+## Choose a request media type
+
+When a request body accepts multiple media types, select the one to send.
 
 ```ts
 const result = await api.$operations.uploadAsset.raw({
@@ -50,7 +56,12 @@ const result = await api.$operations.uploadAsset.raw({
     value: file,
   },
 });
+```
 
+The `.raw()` call returns the decoded data together with the status, headers,
+and Fetch `Response`.
+
+```ts
 if (result.status === 201) {
   console.log(result.headers.location);
 }
@@ -58,19 +69,24 @@ if (result.status === 201) {
 
 ## Links and streams
 
-Response [Link Objects](https://spec.openapis.org/oas/v3.2.0.html#link-object)
-become typed follow-up helpers under `$links`. Streaming
-operations expose typed lazy `AsyncIterable` helpers under `$streams`.
+When a response defines an OpenAPI
+[Link Object](https://spec.openapis.org/oas/v3.2.0.html#link-object), use
+`$links` to make the follow-up request.
 
 ```ts
 const created = await api.$operations.createOrder.raw({ body: order });
 const receipt = await api.$links.createOrder.getReceipt(created);
+```
 
-for await (const event of api.$streams.watchOrders({ query: { cursor: "0" } })) {
+Streaming APIs are available as `AsyncIterable` values under `$streams`.
+
+```ts
+for await (const event of api.$streams.watchOrders({
+  query: { cursor: "0" },
+})) {
   console.log(event);
 }
 ```
 
-Link-derived values are defaults; explicit input overrides them. Stream decode
-failures occur during iteration and cancellation uses the normal `AbortSignal`
-path. See [transport, auth, and streams](./transport.md) for host integration.
+See [transport, authentication, and streams](./transport.md) for request
+cancellation and custom transport configuration.

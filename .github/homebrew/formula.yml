@@ -1,5 +1,5 @@
-desc: Generate TypeScript SDK source from OpenAPI documents
-homepage: https://github.com/connextable/openapi-sdkgen
+desc: Generate application SDK source from OpenAPI documents
+homepage: https://connextable.github.io/openapi-sdkgen/
 license: Apache-2.0
 dependencies:
   build:

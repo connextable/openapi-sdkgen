@@ -1,7 +1,7 @@
 # OpenAPI 3.x Atomic SDK Capability Inventory
 
 This is the grouped, human-readable companion to
-[`openapi-feature-matrix.md`](openapi-feature-matrix.md). Every listed surface
+[`openapi-feature-matrix.md`](openapi-feature-matrix.md). Every listed capability
 has one base-client target state only: `generated`, `metadata`, or `error`.
 An optional add-on may override that state through its documented manifest
 condition; for example Webhooks remain a client-only `error` but are generated
@@ -12,11 +12,11 @@ the source value, but does not invent a runtime API.
 The canonical field-level source is
 [`openapi-feature-manifest.json`](openapi-feature-manifest.json). It uses one
 ID, state, version scope, and executable evidence reference per field. This
-grouped view covers the common OpenAPI 3.x surface once; a field appears in a
+grouped view covers the common OpenAPI 3.x feature set once; a field appears in a
 version-only table only when its availability or semantics differ by minor
 line.
 
-## Common Document and Discovery Surface
+## Common Document and Discovery Features
 
 | ID | Fields | Versions | State | Evidence |
 | --- | --- | --- | --- | --- |
@@ -163,6 +163,6 @@ line.
 | oas32-security-deprecated | Security Scheme `deprecated` | 3.2 | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesEveryHostManagedSecurityCredentialShape` |
 | oas32-device-authorization-flow | OAuth `deviceAuthorization` flow | 3.2 | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesEveryHostManagedSecurityCredentialShape` |
 | oas32-response-summary | Response `summary` | 3.2 | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
-| oas32-optional-paths | optional `paths` when another API surface is present | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsAllowsOpenAPI32OptionalPaths` |
+| oas32-optional-paths | optional `paths` when another API entry point is present | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsAllowsOpenAPI32OptionalPaths` |
 | oas32-operations | `query`, `additionalOperations` | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations` |
 | oas32-streaming-media | streaming/sequential/SSE media and expanded multipart rules | 3.2 | generated | `internal/target/typescript/runtime_parity_test.go::TestGeneratedNestedMultipartRequestAndResponseRoundTrip` |

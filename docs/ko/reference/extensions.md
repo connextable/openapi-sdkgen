@@ -1,81 +1,78 @@
-# SDK extension
+# SDK 확장 기능
 
-표준 OpenAPI 문서만으로 TypeScript SDK를 생성할 수 있습니다.
-openapi-sdkgen extension, `operationId`, `/v1` 루트 server, operation별
-security 선언은 필수가 아닙니다.
+표준 OpenAPI만으로 SDK를 생성할 수 있습니다. 이 페이지의 `x-*` 필드는
+OpenAPI만으로 표현하기 어려운 편의 기능이 필요할 때만 사용하세요.
 
-Extension은 OpenAPI만으로 표현할 수 없는 SDK 편의 기능을 명시적으로
-활성화합니다. 인식하는 extension이 존재하면 openapi-sdkgen은 source를
-생성하기 전에 전체 계약을 검증합니다. 잘못된 선언을 무시하거나 추측해서
-처리하지 않습니다.
+openapi-sdkgen이 지원하는 확장 필드가 있으면 선언 내용을 먼저 검사합니다.
+잘못된 설정을 무시하거나 임의로 해석하지 않으며, 오류가 있으면 SDK를 생성하지
+않습니다.
 
-## 기본 동작
+## 확장 필드 없이 사용할 수 있는 기능
 
-- `operationId`가 없는 operation도 `api.$routes["METHOD /path"]`로 호출할 수 있습니다.
-- query, header, cookie, path parameter는 표준 Parameter Object와 정확한 이름을 사용합니다.
-- `required`, `minimum`, `pattern`, `enum` 같은 request/response 제약은 생성 코드의
-  runtime validation 규칙으로 유지됩니다.
-- 알 수 없는 third-party `x-*`는 `metadata.ts`에 보존되며 SDK 동작에는 영향을 주지 않습니다.
-- `x-filter`, `x-concurrency`, `x-idempotency`는 의미를 부여하지 않는 vendor metadata입니다.
-  filter는 query parameter로, `If-Match`와 `Idempotency-Key`는 표준 header parameter로 선언하세요.
+- `operationId`가 없어도 `api.$routes["METHOD /path"]`로 API를 호출할 수
+  있습니다.
+- query, header, cookie, path 매개변수는 OpenAPI에 선언된 이름을 그대로
+  사용합니다.
+- `required`, `minimum`, `pattern`, `enum` 같은 스키마 제약은 생성된 코드의
+  요청·응답 검사에 반영됩니다.
+- openapi-sdkgen이 알지 못하는 `x-*` 필드는 메타데이터에 보존되지만 SDK 동작을
+  바꾸지는 않습니다.
 
-생성 코드의 검증은 SDK 호출과 생성된 inbound adapter를 보호합니다. API 제공 서버는
-authorization, 상태, 재고 같은 business rule을 포함해 독립적으로 검증해야 합니다.
+필터는 query 매개변수로, `If-Match`와 `Idempotency-Key`는 header 매개변수로
+선언하세요. `x-filter`, `x-concurrency`, `x-idempotency`에는 별도 동작을
+부여하지 않습니다.
 
 ## `x-envelope`
 
-위치: 일반 Paths Operation Object.
-
-허용 값은 `data`뿐입니다. body가 있는 모든 성공 JSON response는 선언된
-`data` property를 가진 object여야 합니다.
+성공 응답의 `data` 속성만 일반 호출의 반환값으로 사용합니다.
 
 ```yaml
 x-envelope: data
 ```
 
-일반 호출은 `data` member를 반환합니다. `.raw()`는 metadata를 포함한 전체 decoded body를
-유지하고 pagination도 이 전체 body를 읽습니다. Extension이 없으면 일반 호출도 전체 body를 반환합니다.
+이 확장을 사용하려면 본문이 있는 모든 성공 JSON 응답이 `data` 속성을 가진
+object여야 합니다. `.raw()`는 나머지 메타데이터를 포함한 전체 응답 본문을
+반환합니다.
 
-`x-envelope: none`을 쓰지 말고 extension을 생략하세요.
+전체 응답을 그대로 받으려면 `x-envelope`를 생략하세요.
 
 ## `x-pagination`
 
-위치: 일반 Paths Operation Object.
+페이지 순회를 돕는 `.paginate()` 메서드를 생성합니다. 확장을 생략하면 API는
+그대로 생성되지만 `.paginate()`는 추가되지 않습니다.
 
-Extension이 없으면 operation은 평범하게 생성되고 `.paginate()` helper가 생기지 않습니다.
-Pagination helper를 사용하더라도 선언된 query parameter와 response schema가 기준입니다.
+### 기본 형식
 
-### 문자열 shorthand
-
-허용 값은 `cursor`, `offset`, `both`입니다. Mode에 따라 다음 표준 query 이름이 필요합니다.
-
-- cursor: string `cursor`, positive integer `limit`
-- offset: non-negative integer `offset`, positive integer `limit`
-- both: 세 control 모두
-
-모든 성공 JSON response는 아래 layout 중 하나를 동일하게 사용해야 합니다.
-
-| Layout | Items | Pagination metadata |
-|---|---|---|
-| Root collection | `/items` | `/pagination/*` |
-| Nested collection | `/data/items` | `/data/pagination/*` |
-| Data-array envelope | `/data` | `/meta/pagination/*` |
-
-Cursor metadata의 `nextCursor`는 string 또는 null schema입니다. Offset metadata는
-`offset`, `limit`, `total`을 사용할 수 있습니다. Offset과 total은 non-negative integer,
-limit은 positive integer여야 하며 schema에 해당 bound가 선언되어야 합니다.
+값은 `cursor`, `offset`, `both` 중 하나입니다.
 
 ```yaml
 x-pagination: cursor
 ```
 
-불완전하거나 layout이 섞였거나 모호하면 shorthand를 사용할 수 없습니다. 다른 이름이나
-response 구조는 object form으로 선언하세요.
+각 방식에 필요한 query 매개변수는 다음과 같습니다.
 
-### 명시적 object form
+| 방식 | 필요한 query 매개변수 |
+| --- | --- |
+| `cursor` | 문자열 `cursor`, 양의 정수 `limit` |
+| `offset` | 0 이상의 정수 `offset`, 양의 정수 `limit` |
+| `both` | `cursor`, `offset`, `limit` |
 
-Object form은 정확한 query parameter 이름과 전체 decoded response body 기준의
-RFC 6901 JSON Pointer를 연결합니다.
+성공 JSON 응답은 다음 구조 중 하나를 사용해야 합니다.
+
+| 응답 구조 | 항목 | 페이지 정보 |
+| --- | --- | --- |
+| 루트 목록 | `/items` | `/pagination/*` |
+| 중첩 목록 | `/data/items` | `/data/pagination/*` |
+| `data` 배열 | `/data` | `/meta/pagination/*` |
+
+cursor 방식의 `nextCursor`는 문자열 또는 `null`이어야 합니다. offset 방식은
+`offset`, `limit`, `total`을 사용할 수 있으며 스키마에도 각 값의 범위를
+선언해야 합니다.
+
+### 매개변수와 응답 경로 직접 지정
+
+다른 이름이나 응답 구조를 사용한다면 query 매개변수 이름과 응답 본문의 JSON
+Pointer를 직접 연결합니다.
 
 ```yaml
 x-pagination:
@@ -92,22 +89,16 @@ x-pagination:
     total: /payload/page/total
 ```
 
-`mode`는 `cursor`, `offset`, `both` 중 하나입니다. `items`는 항상 필요합니다.
-Cursor mode는 request `cursor`와 response `nextCursor`가 필요하고, offset mode는
-request `offset`, `limit`이 필요합니다. 선택적인 offset response pointer가 없으면 현재
-request 값을 fallback으로 사용합니다. 빈 pointer는 response body root를 가리킵니다.
+`mode`와 `items`는 필수입니다. cursor 방식은 요청의 `cursor`와 응답의
+`nextCursor`가 필요합니다. offset 방식은 요청의 `offset`과 `limit`이
+필요합니다.
 
-`both`의 `.paginate({mode: "cursor" | "offset", ...})`에서 top-level `mode`는 helper 전용입니다.
-실제 query parameter 이름이 `mode`라면 `query.mode`에 그대로 남고 그대로 전송됩니다.
-
-Iterator는 filter, sort input, request option, 초기 control을 보존합니다. Cursor가 없거나
-null, 빈 문자열, 반복 값이면 종료합니다. Offset page가 비었거나 짧거나 total에 도달했거나
-반복 또는 진행하지 않으면 종료합니다.
+`.paginate()`는 다음 cursor가 없거나 같은 값이 반복될 때, 또는 offset
+페이지가 비었거나 마지막 항목에 도달했을 때 순회를 끝냅니다.
 
 ## `x-sort`
 
-위치: 일반 Paths operation에서 변환할 정확한 query Parameter Object. Webhook과
-callback parameter는 schema에서 그대로 파생하며 이 client projection을 허용하지 않습니다.
+정렬에 사용하는 query 매개변수에 선언합니다.
 
 ```yaml
 - name: sort
@@ -121,50 +112,49 @@ callback parameter는 schema에서 그대로 파생하며 이 client projection�
     format: field-direction
 ```
 
-Schema는 `field:asc` 또는 `field:desc` 형태의 고유한 string enum array여야 합니다.
-생성 input은 연관관계를 보존한 `{field, direction}` union이 됩니다. Runtime은 이를
-선언된 enum으로 변환한 다음 표준 schema validation과 Parameter serialization을 적용합니다.
-Operation-level 및 inbound-only webhook/callback `x-sort` 선언은 잘못된 선언입니다.
+스키마는 `field:asc` 또는 `field:desc` 형식의 고유한 문자열 enum 배열이어야
+합니다. 생성된 클라이언트에서는 다음과 같은 값으로 전달할 수 있습니다.
+
+```ts
+{ field: "createdAt", direction: "desc" }
+```
+
+Webhook과 Callback에는 `x-sort`를 사용할 수 없습니다.
 
 ## `x-sdk-visibility`
 
-위치: 일반 Paths Operation Object.
+클라이언트에서 API를 노출할 방법을 지정합니다.
 
-허용 값:
+```yaml
+x-sdk-visibility: internal
+```
 
-- `internal`: exact route와 operation-ID catalog는 유지하고 path resource tree에서는 제외
-- `hidden`: operation과 이에 의존하는 client helper를 모두 제외
+- `internal`: `$routes`와 `$operations`에서는 호출할 수 있지만 리소스
+  메서드에서는 제외합니다.
+- `hidden`: API와 관련 클라이언트 메서드를 생성하지 않습니다.
 
-Extension이 없으면 public입니다. `x-sdk-visibility: public`을 쓰지 마세요.
+확장을 생략하면 일반 공개 API로 생성됩니다.
 
 ## `x-error-category`
 
-위치: operation error response에서 도달 가능한 인식된 outer error-envelope component schema.
+오류 응답의 `error` object에 정확한 `code`가 있고 `category`가 없을 때 정적인
+오류 범주를 추가합니다.
 
-인식하는 error shape는 exact `code`를 가진 required outer `error` object입니다.
-Nested error object에 `category` property가 없을 때
-`x-error-category: value`가 해당 schema의 모든 exact code에 non-empty static category를 제공합니다.
+```yaml
+x-error-category: validation
+```
 
-Required nested `category`의 string `const` 또는 single-value `enum`이 wire 기준입니다.
-같은 extension은 redundant warning이고, 충돌하면 error입니다. Optional, non-string,
-multi-value wire category는 extension으로 override할 수 없습니다.
+스키마에 이미 필수 `category`가 선언되어 있다면 그 값이 우선합니다. 서로 다른
+값을 중복으로 선언하면 오류가 발생합니다.
 
-## Diagnostic과 migration
+## 이전 설정 정리
 
-별도 `validate` command는 없으며 `generate`가 유일한 validation workflow입니다.
-발견 가능한 warning과 error를 phase/source별로 한 번 출력합니다. Warning만 있으면
-생성하고, error가 있으면 새 output을 만들지 않으며 기존 output도 byte 단위로 보존합니다.
+이전 버전의 설정을 사용하고 있다면 다음 항목을 확인하세요.
 
-기존 문서를 옮길 때:
+- `x-envelope: none`, `x-sdk-visibility: public`은 제거합니다.
+- `x-concurrency`, `x-idempotency` 대신 `If-Match`,
+  `Idempotency-Key` header 매개변수를 선언합니다.
+- 모든 API는 `Routes`와 `$routes`에 생성됩니다. `operationId`가 있는
+  경우에만 `Operations`와 `$operations`에도 생성됩니다.
 
-- `x-envelope: none`, `x-sdk-visibility: public` 제거
-- placeholder `x-concurrency`, `x-idempotency` 필수 선언 제거
-- `If-Match`, `Idempotency-Key`를 Header Parameter Object로 선언하고 정확한
-  `headerParams` key로 전달
-- 기존 `RequestOptions.ifMatch`, `RequestOptions.idempotencyKey` 사용을 header parameter로 교체
-- 모든 operation은 `Routes`/`$routes`에서 접근하고, 명시적 operation ID가 있는 경우에만
-  `Operations`/`$operations` exact alias 사용
-- exported runtime helper를 직접 사용한다면 `createPaginator`에 profile string 대신
-  검증된 `PaginationPlan` 전달
-
-Diagnostic과 CI 동작은 [SDK 생성](../guide/generate.md)을 참고하세요.
+생성 오류와 CI 사용법은 [SDK 생성](../guide/generate.md)을 참고하세요.

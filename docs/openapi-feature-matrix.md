@@ -24,7 +24,7 @@ Authoritative specifications: [OAS 3.0.4](https://spec.openapis.org/oas/v3.0.4.h
 
 ## Evidence Mapping
 
-| Matrix surface | Fixture / assertion | Targets |
+| Capability area | Fixture / assertion | Targets |
 | --- | --- | --- |
 | Version detection and complete-document references | `internal/compiler/openapi/read_test.go`, `internal/compiler/compiler_test.go` | compiler, TypeScript |
 | 3.0 / 3.1 / 3.2 output | `internal/target/typescript/version_matrix_test.go` with `oas30-sdk.json`, `oas31-sdk.json`, `oas32-sdk.json` | TypeScript |
@@ -41,7 +41,7 @@ Authoritative specifications: [OAS 3.0.4](https://spec.openapis.org/oas/v3.0.4.h
 | `openapi` minor/patch detection | yes | yes | yes | Generated for SemVer `3.0.x`, `3.1.x`, `3.2.x` lines | detect each supported minor line; reject other minors/majors explicitly | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | `info` (`title`, `summary`, `description`, `termsOfService`, `contact`, `license`, `version`) | common; `summary`/license identifier later | yes | yes | Metadata: lossless `metadata.js` `openapi.document` export | generated API metadata/docs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | root `servers` and defaults | yes | yes | yes | Generated server selector, variable expansion, and defaults | generated server selector + defaults | `internal/target/typescript/runtime_parity_test.go::TestRuntimeSelectsAndExpandsOpenAPIServerVariables` |
-| root `paths` | required | optional with other surface | optional with other surface | Generated when present; optional absence preserved | generated operations | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
+| root `paths` | required | optional with another API entry point | optional with another API entry point | Generated when present; optional absence preserved | generated operations | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | root `webhooks` | no | yes | yes | TypeScript `--with server`: generated handler contracts; otherwise error | generated webhook handler contracts | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | `components` | yes | yes | yes | Generated/metadata with feature-path diagnostics for unsupported semantics | reusable generated declarations/codecs | `internal/compiler/openapi/read_test.go::TestReadBuildsSupportedOpenAPI3Models` |
 | root `security`, `tags`, `externalDocs` | yes | yes | yes | Client security alternatives generated through host-owned credentials; tags/docs export through metadata | generated credential plan + docs | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesOpenAPISecurityAlternativesAndOperationOverride` |

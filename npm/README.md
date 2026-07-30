@@ -1,7 +1,7 @@
 # openapi-sdkgen
 
-Generate source-mode TypeScript SDKs from OpenAPI 3.0.x, 3.1.x, and 3.2.x
-documents.
+Generate application SDK source from OpenAPI 3.0, 3.1, and 3.2 documents.
+The current release includes the `typescript` target.
 
 ```sh
 pnpm dlx openapi-sdkgen generate \
@@ -14,4 +14,4 @@ The package contains precompiled executables for macOS, Linux, and Windows on
 arm64 and x64. Go is not required by consumers.
 
 For command reference and generated SDK usage, see the
-[project documentation](https://github.com/connextable/openapi-sdkgen#readme).
+[project documentation](https://connextable.github.io/openapi-sdkgen/).

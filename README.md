@@ -101,6 +101,9 @@ The server add-on creates separate `server/webhooks.ts` and
 
 ## Documentation
 
+Full guides and reference documentation:
+[connextable.github.io/openapi-sdkgen](https://connextable.github.io/openapi-sdkgen/).
+
 - [Getting started](docs/guide/getting-started.md)
 - [Generating an SDK](docs/guide/generate.md)
 - [Using the generated client](docs/guide/client.md)

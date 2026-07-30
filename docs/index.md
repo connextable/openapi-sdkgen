@@ -3,32 +3,29 @@ layout: home
 
 hero:
   name: openapi-sdkgen
-  text: Use your OpenAPI contract as TypeScript source
-  tagline: Generate a typed client beside your application code and make API changes easier to ship with confidence.
+  text: Turn OpenAPI into application code
+  tagline: Generate SDK source that matches your API description and use it directly.
   actions:
     - theme: brand
-      text: Start in three minutes
+      text: Get started
       link: /guide/getting-started
     - theme: alt
       text: Explore the generated client
       link: /guide/client
-  image:
-    src: /sdk-flow.svg
-    alt: OpenAPI document becoming a TypeScript client
 
 features:
   - icon: 🧩
-    title: Generate source where you need it
-    details: The generated client lives in your source tree. There is no SDK package to publish or build separately.
+    title: Use it directly in your application
+    details: Import the generated client and types directly into your project.
   - icon: ✓
-    title: Keep the contract at the boundary
-    details: Validate request data before dispatch and validate decoded responses before application code consumes them.
+    title: Validate requests and responses
+    details: Check requests before they are sent and decoded responses before your application uses them.
   - icon: ⚡
-    title: Use the API at two levels
-    details: Work with readable resources in everyday code, or reach every visible operation through its exact operation ID.
+    title: Call APIs your way
+    details: Use readable resource methods or call an operation by its exact HTTP method, path, or operation ID.
   - icon: ↗
-    title: Receive events when your app needs them
-    details: Add Fetch-native Webhook and Callback contracts only when you opt into the server add-on.
+    title: Generate inbound APIs too
+    details: Add Webhook and Callback handler types and routers from the same OpenAPI document when needed.
 ---
 
 ## One command, ordinary application source
@@ -40,6 +37,6 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The output is ordinary TypeScript that you import with a relative ESM path.
-Follow [Create your first SDK](./guide/getting-started.md) for the complete
-flow, including the first typed request.
+The command writes the client and types to the selected directory. Follow
+[Create your first SDK](./guide/getting-started.md) to generate a client and
+make your first API call.
