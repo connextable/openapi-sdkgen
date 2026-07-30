@@ -580,6 +580,7 @@ func TestRouteCatalogCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 		`readonly "GET /source": Routes["GET /source"]["call"]`,
 		`["stream", __sdkgen_`,
 		`["links", Object.fromEntries`,
+		`as unknown as Routes["GET /source"]["call"]`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("route capability missing %q:\n%s", expected, client)

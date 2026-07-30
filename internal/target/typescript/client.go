@@ -286,7 +286,7 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 			properties = append(properties, runtimeProperty{key: "stream", value: stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation))})
 		}
 		if len(properties) != 0 {
-			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, %s) as Routes[%s][\"call\"]\n", operationValueName(routeKey), operationBaseValueName(routeKey), runtimeObjectExpression(properties), quoteTS(routeKey))
+			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, %s) as unknown as Routes[%s][\"call\"]\n", operationValueName(routeKey), operationBaseValueName(routeKey), runtimeObjectExpression(properties), quoteTS(routeKey))
 		}
 	}
 	output.WriteString("\n")
