@@ -49,14 +49,15 @@ await api.auth.oauth(provider).post({
 
 브라우저 Fetch는 현재 보안 문맥에 따라 헤더를 추가하거나 생략하고, 필요하면
 값을 다시 씁니다. API 서버는 실제로 받은 헤더를 계속 검사해야 합니다. 원본
-선언은 `metadata.js`에 남고, 서버 애드온에서도 인바운드 헤더 타입과 필수
-검사를 그대로 생성합니다.
+선언은 `metadata.js`에 남고, 생성된 Webhook과 Callback 핸들러에서도 인바운드
+헤더 계약과 필수 검사를 그대로 유지합니다.
 
 `headerParams`와 원시 `headers` 옵션으로는 실행 환경이 관리하는 헤더를 넣을 수
 없습니다. JavaScript나 `as any`로 타입을 우회해도 전송 전에 차단됩니다.
 `X-HTTP-Method`, `X-HTTP-Method-Override`, `X-Method-Override`는 입력으로
-사용할 수 있지만, 직렬화한 값에 `CONNECT`, `TRACE`, `TRACK`이 포함되면
-차단됩니다.
+사용할 수 있지만, 쉼표로 분리해 파싱한 메서드 항목이 대소문자 구분 없이
+`CONNECT`, `TRACE`, `TRACK`과 정확히 일치하면 차단됩니다.
+헤더에 배치된 OpenAPI API key 인증 정보에도 전송 전에 같은 정책을 적용합니다.
 
 기존 SDK를 다시 생성한 뒤에는 `headerParams.Origin`처럼 직접 전달하던 값을
 호출 코드에서 제거해야 합니다. 이 변경은 의도적인 소스 호환성 변경이며, 이전
@@ -84,7 +85,8 @@ const api = createClient({
 ```
 
 이 방식은 전송 구현이 해당 값을 소유하는 신뢰 경계일 때만 사용하세요. 브라우저
-Fetch의 제한을 우회하지는 못합니다.
+Fetch의 제한을 우회하거나 Fetch 관리 헤더를 애플리케이션이 제공하는 API key
+인증 정보로 바꾸지는 못합니다.
 
 ## 인증 정보 제공
 

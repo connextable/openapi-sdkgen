@@ -53,6 +53,12 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 		responses, _ := source.Raw["responses"].(map[string]any)
 		for _, status := range sortedAnyKeys(responses) {
 			response, _ := responses[status].(map[string]any)
+			responseSourcePointer := responsePointer(source, status)
+			linksPointer, err := componentObjectFieldPointer(document, response, "responses", responseSourcePointer, "links")
+			if err != nil {
+				failures = append(failures, fmt.Errorf("response %s %s: %w", operationLabel(source), status, err))
+				continue
+			}
 			resolved, err := resolveComponentObject(document, response, "responses")
 			if err != nil {
 				failures = append(failures, fmt.Errorf("response %s %s: %w", operationLabel(source), status, err))
@@ -60,8 +66,18 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 			}
 			links, _ := resolved["links"].(map[string]any)
 			for _, name := range sortedAnyKeys(links) {
-				linkPointer := responseLinkPointer(source, status, name)
+				linkPointer := linksPointer + "/" + escapePointerToken(name)
 				link, _ := links[name].(map[string]any)
+				parametersPointer, err := componentObjectFieldPointer(document, link, "links", linkPointer, "parameters")
+				if err != nil {
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
+				}
+				requestBodyPointer, err := componentObjectFieldPointer(document, link, "links", linkPointer, "requestBody")
+				if err != nil {
+					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					continue
+				}
 				link, err = resolveComponentObject(document, link, "links")
 				if err != nil {
 					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
@@ -76,7 +92,10 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 					failures = append(failures, fmt.Errorf("response link %s %s targets hidden operation %q", operationLabel(source), name, operationLabel(target)))
 					continue
 				}
-				definition, err := linkDefinition(document, source, target, link, linkPointer)
+				definition, err := linkDefinition(document, source, target, link, linkDefinitionPointers{
+					parameters:  parametersPointer,
+					requestBody: requestBodyPointer,
+				})
 				if err != nil {
 					if strings.HasPrefix(err.Error(), "#") {
 						failures = append(failures, err)
@@ -106,12 +125,12 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 	return result, failures
 }
 
-func responseLinkPointer(source ir.Operation, status, name string) string {
+func responsePointer(source ir.Operation, status string) string {
 	pointer := source.Pointer
 	if pointer == "" {
 		pointer = "#/paths/" + escapePointerToken(source.Path) + "/" + strings.ToLower(source.Method)
 	}
-	return pointer + "/responses/" + escapePointerToken(status) + "/links/" + escapePointerToken(name)
+	return pointer + "/responses/" + escapePointerToken(status)
 }
 
 func linkServerURL(link map[string]any) (string, error) {
@@ -173,7 +192,12 @@ func linkTargetOperation(document *ir.Document, byID map[string]ir.Operation, li
 	return ir.Operation{}, fmt.Errorf("operationRef %q does not name a generated operation", operationRef)
 }
 
-func linkDefinition(document *ir.Document, source, target ir.Operation, link map[string]any, pointer string) (string, error) {
+type linkDefinitionPointers struct {
+	parameters  string
+	requestBody string
+}
+
+func linkDefinition(document *ir.Document, source, target ir.Operation, link map[string]any, pointers linkDefinitionPointers) (string, error) {
 	parameters, err := operationParameters(document, target)
 	if err != nil {
 		return "", err
@@ -189,13 +213,13 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 	var assignments []string
 	values, _ := link["parameters"].(map[string]any)
 	for _, name := range sortedAnyKeys(values) {
-		valuePointer := pointer + "/parameters/" + escapePointerToken(name)
+		valuePointer := pointers.parameters + "/" + escapePointerToken(name)
 		matches := byName[name]
 		if len(matches) != 1 {
-			return "", fmt.Errorf("%s: parameter %q matches %d target parameters", valuePointer, name, len(matches))
+			return "", withSourcePointer(valuePointer, "parameter %q matches %d target parameters", name, len(matches))
 		}
 		if matches[0].HostManaged {
-			return "", fmt.Errorf("%s: Link cannot assign host-managed target request header %q", valuePointer, matches[0].Name)
+			return "", withSourcePointer(valuePointer, "Link cannot assign host-managed target request header %q", matches[0].Name)
 		}
 		location := matches[0].Location
 		switch location {
@@ -208,7 +232,7 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 		}
 		value, err := linkValueLiteral(values[name], sourceParameters)
 		if err != nil {
-			return "", fmt.Errorf("%s: %w", valuePointer, err)
+			return "", withSourcePointer(valuePointer, "%v", err)
 		}
 		assignments = append(assignments, "{ location: "+quoteTS(location)+", property: "+quoteTS(matches[0].Property)+", value: "+value+" }")
 	}
@@ -219,7 +243,7 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 	if body, exists := link["requestBody"]; exists {
 		value, err := linkValueLiteral(body, sourceParameters)
 		if err != nil {
-			return "", fmt.Errorf("%s/requestBody: %w", pointer, err)
+			return "", withSourcePointer(pointers.requestBody, "%v", err)
 		}
 		fields = append(fields, "requestBody: "+value)
 	}

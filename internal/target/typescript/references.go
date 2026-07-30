@@ -18,6 +18,40 @@ func resolveMediaTypeObject(document *ir.Document, object map[string]any) (map[s
 	return resolveComponentObject(document, object, "mediaTypes")
 }
 
+func componentObjectFieldPointer(document *ir.Document, object map[string]any, component, pointer, field string) (string, error) {
+	return componentObjectFieldPointerRecursive(document, object, component, pointer, field, make(map[string]bool))
+}
+
+func componentObjectFieldPointerRecursive(document *ir.Document, object map[string]any, component, pointer, field string, resolving map[string]bool) (string, error) {
+	if _, exists := object[field]; exists {
+		return pointer + "/" + escapePointerToken(field), nil
+	}
+	reference, _ := object["$ref"].(string)
+	if reference == "" {
+		return pointer + "/" + escapePointerToken(field), nil
+	}
+	if resolving[reference] {
+		return "", fmt.Errorf("cyclic %s reference %q", component, reference)
+	}
+	resolving[reference] = true
+	defer delete(resolving, reference)
+	components, _ := document.Raw["components"].(map[string]any)
+	objects, _ := components[component].(map[string]any)
+	name, err := componentReferenceName(reference, component)
+	if err != nil {
+		return "", err
+	}
+	resolved, ok := objects[name].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("unresolved %s reference %q", component, reference)
+	}
+	resolvedPointer := localReferencePointer(reference)
+	if resolvedPointer == "" {
+		resolvedPointer = reference
+	}
+	return componentObjectFieldPointerRecursive(document, resolved, component, resolvedPointer, field, resolving)
+}
+
 func resolveComponentObjectRecursive(document *ir.Document, object map[string]any, component string, resolving map[string]bool) (map[string]any, error) {
 	reference, _ := object["$ref"].(string)
 	if reference == "" {

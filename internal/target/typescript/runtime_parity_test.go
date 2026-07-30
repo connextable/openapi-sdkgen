@@ -900,6 +900,50 @@ func TestGeneratedResponseLinksRejectHostManagedRequestHeaders(t *testing.T) {
 			wantPointer: "#/paths/~1source/get/responses/200/links/follow/parameters/Origin",
 			wantMessage: `cannot assign host-managed target request header "Origin"`,
 		},
+		{
+			name: "component link target assignment",
+			document: `{
+  "openapi":"3.1.1", "info":{"title":"Managed component Link","version":"1"},
+  "components":{"links":{"ManagedOrigin":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"$ref":"#/components/links/ManagedOrigin"}}}}}},
+    "/target":{"get":{"operationId":"getTarget","parameters":[
+      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}}
+  }
+}`,
+			wantPointer: "#/components/links/ManagedOrigin/parameters/Origin",
+			wantMessage: `cannot assign host-managed target request header "Origin"`,
+		},
+		{
+			name: "component response target assignment",
+			document: `{
+  "openapi":"3.1.1", "info":{"title":"Managed component Response Link","version":"1"},
+  "components":{"responses":{"ManagedResponse":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","responses":{"200":{"$ref":"#/components/responses/ManagedResponse"}}}},
+    "/target":{"get":{"operationId":"getTarget","parameters":[
+      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}}
+  }
+}`,
+			wantPointer: "#/components/responses/ManagedResponse/links/follow/parameters/Origin",
+			wantMessage: `cannot assign host-managed target request header "Origin"`,
+		},
+		{
+			name: "link name contains diagnostic separator",
+			document: `{
+  "openapi":"3.1.1", "info":{"title":"Managed named Link","version":"1"},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow: managed":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}}},
+    "/target":{"get":{"operationId":"getTarget","parameters":[
+      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}}
+  }
+}`,
+			wantPointer: "#/paths/~1source/get/responses/200/links/follow: managed/parameters/Origin",
+			wantMessage: `cannot assign host-managed target request header "Origin"`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1986,6 +2030,82 @@ await createClient({ baseURL: "https://api.example.test", credentials, headers: 
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript security runtime test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimeEnforcesFetchManagedPolicyForHeaderAPIKeys(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0",
+  "info":{"title":"Fetch-managed security headers","version":"1"},
+  "components":{"securitySchemes":{
+    "OriginKey":{"type":"apiKey","in":"header","name":"Origin"},
+    "OverrideKey":{"type":"apiKey","in":"header","name":"X-HTTP-Method-Override"},
+    "AgentKey":{"type":"apiKey","in":"header","name":"User-Agent"}
+  }},
+  "paths":{
+    "/origin":{"get":{"operationId":"getOrigin","security":[{"OriginKey":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/override":{"get":{"operationId":"getOverride","security":[{"OverrideKey":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/agent":{"get":{"operationId":"getAgent","security":[{"AgentKey":[]}],"responses":{"204":{"description":"OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let override = 123;
+let calls = 0;
+const credentials = ({ alternatives, operation }) => {
+  const alternative = Object.values(alternatives)[0];
+  const values = {
+    getOrigin: "https://caller.example",
+    getOverride: override,
+    getAgent: "openapi-sdkgen-test",
+  };
+  return { alternative, values: { [alternative.schemes[0].name]: { kind: "api-key", value: values[operation.operationID] } } };
+};
+const api = createClient({
+  baseURL: "https://api.example.test",
+  credentials,
+  fetch: async (input, init) => {
+    calls++;
+    const url = new URL(String(input));
+    const headers = new Headers(init.headers);
+    if (url.pathname === "/override" && headers.get("X-HTTP-Method-Override") !== "PATCH") throw new Error("safe override API key missing");
+    if (url.pathname === "/agent" && headers.get("User-Agent") !== "openapi-sdkgen-test") throw new Error("User-Agent API key missing");
+    return new Response(null, { status: 204 });
+  },
+});
+const expectBlocked = async (pending, header) => {
+  const previousCalls = calls;
+  await pending.then(
+    () => { throw new Error("blocked security header was accepted: " + header); },
+    (error) => {
+      if (error.code !== "REQUEST_ENCODE_FAILED" || !String(error.cause).includes(header)) throw error;
+      if (calls !== previousCalls) throw new Error("blocked security header reached fetch: " + header);
+    },
+  );
+};
+const previousCalls = calls;
+await api.$operations.getOverride().then(
+  () => { throw new Error("non-string API key was accepted"); },
+  (error) => {
+    if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error;
+    if (calls !== previousCalls) throw new Error("non-string API key reached fetch");
+  },
+);
+override = "TRACE";
+await expectBlocked(api.$operations.getOrigin(), "Origin");
+await expectBlocked(api.$operations.getOverride(), "X-HTTP-Method-Override");
+override = "PATCH";
+await api.$operations.getOverride();
+await api.$operations.getAgent();
+if (calls !== 2) throw new Error("security header dispatch count mismatch: " + calls);
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute Fetch-managed security-header runtime test: %v\n%s", err, output)
 	}
 }
 

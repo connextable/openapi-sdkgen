@@ -1666,9 +1666,10 @@ function applySecurityCredential(
 ): void {
   switch (scheme.type) {
     case "apiKey": {
-      if (credential.kind !== "api-key" || credential.value === "") throw securityCredentialError(scheme.name, "api-key value");
+      if (credential.kind !== "api-key" || typeof credential.value !== "string" || credential.value === "") throw securityCredentialError(scheme.name, "api-key value");
       if (scheme.location === "header") {
         if (headers.has(scheme.parameterName!)) throw securityCollision(scheme.name, `header ${scheme.parameterName}`);
+        assertCallerRequestHeader(scheme.parameterName!, credential.value);
         headers.set(scheme.parameterName!, credential.value);
         return;
       }

@@ -17,9 +17,9 @@ Call an API through a resource method, its exact HTTP route, or its
 
 For request headers, generated clients distinguish caller-controlled values
 from names managed by Fetch. Fetch-managed declarations remain in metadata and
-generated inbound server contracts, but are omitted from client inputs and
-blocked in raw header options. Value-dependent method-override headers follow
-the Fetch forbidden-method rule. See
+generated Webhook and Callback inbound contracts, but are omitted from client
+inputs and blocked in raw header options. Value-dependent method-override
+headers follow the Fetch forbidden-method rule. See
 [Caller-owned and host-managed headers](../guide/transport.md#caller-owned-and-host-managed-headers).
 
 ## Servers and authentication

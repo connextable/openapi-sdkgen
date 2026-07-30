@@ -51,14 +51,17 @@ await api.auth.oauth(provider).post({
 
 Browser Fetch supplies, omits, or rewrites the header according to the browser
 security context. The API server remains responsible for validating the
-header. The original declaration is still available in `metadata.js`, and a
-generated server add-on still receives and validates the inbound header.
+header. The original declaration is still available in `metadata.js`, and
+generated Webhook or Callback handlers still receive and validate the full
+inbound header contract.
 
 Neither `headerParams` nor the raw `headers` option can set a host-managed
 header. Runtime checks also cover JavaScript or `as any` escape hatches before
 the transport runs. `X-HTTP-Method`, `X-HTTP-Method-Override`, and
-`X-Method-Override` remain normal inputs, but values containing `CONNECT`,
-`TRACE`, or `TRACK` are rejected.
+`X-Method-Override` remain normal inputs, but a parsed comma-separated method
+item that equals `CONNECT`, `TRACE`, or `TRACK` case-insensitively is rejected.
+Header-located OpenAPI API-key credentials pass through the same policy before
+the transport runs.
 
 After regenerating an existing SDK, remove previously supplied values such as
 `headerParams.Origin`. This is an intentional source-level breaking change; no
@@ -86,7 +89,8 @@ const api = createClient({
 ```
 
 Use this pattern only when that transport is the trusted owner of the value.
-It does not bypass browser Fetch rules.
+It does not bypass browser Fetch rules or turn a Fetch-managed header into a
+caller-provided API-key credential.
 
 ## Provide credentials
 

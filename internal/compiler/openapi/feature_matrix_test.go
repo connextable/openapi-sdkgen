@@ -247,7 +247,7 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		}
 	}
 	sort.Strings(manifestContracts)
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "128699dce3cddff35b263030b3b99dd2b104f07698a28c949f98f4ecf204c435" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "68cd703ae5899011602653c7032a952c2870c7d58cf18738b8f930299d8e6816" {
 		t.Errorf("manifest feature/evidence contract changed: %s", got)
 	}
 
@@ -289,7 +289,7 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		"parameter.cookie-style", "parameter.styles", "parameter.delimited-object", "parameter.structured-non-json-content",
 		"requestBody.media.json", "requestBody.media.text", "requestBody.media.binary", "requestBody.media.form-urlencoded", "requestBody.media.multipart", "requestBody.encoding", "media.xml", "media.itemSchema", "media.prefixEncoding", "media.itemEncoding",
 		"response.status.exact", "response.status.default", "response.status.range", "response.default-media-negotiation", "response.headers", "response.links", "response.links.fetch-managed-request-headers", "response.streams",
-		"securityScheme.type", "securityScheme.name", "securityScheme.in", "securityScheme.scheme", "securityScheme.bearerFormat", "securityScheme.flows", "securityScheme.openIdConnectUrl",
+		"securityScheme.type", "securityScheme.name", "securityScheme.in", "securityScheme.apiKey.fetch-managed-header", "securityScheme.scheme", "securityScheme.bearerFormat", "securityScheme.flows", "securityScheme.openIdConnectUrl",
 		"info.contact.name", "info.contact.url", "info.contact.email", "info.license.name", "info.license.url",
 		"server.url", "server.description", "server.name", "response.description", "response.summary", "response.content", "response.media-wildcard",
 		"server.variable.enum", "server.variable.default", "server.variable.description",

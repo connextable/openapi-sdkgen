@@ -103,10 +103,10 @@ const todos = await api.$operations["listTodos"]({
 않습니다. 클라이언트와 요청 단위의 원시 `headers` 옵션으로도 추가할 수
 없습니다.
 
-OpenAPI 원본 선언은 `openapi.document`에 남습니다. 서버 애드온 입력 타입은
-인바운드 헤더 전체와 필수 조건을 그대로 유지합니다. Link가 Fetch 관리 요청
-헤더를 읽거나 대상 요청에 대입하려 하면 해당 Link 필드 위치에서 생성 오류가
-발생합니다.
+OpenAPI 원본 선언은 `openapi.document`에 남습니다. 생성된 Webhook과 Callback
+서버 애드온 입력 타입은 인바운드 헤더 전체와 필수 조건을 그대로 유지합니다.
+Link가 Fetch 관리 요청 헤더를 읽거나 대상 요청에 대입하려 하면 해당 Link 필드
+위치에서 생성 오류가 발생합니다.
 
 브라우저 동작, 마이그레이션, 조건부 method override 헤더, 신뢰할 수 있는
 비브라우저 전송에서 값을 추가하는 방법은

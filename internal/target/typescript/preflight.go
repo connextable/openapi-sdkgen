@@ -241,7 +241,7 @@ func securityPreparationDiagnostics(document *ir.Document) []diagnostic.Diagnost
 }
 
 func serverPreparationDiagnostic(document *ir.Document, kind string, err error) diagnostic.Diagnostic {
-	pointer, message := splitPointerError(err.Error())
+	pointer, message := sourcePointerErrorDetails(err)
 	if pointer == "" {
 		pointer = "#"
 	}
@@ -283,7 +283,7 @@ func loweringPreparationDiagnostic(document *ir.Document, err error) diagnostic.
 }
 
 func helperPreparationDiagnostic(document *ir.Document, kind string, code string, err error) diagnostic.Diagnostic {
-	pointer, message := splitPointerError(err.Error())
+	pointer, message := sourcePointerErrorDetails(err)
 	route := ""
 	operationID := ""
 	if pointer == "" {

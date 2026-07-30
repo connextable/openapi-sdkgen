@@ -303,7 +303,52 @@ describe("generated runtime", () => {
         },
       );
     }
+    for (const name of [
+      "Accept-Charset",
+      "Accept-Encoding",
+      "Access-Control-Request-Headers",
+      "Access-Control-Request-Method",
+      "Connection",
+      "Content-Length",
+      "Cookie",
+      "Cookie2",
+      "Date",
+      "DNT",
+      "Expect",
+      "Host",
+      "Keep-Alive",
+      "Origin",
+      "Referer",
+      "Set-Cookie",
+      "TE",
+      "Trailer",
+      "Transfer-Encoding",
+      "Upgrade",
+      "Via",
+      "Proxy-Future",
+      "Sec-Future",
+    ]) {
+      await request(operation({ path: "/raw-fixed" }), undefined, {
+        headers: [[name, "blocked"]],
+      }).then(
+        () => {
+          throw new Error(`raw host-managed header was accepted: ${name}`);
+        },
+        (error: unknown) => {
+          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
+        },
+      );
+    }
     expect(calls).toBe(0);
+
+    await request(operation({ path: "/raw-allowed" }), undefined, {
+      headers: {
+        "User-Agent": "openapi-sdkgen-test",
+        "X-Origin": "caller-owned",
+        "X-HTTP-Methods": "TRACE",
+      },
+    });
+    expect(calls).toBe(1);
   });
 
   it("allows safe method overrides and blocks Fetch-forbidden method values", async () => {
@@ -333,6 +378,8 @@ describe("generated runtime", () => {
     expect(seen[0]?.get("x-http-method-override")).toBe("PATCH");
     await request(override, { headerParams: { method: `"PATCH, TRACE"` } });
     expect(seen[1]?.get("x-http-method-override")).toBe(`"PATCH, TRACE"`);
+    await request(override, { headerParams: { method: "RECONNECT" } });
+    expect(seen[2]?.get("x-http-method-override")).toBe("RECONNECT");
     await request(override, { headerParams: { method: "PATCH, TRACE" } }).then(
       () => {
         throw new Error("forbidden method override was accepted");
@@ -353,7 +400,7 @@ describe("generated runtime", () => {
         expect(String((error as { cause?: unknown }).cause)).toContain("x-method-override");
       },
     );
-    expect(seen).toHaveLength(2);
+    expect(seen).toHaveLength(3);
   });
 
   it("lets a trusted custom transport inject a host-managed header after encoding", async () => {
