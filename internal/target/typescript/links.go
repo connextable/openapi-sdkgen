@@ -218,9 +218,6 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 		if len(matches) != 1 {
 			return "", withSourcePointer(valuePointer, "parameter %q matches %d target parameters", name, len(matches))
 		}
-		if matches[0].EnvironmentControlled {
-			return "", withSourcePointer(valuePointer, "Link cannot assign host-managed target request header %q", matches[0].Name)
-		}
 		location := matches[0].Location
 		switch location {
 		case "header":
@@ -275,9 +272,6 @@ func linkRequestParameterExpression(expression string, sourceParameters []operat
 	for _, parameter := range sourceParameters {
 		if parameter.Location != location || parameter.Name != name {
 			continue
-		}
-		if parameter.EnvironmentControlled {
-			return nil, fmt.Errorf("request runtime expression %q reads host-managed source request header %q", expression, parameter.Name)
 		}
 		section := location
 		if location == "header" {

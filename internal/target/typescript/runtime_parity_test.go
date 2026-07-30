@@ -862,118 +862,74 @@ func TestGeneratedResponseLinksRejectUnknownRequestParameterExpressions(t *testi
 	}
 }
 
-func TestGeneratedResponseLinksRejectHostManagedRequestHeaders(t *testing.T) {
-	tests := []struct {
-		name        string
-		document    string
-		wantPointer string
-		wantMessage string
-	}{
-		{
-			name: "source expression",
-			document: `{
-  "openapi":"3.1.1", "info":{"title":"Managed source Link","version":"1"},
+func TestGeneratedResponseLinksDelegateEnvironmentControlledRequestHeaders(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.1.1", "info":{"title":"Transport-native request header Links","version":"1"},
+  "components":{
+    "links":{"ManagedOrigin":{"operationId":"getOrigin","parameters":{"Origin":"https://component.example"}}},
+    "responses":{"ManagedResponse":{"description":"OK","links":{"follow":{"operationId":"getOrigin","parameters":{"Origin":"https://response.example"}}}}}
+  },
   "paths":{
     "/source":{"get":{"operationId":"getSource","parameters":[
       {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
-    ],"responses":{"200":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"X-Trace":"$request.header.Origin"}}}}}}},
-    "/target":{"get":{"operationId":"getTarget","parameters":[
-      {"name":"X-Trace","in":"header","required":true,"schema":{"type":"string"}}
-    ],"responses":{"204":{"description":"OK"}}}}
-  }
-}`,
-			wantPointer: "#/paths/~1source/get/responses/200/links/follow/parameters/X-Trace",
-			wantMessage: `reads host-managed source request header "Origin"`,
-		},
-		{
-			name: "target assignment",
-			document: `{
-  "openapi":"3.1.1", "info":{"title":"Managed target Link","version":"1"},
-  "paths":{
-    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}}},
-    "/target":{"get":{"operationId":"getTarget","parameters":[
+    ],"responses":{"204":{"description":"OK","links":{
+      "trace":{"operationId":"getTrace","parameters":{"X-Trace":"$request.header.Origin"}},
+      "origin":{"operationId":"getOrigin","parameters":{"Origin":"https://literal.example"}}
+    }}}}},
+    "/component-source":{"get":{"operationId":"getComponentSource","responses":{"204":{"description":"OK","links":{"follow":{"$ref":"#/components/links/ManagedOrigin"}}}}}},
+    "/response-source":{"get":{"operationId":"getResponseSource","responses":{"204":{"$ref":"#/components/responses/ManagedResponse"}}}},
+    "/trace":{"get":{"operationId":"getTrace","parameters":[
+      {"name":"X-Trace","in":"header","schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}},
+    "/origin":{"get":{"operationId":"getOrigin","parameters":[
       {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
     ],"responses":{"204":{"description":"OK"}}}}
   }
-}`,
-			wantPointer: "#/paths/~1source/get/responses/200/links/follow/parameters/Origin",
-			wantMessage: `cannot assign host-managed target request header "Origin"`,
-		},
-		{
-			name: "component link target assignment",
-			document: `{
-  "openapi":"3.1.1", "info":{"title":"Managed component Link","version":"1"},
-  "components":{"links":{"ManagedOrigin":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}},
-  "paths":{
-    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"$ref":"#/components/links/ManagedOrigin"}}}}}},
-    "/target":{"get":{"operationId":"getTarget","parameters":[
-      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
-    ],"responses":{"204":{"description":"OK"}}}}
-  }
-}`,
-			wantPointer: "#/components/links/ManagedOrigin/parameters/Origin",
-			wantMessage: `cannot assign host-managed target request header "Origin"`,
-		},
-		{
-			name: "component response target assignment",
-			document: `{
-  "openapi":"3.1.1", "info":{"title":"Managed component Response Link","version":"1"},
-  "components":{"responses":{"ManagedResponse":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}},
-  "paths":{
-    "/source":{"get":{"operationId":"getSource","responses":{"200":{"$ref":"#/components/responses/ManagedResponse"}}}},
-    "/target":{"get":{"operationId":"getTarget","parameters":[
-      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
-    ],"responses":{"204":{"description":"OK"}}}}
-  }
-}`,
-			wantPointer: "#/components/responses/ManagedResponse/links/follow/parameters/Origin",
-			wantMessage: `cannot assign host-managed target request header "Origin"`,
-		},
-		{
-			name: "link name contains diagnostic separator",
-			document: `{
-  "openapi":"3.1.1", "info":{"title":"Managed named Link","version":"1"},
-  "paths":{
-    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow: managed":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}}},
-    "/target":{"get":{"operationId":"getTarget","parameters":[
-      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
-    ],"responses":{"204":{"description":"OK"}}}}
-  }
-}`,
-			wantPointer: "#/paths/~1source/get/responses/200/links/follow: managed/parameters/Origin",
-			wantMessage: `cannot assign host-managed target request header "Origin"`,
-		},
+}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			document, err := sdkgen.Compile([]byte(test.document))
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, diagnostics, err := prepareSourcePlan(document, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, item := range diagnostics {
-				if item.Code == "SDKGEN-E509" && item.Location.Pointer == test.wantPointer {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("Link diagnostics do not identify exact pointer %s: %#v", test.wantPointer, diagnostics)
-			}
-			_, err = SourceArtifacts(document)
-			if err == nil {
-				t.Fatal("host-managed Link request header was accepted")
-			}
-			for _, expected := range []string{"SDKGEN-E509", test.wantPointer, test.wantMessage} {
-				if !strings.Contains(err.Error(), expected) {
-					t.Fatalf("Link diagnostic missing %q:\n%s", expected, err)
-				}
-			}
-		})
+	if _, diagnostics, err := prepareSourcePlan(document, false); err != nil {
+		t.Fatal(err)
+	} else if len(diagnostics) != 0 {
+		t.Fatalf("environment-controlled Link diagnostics = %#v", diagnostics)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const seen = [];
+const api = createClient({
+  baseURL: "https://api.example.test",
+  fetch: async (input, init) => {
+    seen.push([new URL(String(input)).pathname, Object.fromEntries(new Headers(init.headers).entries())]);
+    return new Response(null, { status: 204 });
+  },
+});
+const explicit = await api.$operations.getSource.raw({ headerParams: { Origin: "https://source.example" } });
+await api.$links.getSource.trace(explicit, { sourceInput: { headerParams: { Origin: "https://source.example" } } });
+await api.$links.getSource.origin(explicit);
+const omitted = await api.$operations.getSource.raw();
+await api.$links.getSource.trace(omitted);
+const component = await api.$operations.getComponentSource.raw();
+await api.$links.getComponentSource.follow(component);
+const response = await api.$operations.getResponseSource.raw();
+await api.$links.getResponseSource.follow(response);
+const expected = [
+  ["/source", { origin: "https://source.example" }],
+  ["/trace", { "x-trace": "https://source.example" }],
+  ["/origin", { origin: "https://literal.example" }],
+  ["/source", {}],
+  ["/trace", {}],
+  ["/component-source", {}],
+  ["/origin", { origin: "https://component.example" }],
+  ["/response-source", {}],
+  ["/origin", { origin: "https://response.example" }],
+];
+if (JSON.stringify(seen) !== JSON.stringify(expected)) throw new Error("environment-controlled Link dispatch mismatch: " + JSON.stringify(seen));
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute environment-controlled Link runtime test: %v\n%s", err, output)
 	}
 }
 
