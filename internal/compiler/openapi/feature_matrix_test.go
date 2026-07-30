@@ -247,7 +247,7 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		}
 	}
 	sort.Strings(manifestContracts)
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "cec621bfaa6b6e6f37d4c2c2c16c8c7b9a27a5add7e90d2b58984342c8558190" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "128699dce3cddff35b263030b3b99dd2b104f07698a28c949f98f4ecf204c435" {
 		t.Errorf("manifest feature/evidence contract changed: %s", got)
 	}
 
@@ -285,10 +285,10 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		"components.headers", "components.securitySchemes", "components.links", "components.callbacks", "components.pathItems", "components.mediaTypes",
 		"operation.standard-methods", "operation.query", "operation.additionalOperations", "operation.operationId", "operation.tags", "operation.summary", "operation.description", "operation.externalDocs", "operation.deprecated",
 		"operation.callbacks", "operation.security", "operation.scoped-server-alternatives",
-		"parameter.in.path", "parameter.in.query", "parameter.in.header", "parameter.in.cookie", "parameter.querystring", "parameter.required", "parameter.allowReserved", "parameter.allowEmptyValue",
+		"parameter.in.path", "parameter.in.query", "parameter.in.header", "parameter.header.fetch-managed", "parameter.in.cookie", "parameter.querystring", "parameter.required", "parameter.allowReserved", "parameter.allowEmptyValue",
 		"parameter.cookie-style", "parameter.styles", "parameter.delimited-object", "parameter.structured-non-json-content",
 		"requestBody.media.json", "requestBody.media.text", "requestBody.media.binary", "requestBody.media.form-urlencoded", "requestBody.media.multipart", "requestBody.encoding", "media.xml", "media.itemSchema", "media.prefixEncoding", "media.itemEncoding",
-		"response.status.exact", "response.status.default", "response.status.range", "response.default-media-negotiation", "response.headers", "response.links", "response.streams",
+		"response.status.exact", "response.status.default", "response.status.range", "response.default-media-negotiation", "response.headers", "response.links", "response.links.fetch-managed-request-headers", "response.streams",
 		"securityScheme.type", "securityScheme.name", "securityScheme.in", "securityScheme.scheme", "securityScheme.bearerFormat", "securityScheme.flows", "securityScheme.openIdConnectUrl",
 		"info.contact.name", "info.contact.url", "info.contact.email", "info.license.name", "info.license.url",
 		"server.url", "server.description", "server.name", "response.description", "response.summary", "response.content", "response.media-wildcard",

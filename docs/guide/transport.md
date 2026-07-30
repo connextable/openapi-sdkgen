@@ -28,6 +28,66 @@ Only declare capabilities that the active environment actually provides. The
 client reports an error before sending a request when a required capability is
 missing.
 
+## Caller-owned and host-managed headers
+
+Generated request inputs include headers the application is allowed to set,
+such as `If-Match` and `Idempotency-Key`. Headers reserved by the
+[Fetch Standard](https://fetch.spec.whatwg.org/#forbidden-request-header) stay
+under Fetch or host-environment control. This includes `Origin`, `Host`,
+`Cookie`, `Content-Length`, `Accept-Encoding`, and every `Proxy-*` or `Sec-*`
+header.
+
+An OpenAPI declaration can still mark one of these headers as required on the
+wire. The generated browser call does not ask the application to provide it:
+
+```ts
+await api.auth.oauth(provider).post({
+  body: {
+    intent: "login",
+    returnTo,
+  },
+});
+```
+
+Browser Fetch supplies, omits, or rewrites the header according to the browser
+security context. The API server remains responsible for validating the
+header. The original declaration is still available in `metadata.js`, and a
+generated server add-on still receives and validates the inbound header.
+
+Neither `headerParams` nor the raw `headers` option can set a host-managed
+header. Runtime checks also cover JavaScript or `as any` escape hatches before
+the transport runs. `X-HTTP-Method`, `X-HTTP-Method-Override`, and
+`X-Method-Override` remain normal inputs, but values containing `CONNECT`,
+`TRACE`, or `TRACK` are rejected.
+
+After regenerating an existing SDK, remove previously supplied values such as
+`headerParams.Origin`. This is an intentional source-level breaking change; no
+compatibility property is generated.
+
+### Inject a header in a non-browser transport
+
+A trusted Node or other non-browser transport can add a host-managed header
+after the generated request has been encoded. Keep the value outside public
+operation input and raw header options:
+
+```ts
+const nodeFetch = globalThis.fetch;
+
+const api = createClient({
+  baseURL: "https://api.example.test",
+  transport: {
+    async fetch(input, init = {}) {
+      const headers = new Headers(init.headers);
+      headers.set("Origin", trustedOrigin);
+      return nodeFetch(input, { ...init, headers });
+    },
+  },
+});
+```
+
+Use this pattern only when that transport is the trusted owner of the value.
+It does not bypass browser Fetch rules.
+
 ## Provide credentials
 
 For a simple Bearer token, set `authorization` when creating the client.

@@ -95,6 +95,22 @@ const todos = await api.$operations["listTodos"]({
 });
 ```
 
+## Request headers
+
+Declared caller-controlled headers appear under `headerParams`. Fetch-managed
+headers such as `Origin`, `Host`, `Cookie`, and `Sec-*` do not appear in
+resource, `$routes`, or `$operations` input types, even when OpenAPI marks them
+as required. Raw client and request `headers` options cannot add them either.
+
+The OpenAPI declaration remains available through `openapi.document`.
+Server-add-on input types preserve the full inbound header contract and its
+requiredness. A Link that tries to read or assign a Fetch-managed request
+header produces a generation diagnostic at that Link field.
+
+See [Caller-owned and host-managed headers](../guide/transport.md#caller-owned-and-host-managed-headers)
+for browser behavior, migration guidance, conditional method-override headers,
+and trusted non-browser transport injection.
+
 ## Links and streams
 
 - `$links`: follow-up requests defined by OpenAPI Links

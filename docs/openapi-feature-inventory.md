@@ -16,7 +16,7 @@ grouped view covers the common OpenAPI 3.x feature set once; a field appears in 
 version-only table only when its availability or semantics differ by minor
 line.
 
-## Common Document and Discovery Features
+## Common Document and Discovery Surface
 
 | ID | Fields | Versions | State | Evidence |
 | --- | --- | --- | --- | --- |
@@ -68,6 +68,7 @@ line.
 | query-method | `query` | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations` |
 | additional-operations | `additionalOperations` arbitrary methods | 3.2 | generated | `internal/target/typescript/openapi_support_test.go::TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations` |
 | parameter-locations | `path`, `query`, `header`, `cookie` | all | generated | `internal/target/typescript/runtime_parity_test.go::TestVersionedTypeScriptRuntime` |
+| fetch-managed-request-headers | Fetch-forbidden fixed names, `Proxy-*`/`Sec-*`, and value-dependent method-override headers; client projection/runtime policy with full inbound server preservation | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeEnforcesFetchManagedRequestHeaderPolicy` |
 | parameter-serialization | scalar/array `simple`, `label`, `matrix`, `form`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `explode` | all | generated | `test/typescript/tests/runtime.test.ts::serializes paths, query styles, headers, cookies, and wire names` |
 | parameter-delimited-object | `spaceDelimited` and `pipeDelimited` object parameters | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeSerializesDelimitedObjectQueryParameters` |
 | parameter-schema-content | parameter `schema`, single-media `content` | all | generated | `internal/target/typescript/emit_test.go::TestSourceArtifactsStayConsistentAndDeterministic` |
@@ -95,6 +96,7 @@ line.
 | response-media-wildcards | exact, type, and structured-suffix wildcard response media matching | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDecodesWildcardResponseMediaTypes` |
 | response-streams | NDJSON/JSON Lines, JSON-seq, Server-Sent Event, multipart, and registered custom-media item streams | 3.2 | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeUsesRegisteredCustomResponseStreamCodec` |
 | response-links | Link Object `operationId`/local `operationRef`, response/request body/header/status expressions, parameters, requestBody, and same-name status dispatch | all | generated | `internal/target/typescript/runtime_parity_test.go::TestGeneratedResponseLinksDispatchSameNameByStatus` |
+| fetch-managed-link-request-headers | Link source expressions and target assignments involving Fetch-managed request headers | all | error | `internal/target/typescript/runtime_parity_test.go::TestGeneratedResponseLinksRejectHostManagedRequestHeaders` |
 | callbacks | Callback Object, key expressions, callback Path Items; generated only by `typescript --with server` | all | error | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
 | webhooks | root Webhook Object; generated only by `typescript --with server` | 3.1+ | error | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | examples | Example `summary`, `description`, `value`, `externalValue` | all | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
