@@ -283,30 +283,36 @@ func loweringPreparationDiagnostic(document *ir.Document, err error) diagnostic.
 }
 
 func helperPreparationDiagnostic(document *ir.Document, kind string, code string, err error) diagnostic.Diagnostic {
-	pointer := "#"
+	pointer, message := splitPointerError(err.Error())
 	route := ""
 	operationID := ""
-	for _, operation := range document.Operations {
-		if !strings.Contains(err.Error(), operationLabel(operation)) {
-			continue
+	if pointer == "" {
+		pointer = "#"
+		message = err.Error()
+		for _, operation := range document.Operations {
+			if !strings.Contains(err.Error(), operationLabel(operation)) {
+				continue
+			}
+			pointer = operation.Pointer
+			if pointer == "" {
+				pointer = "#/paths/" + escapePointerToken(operation.Path) + "/" + strings.ToLower(operation.Method)
+			}
+			route = operationRouteKey(operation)
+			operationID = operation.OperationID
+			break
 		}
-		pointer = operation.Pointer
-		if pointer == "" {
-			pointer = "#/paths/" + escapePointerToken(operation.Path) + "/" + strings.ToLower(operation.Method)
-		}
-		route = operationRouteKey(operation)
-		operationID = operation.OperationID
-		break
 	}
 	value := sourceTargetDiagnostic(
 		document,
 		pointer,
 		code,
-		fmt.Sprintf("The TypeScript target cannot prepare %s: %s.", kind, strings.TrimSuffix(err.Error(), ".")),
+		fmt.Sprintf("The TypeScript target cannot prepare %s: %s.", kind, strings.TrimSuffix(message, ".")),
 		"Correct the referenced operation, response, or helper definition shown by this diagnostic.",
 	)
-	value.Route = route
-	value.Operation = operationID
+	if route != "" {
+		value.Route = route
+		value.Operation = operationID
+	}
 	return value
 }
 

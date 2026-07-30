@@ -863,6 +863,77 @@ func TestGeneratedResponseLinksRejectUnknownRequestParameterExpressions(t *testi
 	}
 }
 
+func TestGeneratedResponseLinksRejectHostManagedRequestHeaders(t *testing.T) {
+	tests := []struct {
+		name        string
+		document    string
+		wantPointer string
+		wantMessage string
+	}{
+		{
+			name: "source expression",
+			document: `{
+  "openapi":"3.1.1", "info":{"title":"Managed source Link","version":"1"},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","parameters":[
+      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"200":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"X-Trace":"$request.header.Origin"}}}}}}},
+    "/target":{"get":{"operationId":"getTarget","parameters":[
+      {"name":"X-Trace","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}}
+  }
+}`,
+			wantPointer: "#/paths/~1source/get/responses/200/links/follow/parameters/X-Trace",
+			wantMessage: `reads host-managed source request header "Origin"`,
+		},
+		{
+			name: "target assignment",
+			document: `{
+  "openapi":"3.1.1", "info":{"title":"Managed target Link","version":"1"},
+  "paths":{
+    "/source":{"get":{"operationId":"getSource","responses":{"200":{"description":"OK","links":{"follow":{"operationId":"getTarget","parameters":{"Origin":"https://caller.example"}}}}}}},
+    "/target":{"get":{"operationId":"getTarget","parameters":[
+      {"name":"Origin","in":"header","required":true,"schema":{"type":"string"}}
+    ],"responses":{"204":{"description":"OK"}}}}
+  }
+}`,
+			wantPointer: "#/paths/~1source/get/responses/200/links/follow/parameters/Origin",
+			wantMessage: `cannot assign host-managed target request header "Origin"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := sdkgen.Compile([]byte(test.document))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, diagnostics, err := prepareSourcePlan(document, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, item := range diagnostics {
+				if item.Code == "SDKGEN-E509" && item.Location.Pointer == test.wantPointer {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Link diagnostics do not identify exact pointer %s: %#v", test.wantPointer, diagnostics)
+			}
+			_, err = SourceArtifacts(document)
+			if err == nil {
+				t.Fatal("host-managed Link request header was accepted")
+			}
+			for _, expected := range []string{"SDKGEN-E509", test.wantPointer, test.wantMessage} {
+				if !strings.Contains(err.Error(), expected) {
+					t.Fatalf("Link diagnostic missing %q:\n%s", expected, err)
+				}
+			}
+		})
+	}
+}
+
 func TestGeneratedResponseLinksDispatchSameNameByStatus(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.0", "info":{"title":"Status links","version":"1"},

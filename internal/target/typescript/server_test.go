@@ -699,6 +699,107 @@ func TestServerAddOnEmitsInboundParameterDefinitions(t *testing.T) {
 	}
 }
 
+func TestServerAddOnPreservesFetchManagedInboundHeaders(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.2.0",
+  "info": {"title": "Managed inbound headers", "version": "1"},
+  "paths": {},
+  "webhooks": {
+    "managed": {
+      "post": {
+        "operationId": "managedWebhook",
+        "security": [],
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}},
+          {"name": "Sec-Fetch-Site", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "Accepted"}}
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := generator.NewAddonRegistry(generator.AddonServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := registry.Resolve([]string{"server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := (Generator{}).Generate(document, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhooks := string(artifactByPath(t, artifacts, "server/webhooks.ts"))
+	for _, expected := range []string{
+		`readonly "Origin": string`,
+		`readonly "Sec-Fetch-Site"?: string`,
+		`name: "Origin"`,
+		`required: true`,
+	} {
+		if !strings.Contains(webhooks, expected) {
+			t.Fatalf("managed inbound header contract missing %q:\n%s", expected, webhooks)
+		}
+	}
+
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source")
+	writeTargetArtifacts(t, source, artifacts)
+	if err := os.WriteFile(filepath.Join(source, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "tsconfig.json"), []byte(serverTSConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe := `import type { Webhooks } from "./server/webhooks.js"
+declare const params: Webhooks["managed"]["POST"]["context"]["params"]["headerParams"]
+const origin: string = params.Origin
+const site: string | undefined = params["Sec-Fetch-Site"]
+void origin
+void site
+`
+	if err := os.WriteFile(filepath.Join(source, "managed-inbound.probe.ts"), []byte(probe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
+	if _, err := os.Stat(tsc); err != nil {
+		t.Skipf("TypeScript compiler unavailable for server test: %v", err)
+	}
+	if output, err := exec.Command("node", tsc, "--project", filepath.Join(source, "tsconfig.json")).CombinedOutput(); err != nil {
+		t.Fatalf("compile managed inbound server contract: %v\n%s", err, output)
+	}
+	outputDirectory := filepath.Join(directory, "output")
+	if err := os.WriteFile(filepath.Join(outputDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import { pathToFileURL } from "node:url";
+const { createWebhookRouter } = await import(pathToFileURL(process.argv[1]).href);
+const seen = [];
+const router = createWebhookRouter({
+  managed: { POST: async ({ params }) => {
+    seen.push({ ...params.headerParams });
+    return { status: 204 };
+  } },
+}, { routes: { managed: "/hooks/managed" } });
+const present = await router.fetch(new Request("https://host.test/hooks/managed", {
+  method: "POST",
+  headers: { Origin: "https://caller.example", "Sec-Fetch-Site": "same-origin" },
+}));
+if (present.status !== 204) throw new Error("present managed inbound headers were rejected");
+if (JSON.stringify(seen) !== JSON.stringify([{ Origin: "https://caller.example", "Sec-Fetch-Site": "same-origin" }])) throw new Error("managed inbound headers were not decoded: " + JSON.stringify(seen));
+const missing = await router.fetch(new Request("https://host.test/hooks/managed", { method: "POST" }));
+if (missing.status !== 400 || !String(await missing.text()).includes("Origin")) throw new Error("missing required Origin was not rejected");
+if (seen.length !== 1) throw new Error("missing Origin reached the handler");
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute managed inbound header server test: %v\n%s", err, output)
+	}
+}
+
 func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.2.0","info":{"title":"Server catalog","version":"1"},

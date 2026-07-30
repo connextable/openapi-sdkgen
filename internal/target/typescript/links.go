@@ -60,6 +60,7 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 			}
 			links, _ := resolved["links"].(map[string]any)
 			for _, name := range sortedAnyKeys(links) {
+				linkPointer := responseLinkPointer(source, status, name)
 				link, _ := links[name].(map[string]any)
 				link, err = resolveComponentObject(document, link, "links")
 				if err != nil {
@@ -75,9 +76,13 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 					failures = append(failures, fmt.Errorf("response link %s %s targets hidden operation %q", operationLabel(source), name, operationLabel(target)))
 					continue
 				}
-				definition, err := linkDefinition(document, source, target, link)
+				definition, err := linkDefinition(document, source, target, link, linkPointer)
 				if err != nil {
-					failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					if strings.HasPrefix(err.Error(), "#") {
+						failures = append(failures, err)
+					} else {
+						failures = append(failures, fmt.Errorf("response link %s %s: %w", operationLabel(source), name, err))
+					}
 					continue
 				}
 				serverURL, err := linkServerURL(link)
@@ -99,6 +104,14 @@ func generatedLinksDiagnostics(document *ir.Document, manifest Manifest) ([]gene
 		return operationRouteKey(result[left].SourceOperation) < operationRouteKey(result[right].SourceOperation)
 	})
 	return result, failures
+}
+
+func responseLinkPointer(source ir.Operation, status, name string) string {
+	pointer := source.Pointer
+	if pointer == "" {
+		pointer = "#/paths/" + escapePointerToken(source.Path) + "/" + strings.ToLower(source.Method)
+	}
+	return pointer + "/responses/" + escapePointerToken(status) + "/links/" + escapePointerToken(name)
 }
 
 func linkServerURL(link map[string]any) (string, error) {
@@ -160,7 +173,7 @@ func linkTargetOperation(document *ir.Document, byID map[string]ir.Operation, li
 	return ir.Operation{}, fmt.Errorf("operationRef %q does not name a generated operation", operationRef)
 }
 
-func linkDefinition(document *ir.Document, source, target ir.Operation, link map[string]any) (string, error) {
+func linkDefinition(document *ir.Document, source, target ir.Operation, link map[string]any, pointer string) (string, error) {
 	parameters, err := operationParameters(document, target)
 	if err != nil {
 		return "", err
@@ -176,9 +189,13 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 	var assignments []string
 	values, _ := link["parameters"].(map[string]any)
 	for _, name := range sortedAnyKeys(values) {
+		valuePointer := pointer + "/parameters/" + escapePointerToken(name)
 		matches := byName[name]
 		if len(matches) != 1 {
-			return "", fmt.Errorf("parameter %q matches %d target parameters", name, len(matches))
+			return "", fmt.Errorf("%s: parameter %q matches %d target parameters", valuePointer, name, len(matches))
+		}
+		if matches[0].HostManaged {
+			return "", fmt.Errorf("%s: Link cannot assign host-managed target request header %q", valuePointer, matches[0].Name)
 		}
 		location := matches[0].Location
 		switch location {
@@ -191,7 +208,7 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 		}
 		value, err := linkValueLiteral(values[name], sourceParameters)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%s: %w", valuePointer, err)
 		}
 		assignments = append(assignments, "{ location: "+quoteTS(location)+", property: "+quoteTS(matches[0].Property)+", value: "+value+" }")
 	}
@@ -202,7 +219,7 @@ func linkDefinition(document *ir.Document, source, target ir.Operation, link map
 	if body, exists := link["requestBody"]; exists {
 		value, err := linkValueLiteral(body, sourceParameters)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%s/requestBody: %w", pointer, err)
 		}
 		fields = append(fields, "requestBody: "+value)
 	}
@@ -234,6 +251,9 @@ func linkRequestParameterExpression(expression string, sourceParameters []operat
 	for _, parameter := range sourceParameters {
 		if parameter.Location != location || parameter.Name != name {
 			continue
+		}
+		if parameter.HostManaged {
+			return nil, fmt.Errorf("request runtime expression %q reads host-managed source request header %q", expression, parameter.Name)
 		}
 		section := location
 		if location == "header" {
