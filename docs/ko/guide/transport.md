@@ -147,6 +147,28 @@ const api = createClient({
 API key, HTTP Basic/Bearer, OAuth2, OpenID Connect, mTLS 요구 사항을 지원합니다.
 로그인, 토큰 갱신, 인증 정보 저장은 애플리케이션에서 구현해야 합니다.
 
+OpenAPI cookie API key security scheme은 브라우저의 ambient cookie로 충족할 수
+있습니다. JavaScript에서 쿠키 값을 읽을 필요가 없습니다.
+
+```ts
+const api = createClient({
+  baseURL: "https://api.example.test",
+  credentials: "include",
+});
+```
+
+`"include"`를 사용하면 cookie security는 실행 중인 Fetch 구현에 맡깁니다.
+SDK는 쿠키 값을 요구하거나 `Cookie` 헤더를 만들지 않습니다. 실제 전송 여부는
+Fetch와 브라우저 쿠키 정책이 결정합니다. AND security alternative가 cookie와
+다른 scheme을 함께 요구한다면 다른 scheme에는 credential provider를 사용하고
+요청 옵션으로 `{ credentials: "include" }`를 전달합니다. provider의 `values`에는
+ambient cookie scheme을 넣지 않습니다.
+
+같은 cookie를 `in: cookie` Parameter Object와 적용된 cookie security scheme에
+동시에 선언하면 소유권이 모호하므로 생성을 거부합니다. 일반 cookie parameter는
+계속 명시적인 호출자 입력이며 cookie-jar capability가 있는 transport가
+필요합니다.
+
 ## 요청 취소와 시간 제한
 
 각 요청에 `AbortSignal`과 시간 제한을 지정할 수 있습니다.

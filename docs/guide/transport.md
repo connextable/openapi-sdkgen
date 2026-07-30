@@ -154,6 +154,28 @@ Generated clients support API keys, HTTP Basic and Bearer authentication,
 OAuth2, OpenID Connect, and mTLS requirements. Your application remains
 responsible for login, token refresh, and credential storage.
 
+For an OpenAPI cookie API-key security scheme, browser applications can use
+ambient cookies without reading their values:
+
+```ts
+const api = createClient({
+  baseURL: "https://api.example.test",
+  credentials: "include",
+});
+```
+
+`"include"` satisfies cookie security through the active Fetch implementation.
+The SDK neither asks for the cookie value nor creates a `Cookie` header. Fetch
+and the browser cookie policy decide whether a cookie is sent. If an AND
+security alternative combines a cookie with another scheme, use a credential
+provider for the other schemes and pass `{ credentials: "include" }` as the
+request option; omit the ambient cookie scheme from the provider's `values`.
+
+Do not declare the same cookie as both an `in: cookie` Parameter Object and an
+applied cookie security scheme. Generation rejects that ambiguous ownership.
+Ordinary cookie parameters remain explicit caller input and require a capable
+cookie-jar transport.
+
 ## Cancel a request or set a timeout
 
 Pass an `AbortSignal` or timeout with any request.

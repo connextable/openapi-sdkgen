@@ -417,14 +417,17 @@ security-scheme names and alternatives. Dispatch fails before Fetch unless the
 selected alternative has every required credential. Credentials are requested
 for the final normalized origin; they are never reused for a Link or server
 override at another origin unless the host explicitly returns them for that
-origin. `values` permits exactly the schemes in the selected alternative:
-missing or extra values fail before Fetch. Security-owned header/query/cookie
-locations cannot be supplied by ordinary call options; a collision fails rather
-than overwriting a credential. API keys in cookies are transport-capability
-gated. Browser Fetch uses only an existing same-origin browser cookie under the
-configured credential mode and never synthesizes a `Cookie` header; a
-cross-origin browser call or a transport without a cookie jar fails before
-dispatch. Other environments require an explicit cookie-jar transport adapter.
+origin. `values` permits exactly the schemes in the selected alternative that
+are not already satisfied by ambient Fetch cookies; missing or extra values
+fail before Fetch. Security-owned header/query/cookie locations cannot be
+supplied by ordinary call options; a collision fails rather than overwriting a
+credential. With Fetch credentials mode `"include"`, cookie API-key security is
+ambient: the SDK neither requests its value nor synthesizes a `Cookie` header.
+Fetch and browser cookie policy decide whether a cookie reaches the server.
+Without ambient credentials, explicit cookie credentials remain
+transport-capability gated and require a cookie-jar adapter. Declaring the same
+cookie as both an operation parameter and an applied security scheme is a
+generation error.
 Mutual TLS requires a compatible host transport adapter. Its capability is
 checked before dispatch and an mTLS operation never falls back to default
 Fetch.

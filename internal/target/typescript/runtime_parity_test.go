@@ -2097,6 +2097,70 @@ await api.$operations.readSecure();
 	}
 }
 
+func TestRuntimeUsesAmbientFetchCookiesForCookieSecurity(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0",
+  "info":{"title":"Ambient cookie security","version":"1"},
+  "components":{"securitySchemes":{
+    "Cookie":{"type":"apiKey","in":"cookie","name":"session"},
+    "Bearer":{"type":"http","scheme":"bearer"}
+  }},
+  "paths":{
+    "/client":{"get":{"operationId":"getClientCookie","security":[{"Cookie":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/per-request":{"get":{"operationId":"getRequestCookie","security":[{"Cookie":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/mixed":{"get":{"operationId":"getMixedCookie","security":[{"Cookie":[],"Bearer":[]}],"responses":{"204":{"description":"OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const seen = [];
+const fetch = async (input, init) => {
+  const headers = new Headers(init.headers);
+  seen.push({ path: new URL(String(input)).pathname, credentials: init.credentials, cookie: headers.get("cookie"), authorization: headers.get("authorization") });
+  return new Response(null, { status: 204 });
+};
+
+const clientAmbient = createClient({ baseURL: "https://api.example.test", credentials: "include", fetch });
+await clientAmbient.$operations.getClientCookie();
+
+const requestAmbient = createClient({ baseURL: "https://api.example.test", fetch });
+await requestAmbient.$operations.getRequestCookie({ credentials: "include" });
+
+let providerCalls = 0;
+const mixed = createClient({
+  baseURL: "https://api.example.test",
+  credentials: ({ alternatives }) => {
+    providerCalls++;
+    const alternative = Object.values(alternatives)[0];
+    return { alternative, values: { Bearer: { kind: "http-bearer", token: "token" } } };
+  },
+  fetch,
+});
+await mixed.$operations.getMixedCookie({ credentials: "include" });
+
+if (providerCalls !== 1) throw new Error("mixed ambient credential provider call mismatch");
+if (JSON.stringify(seen) !== JSON.stringify([
+  { path: "/client", credentials: "include", cookie: null, authorization: null },
+  { path: "/per-request", credentials: "include", cookie: null, authorization: null },
+  { path: "/mixed", credentials: "include", cookie: null, authorization: "Bearer token" },
+])) throw new Error("ambient cookie security dispatch mismatch: " + JSON.stringify(seen));
+
+const missing = createClient({ baseURL: "https://api.example.test", credentials: "omit", fetch: async () => { throw new Error("missing ambient credentials reached fetch"); } });
+await missing.$operations.getClientCookie().then(
+  () => { throw new Error("cookie security accepted credentials omit"); },
+  (error) => { if (error.code !== "SECURITY_CREDENTIALS_REQUIRED") throw error; },
+);
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute ambient cookie security runtime test: %v\n%s", err, output)
+	}
+}
+
 func TestRuntimeAppliesEveryHostManagedSecurityCredentialShape(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{"openapi":"3.2.0","info":{"title":"Security shapes","version":"1"},"components":{"securitySchemes":{"Basic":{"type":"http","scheme":"basic"},"Bearer":{"type":"http","scheme":"bearer","bearerFormat":"JWT"},"Digest":{"type":"http","scheme":"digest"},"QueryKey":{"type":"apiKey","in":"query","name":"api_key"},"CookieKey":{"type":"apiKey","in":"cookie","name":"session"},"OAuth":{"type":"oauth2","oauth2MetadataUrl":"https://auth.example.test/metadata","flows":{"authorizationCode":{"authorizationUrl":"https://auth.example.test/authorize","tokenUrl":"https://auth.example.test/token","refreshUrl":"https://auth.example.test/refresh","scopes":{}},"clientCredentials":{"tokenUrl":"https://auth.example.test/token","scopes":{"widgets:read":"Read widgets"}},"deviceAuthorization":{"deviceAuthorizationUrl":"https://auth.example.test/device","tokenUrl":"https://auth.example.test/token","scopes":{}}}},"OpenID":{"type":"openIdConnect","openIdConnectUrl":"https://auth.example.test/openid"},"Mutual":{"type":"mutualTLS","deprecated":true}}},"paths":{"/basic":{"get":{"operationId":"getBasic","security":[{"Basic":[]}],"responses":{"204":{"description":"OK"}}}},"/bearer":{"get":{"operationId":"getBearer","security":[{"Bearer":[]}],"responses":{"204":{"description":"OK"}}}},"/digest":{"get":{"operationId":"getDigest","security":[{"Digest":[]}],"responses":{"204":{"description":"OK"}}}},"/query":{"get":{"operationId":"getQuery","security":[{"QueryKey":[]}],"responses":{"204":{"description":"OK"}}}},"/oauth":{"get":{"operationId":"getOAuth","security":[{"OAuth":["widgets:read"]}],"responses":{"204":{"description":"OK"}}}},"/openid":{"get":{"operationId":"getOpenID","security":[{"OpenID":[]}],"responses":{"204":{"description":"OK"}}}},"/cookie":{"get":{"operationId":"getCookie","security":[{"CookieKey":[]}],"responses":{"204":{"description":"OK"}}}},"/mtls":{"get":{"operationId":"getMTLS","security":[{"Mutual":[]}],"responses":{"204":{"description":"OK"}}}}}}`))
 	if err != nil {

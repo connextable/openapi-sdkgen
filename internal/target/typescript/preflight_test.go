@@ -159,3 +159,50 @@ func TestPrepareAcceptsValidInboundContractsWithServerAddon(t *testing.T) {
 		t.Fatal(diagnostic.RenderHuman(values, nil))
 	}
 }
+
+func TestPrepareRejectsCookieParameterSecurityOwnershipOverlap(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.2.0",
+  "info": {"title": "Cookie ownership", "version": "1"},
+  "components": {
+    "securitySchemes": {
+      "Session": {"type": "apiKey", "in": "cookie", "name": "csrf-local"}
+    }
+  },
+  "security": [{"Session": []}],
+  "paths": {
+    "/conflict": {
+      "get": {
+        "operationId": "getConflict",
+        "parameters": [
+          {"name": "csrf-local", "in": "cookie", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "OK"}}
+      }
+    },
+    "/override": {
+      "get": {
+        "operationId": "getOverride",
+        "parameters": [
+          {"name": "csrf-local", "in": "cookie", "required": true, "schema": {"type": "string"}}
+        ],
+        "security": [],
+        "responses": {"204": {"description": "OK"}}
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, values, err := (Generator{}).Prepare(document, generator.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := diagnostic.RenderHuman(values, nil)
+	if strings.Count(report, "SDKGEN-E509") != 1 ||
+		!strings.Contains(report, `Cookie "csrf-local" is declared as both an operation parameter and security credential`) ||
+		!strings.Contains(report, "GET /conflict") {
+		t.Fatalf("cookie ownership diagnostic =\n%s", report)
+	}
+}

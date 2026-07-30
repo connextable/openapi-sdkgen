@@ -160,6 +160,7 @@ export interface ClientOptions {
    * Either the default Fetch credentials mode or the host-owned provider for
    * OpenAPI Security Requirement Objects. A string is passed to Fetch; a
    * function is called only after the final operation origin is selected.
+   * `"include"` satisfies cookie API-key security through ambient Fetch cookies.
    */
   readonly credentials?: RequestCredentials | CredentialProvider;
   /** Default positive timeout in milliseconds. Individual requests may override it. */
@@ -274,6 +275,7 @@ export type SecurityCredential = APIKeyCredential | HTTPBasicCredential | HTTPBe
 /** Selection returned by a host credential provider. */
 export interface SecurityCredentialSelection {
   readonly alternative: SecurityAlternative;
+  /** Credentials for selected schemes not already satisfied by ambient Fetch cookies. */
   readonly values: Readonly<Record<string, SecurityCredential>>;
 }
 
@@ -305,7 +307,7 @@ export interface RequestOptions {
   readonly csrfToken?: string;
   /** Caller-provided value sent through the `X-Request-Id` header. */
   readonly requestID?: string;
-  /** Fetch API credentials mode for this request, overriding the client default. */
+  /** Fetch credentials mode; `"include"` also satisfies cookie API-key security ambiently. */
   readonly credentials?: RequestCredentials;
   /** Declared additional headers for named multipart form-data parts. */
   readonly multipartHeaders?: Readonly<Record<string, HeadersInit>>;
@@ -1048,11 +1050,12 @@ export function createRequest(options: ClientOptions): RequestFunction {
     requestOptions: RequestOptions = {},
     raw = false,
   ): Promise<Output | RawResponse<Output>> => {
+    const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
     let encoded: EncodedRequest;
     try {
 		const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
 		encoded = isPromise(pending) ? await pending : pending;
-		const secured = applyOperationSecurity(options, operation, encoded);
+		const secured = applyOperationSecurity(options, operation, encoded, credentials);
 		encoded = isPromise(secured) ? await secured : secured;
     } catch (cause) {
       if (isAPIError(cause)) {
@@ -1078,7 +1081,6 @@ export function createRequest(options: ClientOptions): RequestFunction {
         if (isReadableStream(encoded.body)) (init as RequestInit & { duplex?: "half" }).duplex = "half";
       }
       if (abort.signal !== undefined) init.signal = abort.signal;
-      const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
       if (credentials !== undefined) init.credentials = credentials;
       if (abort.signal?.aborted) throw abort.signal.reason;
       assertReadableResponseHeaders(options.transport, operation);
@@ -1184,11 +1186,12 @@ async function* streamOperation<Item>(
   input: unknown,
   requestOptions: RequestOptions,
 ): AsyncIterable<Item> {
+  const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
   let encoded: EncodedRequest;
   try {
     const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
     encoded = isPromise(pending) ? await pending : pending;
-    const secured = applyOperationSecurity(options, operation, encoded);
+    const secured = applyOperationSecurity(options, operation, encoded, credentials);
     encoded = isPromise(secured) ? await secured : secured;
   } catch (cause) {
     throw transportError(TransportErrorCode.REQUEST_ENCODE_FAILED, `Failed to encode ${operationDiagnosticName(operation)} stream request`, cause);
@@ -1202,7 +1205,6 @@ async function* streamOperation<Item>(
       init.body = encoded.body as BodyInit;
       if (isReadableStream(encoded.body)) (init as RequestInit & { duplex?: "half" }).duplex = "half";
     }
-    const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
     if (credentials !== undefined) init.credentials = credentials;
     if (abort.signal?.aborted) throw abort.signal.reason;
     assertReadableResponseHeaders(options.transport, operation);
@@ -1524,9 +1526,12 @@ function applyOperationSecurity(
 	options: ClientOptions,
   operation: OperationDefinition,
   encoded: EncodedRequest,
+  credentials: RequestCredentials | undefined,
 ): EncodedRequest | Promise<EncodedRequest> {
   const declared = operation.security;
   if (declared === undefined || declared.length === 0 || declared.some((alternative) => alternative.schemes.length === 0)) return encoded;
+  const ambientCookies = credentials === "include";
+  if (ambientCookies && declared.some((alternative) => alternative.schemes.every(isCookieSecurityScheme))) return encoded;
 	if (typeof options.credentials !== "function") {
     throw transportError(
       TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
@@ -1547,16 +1552,23 @@ function applyOperationSecurity(
     if (selected === undefined || selected !== resolved.alternative) {
       throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Credential provider selected an unknown security alternative", undefined);
     }
-    const expected = [...selected.schemes].map((scheme) => scheme.name).sort();
+    const expected = selected.schemes.filter((scheme) => !ambientCookies || !isCookieSecurityScheme(scheme)).map((scheme) => scheme.name).sort();
     const supplied = Object.keys(resolved.values ?? {}).sort();
     if (expected.length !== supplied.length || expected.some((name, index) => name !== supplied[index])) {
       throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Credential provider values do not exactly match the selected security alternative", undefined);
     }
     const url = new URL(encoded.url);
-	for (const scheme of selected.schemes) applySecurityCredential(options.transport, scheme, resolved.values[scheme.name]!, encoded.headers, url);
+	for (const scheme of selected.schemes) {
+      if (ambientCookies && isCookieSecurityScheme(scheme)) continue;
+      applySecurityCredential(options.transport, scheme, resolved.values[scheme.name]!, encoded.headers, url);
+    }
     return { ...encoded, url: url.href };
   };
   return isPromise(selection) ? selection.then(apply) : apply(selection);
+}
+
+function isCookieSecurityScheme(scheme: SecuritySchemeDefinition): boolean {
+  return scheme.type === "apiKey" && scheme.location === "cookie";
 }
 
 function applySecurityCredential(

@@ -62,6 +62,7 @@ func prepareTargetDiagnostics(plan *sourcePlan) []diagnostic.Diagnostic {
 	result = append(result, operationIdentityDiagnostics(document)...)
 	result = append(result, templatedResourcePathDiagnostics(document)...)
 	result = append(result, securityPreparationDiagnostics(document)...)
+	result = append(result, cookieSecurityOwnershipDiagnostics(document)...)
 	return diagnostic.Sort(result)
 }
 
@@ -238,6 +239,93 @@ func securityPreparationDiagnostics(document *ir.Document) []diagnostic.Diagnost
 		}
 	}
 	return result
+}
+
+func cookieSecurityOwnershipDiagnostics(document *ir.Document) []diagnostic.Diagnostic {
+	components, _ := document.Raw["components"].(map[string]any)
+	schemes, _ := components["securitySchemes"].(map[string]any)
+	var result []diagnostic.Diagnostic
+	for _, operation := range document.Operations {
+		value, exists := operation.Raw["security"]
+		if !exists {
+			value, exists = document.Raw["security"]
+		}
+		if !exists {
+			continue
+		}
+		requirements, ok := value.([]any)
+		if !ok || len(requirements) == 0 {
+			continue
+		}
+		cookieSchemes := make(map[string][]string)
+		for _, item := range requirements {
+			requirement, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, schemeName := range sortedAnyKeys(requirement) {
+				scheme, ok := schemes[schemeName].(map[string]any)
+				if !ok {
+					continue
+				}
+				kind, _ := scheme["type"].(string)
+				location, _ := scheme["in"].(string)
+				if kind != "apiKey" || location != "cookie" {
+					continue
+				}
+				cookieName, _ := scheme["name"].(string)
+				if cookieName == "" {
+					continue
+				}
+				pointer := "#/components/securitySchemes/" + escapePointerToken(schemeName) + "/name"
+				if !containsString(cookieSchemes[cookieName], pointer) {
+					cookieSchemes[cookieName] = append(cookieSchemes[cookieName], pointer)
+				}
+			}
+		}
+		if len(cookieSchemes) == 0 {
+			continue
+		}
+		parameters, err := operationParameters(document, operation)
+		if err != nil {
+			continue
+		}
+		for _, parameter := range parameters {
+			relatedPointers := cookieSchemes[parameter.Name]
+			if parameter.Location != "cookie" || len(relatedPointers) == 0 {
+				continue
+			}
+			pointer := parameter.Pointer
+			if pointer == "" {
+				pointer = operation.Pointer + "/parameters"
+			}
+			value := sourceTargetDiagnostic(
+				document,
+				pointer,
+				"SDKGEN-E509",
+				fmt.Sprintf("Cookie %q is declared as both an operation parameter and security credential.", parameter.Name),
+				"Remove the duplicate cookie Parameter Object and let the OpenAPI security scheme own this credential.",
+			)
+			value.Route = operationRouteKey(operation)
+			value.Operation = operation.OperationID
+			for _, relatedPointer := range relatedPointers {
+				location, _ := extensionDiagnosticLocation(document, relatedPointer)
+				value.Related = append(value.Related, location)
+			}
+			value.Related = sortTargetLocations(value.Related)
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func serverPreparationDiagnostic(document *ir.Document, kind string, err error) diagnostic.Diagnostic {
