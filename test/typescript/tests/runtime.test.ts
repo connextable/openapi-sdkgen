@@ -358,7 +358,7 @@ describe("generated runtime", () => {
     expect(seen).toHaveLength(5);
   });
 
-  it("lets a trusted custom transport inject a host-managed header after encoding", async () => {
+  it("lets a trusted custom transport inject an environment-controlled header after encoding", async () => {
     const dispatched: Headers[] = [];
     const request = createRequest({
       baseURL: "https://api.example.test",

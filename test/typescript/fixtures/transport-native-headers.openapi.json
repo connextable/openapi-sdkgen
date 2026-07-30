@@ -179,7 +179,19 @@
         "security": [],
         "parameters": [
           {
+            "name": "X-HTTP-Method",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
             "name": "X-HTTP-Method-Override",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Method-Override",
             "in": "header",
             "required": true,
             "schema": { "type": "string" }

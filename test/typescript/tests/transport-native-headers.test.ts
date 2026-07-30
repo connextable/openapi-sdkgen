@@ -47,13 +47,19 @@ const mixedInput: Operations["mixedHeaders"]["input"] = {
   headerParams: { "X-Trace": "trace" },
 };
 const overrideInput: Operations["overrideMethod"]["input"] = {
-  headerParams: { "X-HTTP-Method-Override": "PATCH, TRACE" },
+  headerParams: {
+    "X-HTTP-Method": "CONNECT",
+    "X-HTTP-Method-Override": "TRACE",
+    "X-Method-Override": "TRACK",
+  },
 };
 declare const typedClient: ReturnType<typeof createClient>;
 if (false) {
   typedClient.$operations.allEnvironmentHeaders();
   typedClient.$operations.allEnvironmentHeaders.raw();
   typedClient.$operations.allEnvironmentHeaders({ headerParams: explicitHeaders });
+  typedClient.$operations.allEnvironmentHeaders(undefined, { headers: { "X-Raw": "normal" } });
+  typedClient.$operations.allEnvironmentHeaders.raw(undefined, { headers: { "X-Raw": "raw" } });
   typedClient.$operations.mixedHeaders(mixedInput);
   typedClient.$operations.overrideMethod(overrideInput);
   // @ts-expect-error ordinary required headers still require operation input
@@ -62,6 +68,10 @@ if (false) {
   typedClient.$operations.mixedHeaders({ headerParams: { Origin: "https://caller.example" } });
   // @ts-expect-error method-override headers retain OpenAPI requiredness
   typedClient.$operations.overrideMethod();
+  typedClient.$operations.overrideMethod({
+    // @ts-expect-error every conditional method-override header remains required
+    headerParams: { "X-HTTP-Method": "CONNECT", "X-HTTP-Method-Override": "TRACE" },
+  });
 }
 void [omittedHeaders, mixedInput, overrideInput];
 
@@ -80,12 +90,16 @@ describe("transport-native request headers", () => {
 
     await api.$operations.allEnvironmentHeaders();
     await api.$operations.allEnvironmentHeaders.raw();
+    await api.$operations.allEnvironmentHeaders.raw(undefined, {
+      headers: { "X-Raw": "raw-options" },
+    });
     await api.$operations.allEnvironmentHeaders({ headerParams: explicitHeaders });
 
     expect([...seen[0]!.keys()]).toEqual([]);
     expect([...seen[1]!.keys()]).toEqual([]);
+    expect(seen[2]!.get("X-Raw")).toBe("raw-options");
     for (const [name, value] of headerEntries) {
-      expect(seen[2]!.get(name)).toBe(value);
+      expect(seen[3]!.get(name)).toBe(value);
     }
   });
 
@@ -109,7 +123,9 @@ describe("transport-native request headers", () => {
     expect(seen[0]!.get("X-Trace")).toBe("trace");
     expect(seen[1]!.get("Origin")).toBe("https://caller.example");
     expect(seen[1]!.get("X-Trace")).toBe("trace-explicit");
-    expect(seen[2]!.get("X-HTTP-Method-Override")).toBe("PATCH, TRACE");
+    expect(seen[2]!.get("X-HTTP-Method")).toBe("CONNECT");
+    expect(seen[2]!.get("X-HTTP-Method-Override")).toBe("TRACE");
+    expect(seen[2]!.get("X-Method-Override")).toBe("TRACK");
   });
 
   it("forwards undeclared raw and header API-key values while retaining ownership", async () => {
