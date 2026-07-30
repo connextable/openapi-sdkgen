@@ -2108,6 +2108,7 @@ func TestRuntimeUsesAmbientFetchCookiesForCookieSecurity(t *testing.T) {
   "paths":{
     "/client":{"get":{"operationId":"getClientCookie","security":[{"Cookie":[]}],"responses":{"204":{"description":"OK"}}}},
     "/per-request":{"get":{"operationId":"getRequestCookie","security":[{"Cookie":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/stream":{"get":{"operationId":"streamCookie","security":[{"Cookie":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
     "/mixed":{"get":{"operationId":"getMixedCookie","security":[{"Cookie":[],"Bearer":[]}],"responses":{"204":{"description":"OK"}}}}
   }
 }`))
@@ -2121,15 +2122,23 @@ const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const seen = [];
 const fetch = async (input, init) => {
   const headers = new Headers(init.headers);
-  seen.push({ path: new URL(String(input)).pathname, credentials: init.credentials, cookie: headers.get("cookie"), authorization: headers.get("authorization") });
+  const path = new URL(String(input)).pathname;
+  seen.push({ path, credentials: init.credentials, cookie: headers.get("cookie"), authorization: headers.get("authorization") });
+  if (path === "/stream") return new Response('"event"\n', { headers: { "content-type": "application/x-ndjson" } });
   return new Response(null, { status: 204 });
 };
 
 const clientAmbient = createClient({ baseURL: "https://api.example.test", credentials: "include", fetch });
 await clientAmbient.$operations.getClientCookie();
+for await (const item of clientAmbient.$operations.streamCookie.stream()) {
+  if (item !== "event") throw new Error("client ambient stream item mismatch");
+}
 
 const requestAmbient = createClient({ baseURL: "https://api.example.test", fetch });
 await requestAmbient.$operations.getRequestCookie({ credentials: "include" });
+for await (const item of requestAmbient.$operations.streamCookie.stream({ credentials: "include" })) {
+  if (item !== "event") throw new Error("request ambient stream item mismatch");
+}
 
 let providerCalls = 0;
 const mixed = createClient({
@@ -2146,7 +2155,9 @@ await mixed.$operations.getMixedCookie({ credentials: "include" });
 if (providerCalls !== 1) throw new Error("mixed ambient credential provider call mismatch");
 if (JSON.stringify(seen) !== JSON.stringify([
   { path: "/client", credentials: "include", cookie: null, authorization: null },
+  { path: "/stream", credentials: "include", cookie: null, authorization: null },
   { path: "/per-request", credentials: "include", cookie: null, authorization: null },
+  { path: "/stream", credentials: "include", cookie: null, authorization: null },
   { path: "/mixed", credentials: "include", cookie: null, authorization: "Bearer token" },
 ])) throw new Error("ambient cookie security dispatch mismatch: " + JSON.stringify(seen));
 
