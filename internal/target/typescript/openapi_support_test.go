@@ -68,6 +68,93 @@ func TestSourceArtifactsAcceptsJSONSchemaResourceScopeMetadata(t *testing.T) {
 	}
 }
 
+func TestSourceArtifactsProjectFetchManagedHeadersOutOfClientInputs(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []string{"3.0.4", "3.1.1", "3.2.0"} {
+		version := version
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+
+			document, err := sdkgen.Compile([]byte(fmt.Sprintf(`{
+  "openapi": %q,
+  "info": {"title": "Fetch managed headers", "version": "1"},
+  "paths": {
+    "/oauth": {
+      "post": {
+        "operationId": "oauth",
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object"}}}
+        },
+        "responses": {"204": {"description": "OK"}}
+      }
+    },
+    "/override": {
+      "post": {
+        "operationId": "override",
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}},
+          {"name": "X-Trace", "in": "header", "required": true, "schema": {"type": "string"}},
+          {"name": "X-HTTP-Method-Override", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "OK"}}
+      }
+    }
+  }
+}`, version)))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			manifest, err := buildManifest(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var oauth ManifestOperation
+			for _, operation := range manifest.Operations {
+				if operation.OperationID == "oauth" {
+					oauth = operation
+					break
+				}
+			}
+			if len(oauth.InputTypes) != 1 || !strings.HasSuffix(oauth.InputTypes[0], "BodyInput") {
+				t.Fatalf("oauth input types = %v, want only body input", oauth.InputTypes)
+			}
+			if strings.Contains(oauth.CallExpression, "headerParams") {
+				t.Fatalf("oauth call requires host-managed header input: %s", oauth.CallExpression)
+			}
+
+			artifacts, err := SourceArtifacts(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+			if strings.Contains(client, `readonly "Origin"`) {
+				t.Fatalf("client exposes host-managed Origin input:\n%s", client)
+			}
+			for _, expected := range []string{
+				`readonly "X-Trace": string`,
+				`readonly "X-HTTP-Method-Override"?: string | undefined`,
+				`name: "Origin"`,
+				`hostManaged: true`,
+				`name: "X-HTTP-Method-Override"`,
+				`forbiddenMethodValue: true`,
+			} {
+				if !strings.Contains(client, expected) {
+					t.Fatalf("client missing %q:\n%s", expected, client)
+				}
+			}
+			if metadata := string(artifactByPath(t, artifacts, "metadata.ts")); !strings.Contains(metadata, `"Origin"`) {
+				t.Fatalf("metadata lost the OpenAPI Origin parameter:\n%s", metadata)
+			}
+		})
+	}
+}
+
 func TestSourceArtifactsAllowsImplementedOpenAPIHTTPFeatures(t *testing.T) {
 	document := &ir.Document{
 		Raw: map[string]any{"servers": []any{map[string]any{"url": "https://api.example.test"}}},

@@ -958,27 +958,27 @@ func findItemsSchema(document *ir.Document, schema map[string]any, seen map[stri
 func operationInputTypes(document *ir.Document, operation ir.Operation) ([]string, error) {
 	var result []string
 	name := operationTypeName(operationRouteKey(operation))
-	if parameters, err := parametersIn(document, operation, "path"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "path"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 {
 		result = append(result, name+"PathInput")
 	}
-	if parameters, err := parametersIn(document, operation, "query"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "query"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 || operation.Pagination != "" || len(operation.SortParameters) > 0 {
 		result = append(result, name+"QueryInput")
 	}
-	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "querystring"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 {
 		result = append(result, name+"QuerystringInput")
 	}
-	if parameters, err := parametersIn(document, operation, "header"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "header"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 {
 		result = append(result, name+"HeaderInput")
 	}
-	if parameters, err := parametersIn(document, operation, "cookie"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "cookie"); err != nil {
 		return nil, err
 	} else if len(parameters) > 0 {
 		result = append(result, name+"CookieInput")

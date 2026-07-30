@@ -567,6 +567,10 @@ export interface ParameterDefinition {
   readonly allowReserved?: boolean;
   /** Whether the parameter must be present before the request is sent. Defaults to false. */
   readonly required?: boolean;
+  /** Whether Fetch owns this request header instead of generated caller input. */
+  readonly hostManaged?: boolean;
+  /** Whether forbidden HTTP method values require a runtime header guard. */
+  readonly forbiddenMethodValue?: boolean;
   /** Media type for a content-based parameter. */
   readonly contentType?: string;
   /** Schema used for wire-name transformation before serialization. */

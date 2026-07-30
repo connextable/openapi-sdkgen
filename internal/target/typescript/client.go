@@ -338,35 +338,35 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 	if err := emitOperationOptions(output, document, operationName, operation); err != nil {
 		return err
 	}
-	if parameters, err := parametersIn(document, operation, "path"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "path"); err != nil {
 		return err
 	} else if len(parameters) > 0 {
 		if err := emitParameterType(output, document, operation, operationName+"PathInput", "path"); err != nil {
 			return err
 		}
 	}
-	if parameters, err := parametersIn(document, operation, "query"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "query"); err != nil {
 		return err
 	} else if len(parameters) > 0 || operation.Pagination != "" || len(operation.SortParameters) > 0 {
 		if err := emitQueryTypes(output, document, operation, operationName, parameters); err != nil {
 			return err
 		}
 	}
-	if parameters, err := parametersIn(document, operation, "querystring"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "querystring"); err != nil {
 		return err
 	} else if len(parameters) > 0 {
 		if err := emitParameterType(output, document, operation, operationName+"QuerystringInput", "querystring"); err != nil {
 			return err
 		}
 	}
-	if parameters, err := parametersIn(document, operation, "header"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "header"); err != nil {
 		return err
 	} else if len(parameters) > 0 {
 		if err := emitParameterType(output, document, operation, operationName+"HeaderInput", "header"); err != nil {
 			return err
 		}
 	}
-	if parameters, err := parametersIn(document, operation, "cookie"); err != nil {
+	if parameters, err := clientParametersIn(document, operation, "cookie"); err != nil {
 		return err
 	} else if len(parameters) > 0 {
 		if err := emitParameterType(output, document, operation, operationName+"CookieInput", "cookie"); err != nil {
@@ -546,7 +546,7 @@ func aggregateInputProperty(field string) (string, error) {
 }
 
 func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir.Operation, typeName, location string) error {
-	parameters, err := parametersIn(document, operation, location)
+	parameters, err := clientParametersIn(document, operation, location)
 	if err != nil {
 		return err
 	}
@@ -1534,6 +1534,12 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 			}
 			if parameter.ContentType != "" {
 				fields = append(fields, "contentType: "+quoteTS(parameter.ContentType))
+			}
+			if parameter.HostManaged {
+				fields = append(fields, "hostManaged: true")
+			}
+			if parameter.ForbiddenMethodValue {
+				fields = append(fields, "forbiddenMethodValue: true")
 			}
 			if parameter.Sort != nil {
 				values := make([]runtimeProperty, 0, len(parameter.Sort.Values))

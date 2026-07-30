@@ -10,21 +10,70 @@ import (
 )
 
 type operationParameter struct {
-	Name          string
-	Property      string
-	Binding       string
-	Description   string
-	Location      string
-	Style         string
-	Explode       bool
-	Required      bool
-	Deprecated    bool
-	AllowReserved bool
-	ContentType   string
-	Schema        any
-	Raw           map[string]any
-	Pointer       string
-	Sort          *ir.SortParameterPlan
+	Name                 string
+	Property             string
+	Binding              string
+	Description          string
+	Location             string
+	Style                string
+	Explode              bool
+	Required             bool
+	Deprecated           bool
+	AllowReserved        bool
+	HostManaged          bool
+	ForbiddenMethodValue bool
+	ContentType          string
+	Schema               any
+	Raw                  map[string]any
+	Pointer              string
+	Sort                 *ir.SortParameterPlan
+}
+
+type requestHeaderPolicy uint8
+
+const (
+	requestHeaderCallerManaged requestHeaderPolicy = iota
+	requestHeaderHostManaged
+	requestHeaderForbiddenMethodValue
+)
+
+var fetchHostManagedRequestHeaders = map[string]struct{}{
+	"accept-charset":                 {},
+	"accept-encoding":                {},
+	"access-control-request-headers": {},
+	"access-control-request-method":  {},
+	"connection":                     {},
+	"content-length":                 {},
+	"cookie":                         {},
+	"cookie2":                        {},
+	"date":                           {},
+	"dnt":                            {},
+	"expect":                         {},
+	"host":                           {},
+	"keep-alive":                     {},
+	"origin":                         {},
+	"referer":                        {},
+	"set-cookie":                     {},
+	"te":                             {},
+	"trailer":                        {},
+	"transfer-encoding":              {},
+	"upgrade":                        {},
+	"via":                            {},
+}
+
+func classifyFetchRequestHeader(name string) requestHeaderPolicy {
+	name = strings.ToLower(name)
+	if _, exists := fetchHostManagedRequestHeaders[name]; exists ||
+		strings.HasPrefix(name, "proxy-") ||
+		strings.HasPrefix(name, "sec-") {
+		return requestHeaderHostManaged
+	}
+	switch name {
+	case "x-http-method", "x-http-method-override", "x-method-override":
+		return requestHeaderForbiddenMethodValue
+	default:
+		return requestHeaderCallerManaged
+	}
 }
 
 func operationParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
@@ -96,10 +145,14 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 				copied := value
 				sortPlan = &copied
 			}
+			headerPolicy := requestHeaderCallerManaged
+			if location == "header" {
+				headerPolicy = classifyFetchRequestHeader(name)
+			}
 			merged[key] = operationParameter{
 				Name: name, Property: name, Binding: stablePrivateIdentifier("operation-parameter", operationRouteKey(operation)+"\x00"+location+"\x00"+name), Description: description, Location: location, Style: style,
 				Explode: explode, Required: boolValue(raw, "required"), Deprecated: boolValue(raw, "deprecated"), AllowReserved: boolValue(raw, "allowReserved"), ContentType: contentType, Schema: schema,
-				Raw: raw, Pointer: pointer, Sort: sortPlan,
+				HostManaged: headerPolicy == requestHeaderHostManaged, ForbiddenMethodValue: headerPolicy == requestHeaderForbiddenMethodValue, Raw: raw, Pointer: pointer, Sort: sortPlan,
 			}
 		}
 	}
@@ -161,6 +214,23 @@ func parametersIn(document *ir.Document, operation ir.Operation, location string
 	result := make([]operationParameter, 0, len(parameters))
 	for _, parameter := range parameters {
 		if parameter.Location == location {
+			result = append(result, parameter)
+		}
+	}
+	return result, nil
+}
+
+func clientParametersIn(document *ir.Document, operation ir.Operation, location string) ([]operationParameter, error) {
+	parameters, err := parametersIn(document, operation, location)
+	if err != nil {
+		return nil, err
+	}
+	if location != "header" {
+		return parameters, nil
+	}
+	result := make([]operationParameter, 0, len(parameters))
+	for _, parameter := range parameters {
+		if !parameter.HostManaged {
 			result = append(result, parameter)
 		}
 	}
