@@ -17,6 +17,14 @@ agent_run "generate TypeScript collision fixture" "$ROOT/.tmp/bin/openapi-sdkgen
   --with server \
   --output "$collision_fixture"
 
+transport_headers_fixture="$TYPESCRIPT_ROOT/fixtures/generated/transport-native-headers"
+rm -rf "$transport_headers_fixture"
+agent_run "generate transport-native header fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/transport-native-headers.openapi.json" \
+  --target typescript \
+  --with server \
+  --output "$transport_headers_fixture"
+
 baseline30_fixture="$TYPESCRIPT_ROOT/fixtures/generated/baseline-oas30"
 rm -rf "$baseline30_fixture"
 agent_run "generate extension-free OpenAPI 3.0 fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \

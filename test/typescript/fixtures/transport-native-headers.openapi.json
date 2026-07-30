@@ -1,0 +1,320 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Transport-native request header conformance",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/all-environment": {
+      "get": {
+        "operationId": "allEnvironmentHeaders",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Accept-Charset",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Accept-Encoding",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Access-Control-Request-Headers",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Access-Control-Request-Method",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Connection",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Content-Length",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Cookie",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Cookie2",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Date",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "DNT",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Expect",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Host",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Keep-Alive",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Referer",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Set-Cookie",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "TE",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Trailer",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Transfer-Encoding",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Upgrade",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Via",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Proxy-Future",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Sec-Future",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    },
+    "/mixed": {
+      "get": {
+        "operationId": "mixedHeaders",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Trace",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    },
+    "/override": {
+      "post": {
+        "operationId": "overrideMethod",
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-HTTP-Method-Override",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    },
+    "/raw": {
+      "get": {
+        "operationId": "rawHeaders",
+        "security": [],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    },
+    "/security": {
+      "get": {
+        "operationId": "securedByOrigin",
+        "security": [{ "OriginKey": [] }],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    },
+    "/link-source": {
+      "get": {
+        "operationId": "linkSource",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Source",
+            "links": {
+              "copy": {
+                "operationId": "linkTarget",
+                "parameters": { "X-Trace": "$request.header.Origin" }
+              },
+              "literal": { "$ref": "#/components/links/LiteralOrigin" }
+            }
+          }
+        }
+      }
+    },
+    "/link-target": {
+      "get": {
+        "operationId": "linkTarget",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Trace",
+            "in": "header",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "204": { "description": "Target" } }
+      }
+    },
+    "/callback-source": {
+      "post": {
+        "operationId": "callbackSource",
+        "security": [],
+        "callbacks": {
+          "status": {
+            "{$request.body#/callbackURL}": {
+              "post": {
+                "operationId": "statusCallback",
+                "security": [],
+                "parameters": [
+                  {
+                    "name": "Origin",
+                    "in": "header",
+                    "required": true,
+                    "schema": { "type": "string" }
+                  },
+                  {
+                    "name": "Sec-Fetch-Site",
+                    "in": "header",
+                    "schema": { "type": "string" }
+                  }
+                ],
+                "responses": { "204": { "description": "Accepted" } }
+              }
+            }
+          }
+        },
+        "responses": { "202": { "description": "Accepted" } }
+      }
+    }
+  },
+  "webhooks": {
+    "delivery": {
+      "post": {
+        "operationId": "deliveryWebhook",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Sec-Fetch-Site",
+            "in": "header",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "204": { "description": "Accepted" } }
+      }
+    }
+  },
+  "components": {
+    "links": {
+      "LiteralOrigin": {
+        "operationId": "linkTarget",
+        "parameters": { "Origin": "https://linked.example.test" }
+      }
+    },
+    "securitySchemes": {
+      "OriginKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Origin"
+      }
+    }
+  }
+}
