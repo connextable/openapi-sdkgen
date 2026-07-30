@@ -1,20 +1,29 @@
 # CLI reference
 
-## Command
+## Discover commands
+
+```sh
+openapi-sdkgen --help
+openapi-sdkgen generate --help
+openapi-sdkgen --version
+```
+
+Root help lists the available commands. Generate help groups required, common,
+input, remote-reference, and schema-extension options. Its target and add-on
+availability comes from the running binary, so it stays accurate as built-in
+targets are added.
+
+## Generate command
 
 ```text
-openapi-sdkgen generate --input <path|file-url|http-url|-> --target typescript --output <directory>
-  [--input-base <document>]
-  [--http-header-env <Header-Name=ENV_VAR> ...]
-  [--tls-client-cert <path> --tls-client-key <path>]
-  [--tls-ca-file <path>]
-  [--with <addon> ...]
-  [--allow-remote-ref <https-origin> ...]
-  [--ref-lock <path>]
-  [--update-ref-lock]
-  [--offline]
-  [--schema-extension <manifest> ...]
+openapi-sdkgen generate \
+  --input <path|file-url|http-url|-> \
+  --target <target> \
+  --output <directory>
 ```
+
+Use `openapi-sdkgen generate --help` for the complete option list and this page
+for detailed behavior and security constraints.
 
 ## Private HTTP(S) inputs
 

@@ -11,7 +11,21 @@ if [[ ! -f "$package_dir/package.json" || ! -f "$package_dir/bin/openapi-sdkgen.
   exit 2
 fi
 
-node "$package_dir/bin/openapi-sdkgen.js" --help
+package_version="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version)' "$package_dir/package.json")"
+check_cli() {
+  local expected_version="$1"
+  shift
+  "$@" --help
+  "$@" generate --help
+  local actual_version
+  actual_version="$("$@" --version)"
+  if [[ "$actual_version" != "openapi-sdkgen $expected_version" ]]; then
+    echo "openapi-sdkgen version mismatch: $actual_version" >&2
+    exit 1
+  fi
+}
+
+check_cli "$package_version" node "$package_dir/bin/openapi-sdkgen.js"
 test_dir="${NPM_TEST_DIR:-$ROOT/.tmp/npm-package-install}"
 rm -rf "$test_dir"
 mkdir -p "$test_dir"
@@ -47,5 +61,5 @@ for required_file in "${required_files[@]}"; do
 done
 install_dir="$test_dir/install"
 npm install --ignore-scripts --no-audit --no-fund --offline --prefix "$install_dir" "$tarball"
-"$install_dir/node_modules/.bin/openapi-sdkgen" --help
+check_cli "$package_version" "$install_dir/node_modules/.bin/openapi-sdkgen"
 echo "ok npm package check"

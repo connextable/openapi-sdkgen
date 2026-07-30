@@ -1,20 +1,29 @@
 # CLI 레퍼런스
 
-## Command
+## 명령 찾기
+
+```sh
+openapi-sdkgen --help
+openapi-sdkgen generate --help
+openapi-sdkgen --version
+```
+
+루트 help는 사용할 수 있는 명령을 보여줍니다. Generate help는 필수 option,
+일반 생성 option, 입력, remote reference, schema extension을 구분해 보여줍니다.
+target과 add-on 목록은 실행 중인 binary의 registry에서 가져오므로 built-in target이
+추가되어도 현재 binary와 일치합니다.
+
+## Generate 명령
 
 ```text
-openapi-sdkgen generate --input <path|file-url|http-url|-> --target typescript --output <directory>
-  [--input-base <document>]
-  [--http-header-env <Header-Name=ENV_VAR> ...]
-  [--tls-client-cert <path> --tls-client-key <path>]
-  [--tls-ca-file <path>]
-  [--with <addon> ...]
-  [--allow-remote-ref <https-origin> ...]
-  [--ref-lock <path>]
-  [--update-ref-lock]
-  [--offline]
-  [--schema-extension <manifest> ...]
+openapi-sdkgen generate \
+  --input <path|file-url|http-url|-> \
+  --target <target> \
+  --output <directory>
 ```
+
+전체 option 목록은 `openapi-sdkgen generate --help`에서 확인하고, 각 option의
+상세 동작과 보안 제약은 이 페이지를 참고하세요.
 
 ## 비공개 HTTP(S) 입력
 
