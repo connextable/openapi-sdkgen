@@ -103,16 +103,90 @@ jobs:
   publish-homebrew:
     name: Publish Homebrew formula
     needs: validate-release
+    runs-on: macos-latest
     concurrency:
       group: connextable-homebrew-tap
       cancel-in-progress: false
-    uses: connextable/homebrew-tap/.github/workflows/publish-formula.yml@main
-    with:
-      formula: openapi-sdkgen
-      ref: ${{ needs.validate-release.outputs.commit }}
-      version: ${{ needs.validate-release.outputs.tag }}
-    secrets:
-      deploy_key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+    permissions:
+      contents: read
+    steps:
+      - name: Validate Homebrew credential
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::HOMEBREW_TAP_DEPLOY_KEY is required."
+            exit 1
+          fi
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: connextable/homebrew-tap
+          ref: main
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+          fetch-depth: 0
+      - name: Prepare tap branch
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git switch --force-create main origin/main
+      - name: Resolve source inputs
+        id: source
+        run: bash tap/.github/workflows/scripts/resolve-source-inputs.sh
+        env:
+          INPUT_REPOSITORY: ${{ github.repository }}
+          INPUT_REF: ${{ needs.validate-release.outputs.commit }}
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ steps.source.outputs.repository }}
+          ref: ${{ steps.source.outputs.ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Generate formula
+        id: formula
+        uses: ./tap/actions/publish/formula
+        with:
+          tap-path: tap
+          source-path: source
+          formula: openapi-sdkgen
+          repository: ${{ steps.source.outputs.repository }}
+          ref: ${{ steps.source.outputs.ref }}
+          version: ${{ needs.validate-release.outputs.tag }}
+      - name: Validate formula
+        env:
+          FORMULA: openapi-sdkgen
+        run: |
+          set -euo pipefail
+          validation_root="$(mktemp -d)"
+          validation_tap="$validation_root/homebrew-validation"
+          cp -R tap "$validation_tap"
+          rm -rf "$validation_tap/.git"
+          git init --initial-branch=main "$validation_tap"
+          git -C "$validation_tap" config user.name "github-actions[bot]"
+          git -C "$validation_tap" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$validation_tap" add -A
+          git -C "$validation_tap" commit -m "test: validate $FORMULA" >/dev/null
+          brew tap connextable/validation "$validation_tap"
+          qualified_formula="connextable/validation/$FORMULA"
+          brew audit --strict --formula "$qualified_formula"
+          HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source "$qualified_formula"
+          brew test "$qualified_formula"
+      - name: Commit formula
+        id: commit-formula
+        working-directory: tap
+        run: bash .github/workflows/scripts/commit-formula.sh
+        env:
+          FORMULA_PATH: ${{ steps.formula.outputs.formula-path }}
+          FORMULA: openapi-sdkgen
+          VERSION: ${{ steps.formula.outputs.version }}
+      - name: Push formula
+        if: steps.commit-formula.outputs.changed == 'true'
+        working-directory: tap
+        run: bash .github/workflows/scripts/push-formula.sh
+        env:
+          TAP_BRANCH: main
 
   publish-github-release:
     name: Publish GitHub Release
