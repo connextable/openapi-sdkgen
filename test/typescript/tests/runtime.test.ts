@@ -239,6 +239,156 @@ describe("generated runtime", () => {
     expect(seen[1]?.get("if-match")).toBe("typed-version");
   });
 
+  it("rejects Fetch-managed headers from typed and raw caller inputs before transport", async () => {
+    let calls = 0;
+    const fetch = async (): Promise<Response> => {
+      calls++;
+      return new Response(null, { status: 204 });
+    };
+    const managed = operation({
+      path: "/managed",
+      parameters: [
+        {
+          location: "header",
+          name: "Origin",
+          property: "Origin",
+          style: "simple",
+          explode: false,
+          required: true,
+          hostManaged: true,
+        },
+        {
+          location: "header",
+          name: "Sec-Fetch-Site",
+          property: "Sec-Fetch-Site",
+          style: "simple",
+          explode: false,
+          hostManaged: true,
+        },
+      ],
+    });
+    const request = createRequest({ baseURL: "https://api.example.test", fetch });
+
+    for (const headerParams of [
+      { Origin: "https://caller.example" },
+      { "Sec-Fetch-Site": "same-origin" },
+    ]) {
+      await request(managed, { headerParams }).then(
+        () => {
+          throw new Error("typed host-managed header was accepted");
+        },
+        (error: unknown) => {
+          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
+        },
+      );
+    }
+    for (const rawRequest of [
+      () =>
+        createRequest({
+          baseURL: "https://api.example.test",
+          fetch,
+          headers: { Origin: "https://caller.example" },
+        })(operation({ path: "/raw-client" })),
+      () =>
+        request(operation({ path: "/raw-request" }), undefined, {
+          headers: { "Proxy-Authorization": "secret" },
+        }),
+    ]) {
+      await rawRequest().then(
+        () => {
+          throw new Error("raw host-managed header was accepted");
+        },
+        (error: unknown) => {
+          expect(String((error as { cause?: unknown }).cause)).toContain("host-managed by Fetch");
+        },
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("allows safe method overrides and blocks Fetch-forbidden method values", async () => {
+    const seen: Headers[] = [];
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        seen.push(new Headers(init?.headers));
+        return new Response(null, { status: 204 });
+      },
+    });
+    const override = operation({
+      path: "/override",
+      parameters: [
+        {
+          location: "header",
+          name: "X-HTTP-Method-Override",
+          property: "method",
+          style: "simple",
+          explode: false,
+          forbiddenMethodValue: true,
+        },
+      ],
+    });
+
+    await request(override, { headerParams: { method: "PATCH" } });
+    expect(seen[0]?.get("x-http-method-override")).toBe("PATCH");
+    await request(override, { headerParams: { method: `"PATCH, TRACE"` } });
+    expect(seen[1]?.get("x-http-method-override")).toBe(`"PATCH, TRACE"`);
+    await request(override, { headerParams: { method: "PATCH, TRACE" } }).then(
+      () => {
+        throw new Error("forbidden method override was accepted");
+      },
+      (error: unknown) => {
+        expect(String((error as { cause?: unknown }).cause)).toContain("X-HTTP-Method-Override");
+        expect(String((error as { cause?: unknown }).cause)).not.toContain("PATCH");
+        expect(String((error as { cause?: unknown }).cause)).not.toContain("TRACE");
+      },
+    );
+    await request(operation({ path: "/raw-override" }), undefined, {
+      headers: { "X-Method-Override": "connect" },
+    }).then(
+      () => {
+        throw new Error("raw forbidden method override was accepted");
+      },
+      (error: unknown) => {
+        expect(String((error as { cause?: unknown }).cause)).toContain("x-method-override");
+      },
+    );
+    expect(seen).toHaveLength(2);
+  });
+
+  it("lets a trusted custom transport inject a host-managed header after encoding", async () => {
+    const dispatched: Headers[] = [];
+    const request = createRequest({
+      baseURL: "https://api.example.test",
+      transport: {
+        fetch: async (_input, init) => {
+          const headers = new Headers(init?.headers);
+          expect(headers.has("Origin")).toBe(false);
+          headers.set("Origin", "https://transport.example");
+          dispatched.push(headers);
+          return new Response(null, { status: 204 });
+        },
+      },
+    });
+    await request(
+      operation({
+        path: "/managed",
+        parameters: [
+          {
+            location: "header",
+            name: "Origin",
+            property: "Origin",
+            style: "simple",
+            explode: false,
+            required: true,
+            hostManaged: true,
+          },
+        ],
+      }),
+    );
+    expect(dispatched[0]?.get("Origin")).toBe("https://transport.example");
+  });
+
   it("encodes form, multipart, text, and binary bodies", async () => {
     const requests: RequestInit[] = [];
     const request = createRequest({

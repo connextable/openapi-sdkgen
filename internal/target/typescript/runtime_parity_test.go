@@ -433,6 +433,87 @@ if (JSON.stringify(seen) !== JSON.stringify([["/source",null,null],["/target","i
 	}
 }
 
+func TestRuntimeEnforcesFetchManagedRequestHeaderPolicy(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.2.0",
+  "info": {"title": "Fetch managed headers", "version": "1"},
+  "paths": {
+    "/oauth": {
+      "post": {
+        "operationId": "oauth",
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object"}}}
+        },
+        "responses": {"204": {"description": "OK"}}
+      }
+    },
+    "/override": {
+      "post": {
+        "operationId": "override",
+        "parameters": [
+          {"name": "X-HTTP-Method-Override", "in": "header", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "OK"}}
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+let calls = 0;
+const dispatched = [];
+const fetch = async (_input, init) => {
+  calls++;
+  dispatched.push(new Headers(init.headers));
+  return new Response(null, { status: 204 });
+};
+const expectBlocked = async (pending, header, previousCalls) => {
+  try {
+    await pending;
+    throw new Error("blocked header was accepted: " + header);
+  } catch (error) {
+    if (!String(error.cause).includes(header)) throw error;
+    if (calls !== previousCalls) throw new Error("blocked header reached transport: " + header);
+  }
+};
+
+const api = createClient({ baseURL: "https://api.example.test", fetch });
+await expectBlocked(api.$operations.oauth({ body: {}, headerParams: { Origin: "https://caller.example" } }), "Origin", calls);
+await expectBlocked(createClient({ baseURL: "https://api.example.test", fetch, headers: { Origin: "https://caller.example" } }).$operations.oauth({ body: {} }), "origin", calls);
+await expectBlocked(api.$operations.oauth({ body: {} }, { headers: { "Sec-Fetch-Site": "same-origin" } }), "sec-fetch-site", calls);
+
+await api.$operations.override({ headerParams: { "X-HTTP-Method-Override": "PATCH" } });
+if (dispatched.at(-1)?.get("X-HTTP-Method-Override") !== "PATCH") throw new Error("safe method override was not dispatched");
+await expectBlocked(api.$operations.override({ headerParams: { "X-HTTP-Method-Override": "PATCH, TRACE" } }), "X-HTTP-Method-Override", calls);
+
+const transport = createClient({
+  baseURL: "https://api.example.test",
+  transport: {
+    fetch: async (_input, init) => {
+      const headers = new Headers(init.headers);
+      if (headers.has("Origin")) throw new Error("SDK synthesized Origin before the transport wrapper");
+      headers.set("Origin", "https://transport.example");
+      if (headers.get("Origin") !== "https://transport.example") throw new Error("transport did not inject Origin");
+      return new Response(null, { status: 204 });
+    },
+  },
+});
+await transport.$operations.oauth({ body: {} });
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute Fetch-managed request-header runtime test: %v\n%s", err, output)
+	}
+}
+
 func TestRuntimeEnvelopeProjectionKeepsCompleteRawBody(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.0","info":{"title":"Envelope runtime","version":"1"},
