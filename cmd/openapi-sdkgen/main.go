@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -20,6 +21,8 @@ import (
 var standardInput io.Reader = os.Stdin
 var standardOutput io.Writer = os.Stdout
 var standardError io.Writer = os.Stderr
+
+var version string
 
 var errReportedDiagnostics = errors.New("generation blocked by reported diagnostics")
 
@@ -95,6 +98,11 @@ func runWithRegistries(args []string, runtime generationRuntime, registries cliR
 		return writeRootHelp(registries)
 	}
 	switch args[0] {
+	case "--version":
+		if len(args) != 1 {
+			return rootUsageError("version does not accept additional arguments")
+		}
+		return writeVersion()
 	case "--help", "-h":
 		if len(args) != 1 {
 			return rootUsageError("help does not accept additional arguments")
@@ -289,6 +297,7 @@ func writeRootHelp(registries cliRegistries) error {
 				Title: "Options",
 				Options: []helpOption{
 					{Name: "help", Short: "h", Summary: "Show help"},
+					{Name: "version", Summary: "Show version"},
 				},
 			},
 		},
@@ -343,6 +352,41 @@ func rootUsageError(message string) error {
 
 func generateUsageError(message string) error {
 	return fmt.Errorf("%s\nTry \"openapi-sdkgen generate --help\" for usage", message)
+}
+
+func writeVersion() error {
+	if _, err := fmt.Fprintf(standardOutput, "openapi-sdkgen %s\n", resolvedVersion()); err != nil {
+		return fmt.Errorf("write version: %w", err)
+	}
+	return nil
+}
+
+func resolvedVersion() string {
+	if value := normalizeVersion(version); value != "" {
+		return value
+	}
+	if build, ok := debug.ReadBuildInfo(); ok {
+		if value := versionFromBuildInfo(build); value != "" {
+			return value
+		}
+	}
+	return "dev"
+}
+
+func versionFromBuildInfo(build *debug.BuildInfo) string {
+	for _, setting := range build.Settings {
+		if strings.HasPrefix(setting.Key, "vcs.") {
+			return ""
+		}
+	}
+	return normalizeVersion(build.Main.Version)
+}
+
+func normalizeVersion(value string) string {
+	if value == "" || value == "(devel)" {
+		return ""
+	}
+	return strings.TrimPrefix(value, "v")
 }
 
 func writeDiagnostics(values []diagnostic.Diagnostic, skipped []diagnostic.SkippedPhase) {

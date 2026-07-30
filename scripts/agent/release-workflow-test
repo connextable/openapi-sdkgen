@@ -7,6 +7,7 @@ goreleaser="$ROOT/.goreleaser.yaml"
 release_check="$ROOT/scripts/release/check.sh"
 npm_package="$ROOT/scripts/npm/package.sh"
 npm_check="$ROOT/scripts/npm/check.sh"
+homebrew_formula="$ROOT/.github/homebrew/formula.yml"
 
 require_pattern() {
   local pattern="$1"
@@ -61,6 +62,7 @@ require_pattern 'publish-formula\.yml@main'
 require_pattern 'Publish GitHub Release'
 require_pattern 'release-tools/\.goreleaser\.yaml'
 require_goreleaser_pattern 'replace_existing_artifacts: true'
+require_goreleaser_pattern 'main\.version=\{\{ \.Version \}\}'
 if grep -Eq 'target_commitish:' "$goreleaser"; then
   echo "GoReleaser must not override the target of an existing release tag" >&2
   exit 1
@@ -88,6 +90,14 @@ fi
 
 if ! grep -Eq 'NPM_PACKAGE_BUILD_JOBS' "$npm_package" || ! grep -Eq 'go build .*&$' "$npm_package" || ! grep -Eq 'wait "\$\{build_pids\[\$index\]\}"' "$npm_package"; then
   echo "npm package builds must use bounded parallel workers" >&2
+  exit 1
+fi
+if ! grep -Fq -- '-X main.version=$version' "$npm_package"; then
+  echo "npm package builds must inject the package version" >&2
+  exit 1
+fi
+if ! grep -Fq -- '-X main.version=#{version}' "$homebrew_formula"; then
+  echo "Homebrew builds must inject the formula version" >&2
   exit 1
 fi
 

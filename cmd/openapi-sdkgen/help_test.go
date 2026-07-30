@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -191,6 +192,7 @@ func TestRunUsageErrorsIncludeScopedHelpHints(t *testing.T) {
 	}{
 		{name: "unknown command", args: []string{"publish"}, hint: `Try "openapi-sdkgen --help" for usage`},
 		{name: "unknown help command", args: []string{"help", "publish"}, hint: `Try "openapi-sdkgen --help" for usage`},
+		{name: "version with arguments", args: []string{"--version", "extra"}, hint: `Try "openapi-sdkgen --help" for usage`},
 		{name: "unknown flag", args: []string{"generate", "--unknown"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
 		{name: "unexpected positional", args: []string{"generate", "extra"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
 		{name: "missing required", args: []string{"generate"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
@@ -208,6 +210,45 @@ func TestRunUsageErrorsIncludeScopedHelpHints(t *testing.T) {
 				t.Fatalf("usage error diagnostics = %q", diagnostics.String())
 			}
 		})
+	}
+}
+
+func TestRunReportsDevelopmentAndInjectedVersions(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		injected string
+		expected string
+	}{
+		{name: "development", expected: "openapi-sdkgen dev\n"},
+		{name: "injected", injected: "v1.2.3-rc.1", expected: "openapi-sdkgen 1.2.3-rc.1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previousVersion := version
+			version = test.injected
+			t.Cleanup(func() { version = previousVersion })
+			output, diagnostics := captureCLIOutput(t)
+			if err := run([]string{"--version"}); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != test.expected {
+				t.Fatalf("version output = %q", output.String())
+			}
+			if diagnostics.Len() != 0 {
+				t.Fatalf("version diagnostics = %q", diagnostics.String())
+			}
+		})
+	}
+}
+
+func TestVersionFromBuildInfoUsesModuleInstallsButNotCheckoutBuilds(t *testing.T) {
+	module := debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}
+	if got := versionFromBuildInfo(&module); got != "1.2.3" {
+		t.Fatalf("module version = %q", got)
+	}
+	checkout := module
+	checkout.Settings = []debug.BuildSetting{{Key: "vcs.revision", Value: "0123456789abcdef"}}
+	if got := versionFromBuildInfo(&checkout); got != "" {
+		t.Fatalf("checkout version = %q", got)
 	}
 }
 

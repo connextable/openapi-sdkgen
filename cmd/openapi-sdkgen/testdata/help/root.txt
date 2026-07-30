@@ -8,5 +8,6 @@ Commands:
 
 Options:
   -h, --help                      Show help
+  --version                       Show version
 
 Run "openapi-sdkgen <command> --help" for command details.

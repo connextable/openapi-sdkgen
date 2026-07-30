@@ -12,11 +12,12 @@ import (
 type config struct {
 	Version int `yaml:"version"`
 	Builds  []struct {
-		ID     string   `yaml:"id"`
-		Main   string   `yaml:"main"`
-		Binary string   `yaml:"binary"`
-		GOOS   []string `yaml:"goos"`
-		GOARCH []string `yaml:"goarch"`
+		ID      string   `yaml:"id"`
+		Main    string   `yaml:"main"`
+		Binary  string   `yaml:"binary"`
+		LDFlags []string `yaml:"ldflags"`
+		GOOS    []string `yaml:"goos"`
+		GOARCH  []string `yaml:"goarch"`
 	} `yaml:"builds"`
 	Archives []struct {
 		Formats   []string `yaml:"formats"`
@@ -46,6 +47,9 @@ func TestReleaseConfigurationMatchesSupportedBinaryContract(t *testing.T) {
 	build := value.Builds[0]
 	if build.ID != "openapi-sdkgen" || build.Main != "./cmd/openapi-sdkgen" || build.Binary != "openapi-sdkgen" {
 		t.Fatalf("build = %#v", build)
+	}
+	if !slices.Equal(build.LDFlags, []string{"-s -w -X main.version={{ .Version }}"}) {
+		t.Fatalf("build ldflags = %#v", build.LDFlags)
 	}
 	if !slices.Equal(build.GOOS, []string{"darwin", "linux", "windows"}) || !slices.Equal(build.GOARCH, []string{"amd64", "arm64"}) {
 		t.Fatalf("platforms = %#v", build)

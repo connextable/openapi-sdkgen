@@ -69,7 +69,7 @@ for target in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64 windows-amd64 wi
   output="$package_dir/bin/$target/$executable"
   mkdir -p "$(dirname "$output")"
   log_file="$build_log_root/$target.log"
-  env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags='-s -w' -o "$output" ./cmd/openapi-sdkgen >"$log_file" 2>&1 &
+  env CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=$version" -o "$output" ./cmd/openapi-sdkgen >"$log_file" 2>&1 &
   build_pids+=("$!")
   build_targets+=("$target")
   build_logs+=("$log_file")

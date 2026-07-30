@@ -5,6 +5,6 @@ dependencies:
   build:
     - go
 install: |
-  system "go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin/"openapi-sdkgen", "./cmd/openapi-sdkgen"
+  system "go", "build", "-trimpath", "-ldflags=-s -w -X main.version=#{version}", "-o", bin/"openapi-sdkgen", "./cmd/openapi-sdkgen"
 test: |
-  system "#{bin}/openapi-sdkgen", "--help"
+  assert_match "openapi-sdkgen #{version}", shell_output("#{bin}/openapi-sdkgen --version")

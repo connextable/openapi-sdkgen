@@ -4,6 +4,8 @@ builds:
   - id: openapi-sdkgen
     main: ./cmd/openapi-sdkgen
     binary: openapi-sdkgen
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
