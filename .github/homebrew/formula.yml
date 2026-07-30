@@ -7,4 +7,5 @@ dependencies:
 install: |
   system "go", "build", "-trimpath", "-ldflags=-s -w -X main.version=#{version}", "-o", bin/"openapi-sdkgen", "./cmd/openapi-sdkgen"
 test: |
-  assert_match "openapi-sdkgen #{version}", shell_output("#{bin}/openapi-sdkgen --version")
+  assert_equal "openapi-sdkgen #{version}\n", shell_output("#{bin}/openapi-sdkgen --version")
+  system bin/"openapi-sdkgen", "--help"

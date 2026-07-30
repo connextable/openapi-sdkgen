@@ -15,15 +15,17 @@ const (
 type helpDocument struct {
 	Description string
 	Usage       string
-	Commands    []helpCommand
+	Commands    []cliCommand
 	Groups      []helpOptionGroup
 	Examples    []string
 	Footer      string
 }
 
-type helpCommand struct {
+type cliCommand struct {
 	Name    string
 	Summary string
+	Run     func([]string) error
+	Help    func() error
 }
 
 type helpOptionGroup struct {
@@ -62,7 +64,13 @@ func (set *commandFlagSet) String(group int, option helpOption, defaultValue str
 
 func (set *commandFlagSet) Bool(group int, option helpOption, defaultValue bool) *bool {
 	set.addOption(group, option)
-	return set.Flags.Bool(option.Name, defaultValue, option.Summary)
+	value := new(bool)
+	*value = defaultValue
+	set.Flags.BoolVar(value, option.Name, defaultValue, option.Summary)
+	if option.Short != "" {
+		set.Flags.BoolVar(value, option.Short, defaultValue, option.Summary)
+	}
+	return value
 }
 
 func (set *commandFlagSet) Var(group int, option helpOption, value flag.Value) {
@@ -126,7 +134,7 @@ func writeHelpSection(output *strings.Builder, title string, lines []string) {
 	output.WriteByte('\n')
 }
 
-func writeCommandSection(output *strings.Builder, commands []helpCommand) {
+func writeCommandSection(output *strings.Builder, commands []cliCommand) {
 	width := 0
 	for _, command := range commands {
 		if len(command.Name) > width {

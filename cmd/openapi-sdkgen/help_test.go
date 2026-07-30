@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -89,7 +90,7 @@ func TestRenderHelpIncludesCommandsExamplesAndFooter(t *testing.T) {
 	document := helpDocument{
 		Description: "Generate application SDK source from OpenAPI documents.",
 		Usage:       "openapi-sdkgen <command> [options]",
-		Commands: []helpCommand{
+		Commands: []cliCommand{
 			{Name: "generate", Summary: "Generate SDK source"},
 		},
 		Groups: []helpOptionGroup{
@@ -141,6 +142,30 @@ func TestRenderHelpRejectsEmptyDynamicAvailability(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("partial help was written: %q", output.String())
+	}
+}
+
+func TestBoolMetadataDrivesParserAliasesAndHelp(t *testing.T) {
+	flags := newCommandFlagSet("inspect", "Options")
+	showDocs := flags.Bool(0, helpOption{
+		Name: "docs", Short: "d", Summary: "Show documentation",
+	}, false)
+	if err := flags.Flags.Parse([]string{"-d"}); err != nil {
+		t.Fatal(err)
+	}
+	if !*showDocs {
+		t.Fatal("short alias did not set the metadata-backed flag")
+	}
+
+	var output bytes.Buffer
+	if err := renderHelp(&output, helpDocument{
+		Usage:  "openapi-sdkgen inspect [options]",
+		Groups: flags.Groups,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "  -d, --docs") {
+		t.Fatalf("help did not render the parser metadata:\n%s", output.String())
 	}
 }
 
@@ -211,6 +236,121 @@ func TestRunUsageErrorsIncludeScopedHelpHints(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCommandMetadataDrivesDispatchAndRootHelp(t *testing.T) {
+	registries, err := newCLIRegistries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received []string
+	helpCalled := false
+	application := &cliApplication{
+		registries: registries,
+		commands: []cliCommand{
+			{
+				Name:    "inspect",
+				Summary: "Inspect an OpenAPI document",
+				Run: func(args []string) error {
+					received = append([]string(nil), args...)
+					return nil
+				},
+				Help: func() error {
+					helpCalled = true
+					return nil
+				},
+			},
+		},
+	}
+	application.options = newRootOptions(application)
+	application.options[0].Aliases = []string{"docs"}
+
+	if err := application.run([]string{"inspect", "document.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(received, " ") != "document.yaml" {
+		t.Fatalf("command arguments = %#v", received)
+	}
+	if err := application.run([]string{"docs", "inspect"}); err != nil {
+		t.Fatal(err)
+	}
+	if !helpCalled {
+		t.Fatal("command help handler was not called")
+	}
+	if err := application.run([]string{"help", "inspect"}); err == nil ||
+		!strings.Contains(err.Error(), `unknown command "help"`) {
+		t.Fatalf("stale help alias error = %v", err)
+	}
+
+	output, _ := captureCLIOutput(t)
+	if err := application.writeRootHelp(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "  inspect  Inspect an OpenAPI document\n") {
+		t.Fatalf("root help did not use command metadata:\n%s", output.String())
+	}
+}
+
+func TestCLIUsageErrorsExitWithScopedStderr(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{
+			name: "unknown command",
+			args: []string{"publish"},
+			stderr: "openapi-sdkgen: unknown command \"publish\"\n" +
+				"Try \"openapi-sdkgen --help\" for usage\n",
+		},
+		{
+			name: "unknown flag",
+			args: []string{"generate", "--unknown"},
+			stderr: "openapi-sdkgen: parse generate arguments: flag provided but not defined: -unknown\n" +
+				"Try \"openapi-sdkgen generate --help\" for usage\n",
+		},
+		{
+			name: "missing required",
+			args: []string{"generate"},
+			stderr: "openapi-sdkgen: --input, --target, and --output are required\n" +
+				"Try \"openapi-sdkgen generate --help\" for usage\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commandArgs := append([]string{"-test.run=^TestCLIHelperProcess$", "--"}, test.args...)
+			command := exec.Command(os.Args[0], commandArgs...)
+			command.Env = append(os.Environ(), "OPENAPI_SDKGEN_TEST_HELPER=1")
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			err := command.Run()
+			exitError, ok := err.(*exec.ExitError)
+			if !ok || exitError.ExitCode() != 1 {
+				t.Fatalf("exit error = %v", err)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q", stdout.String())
+			}
+			if stderr.String() != test.stderr {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestCLIHelperProcess(t *testing.T) {
+	if os.Getenv("OPENAPI_SDKGEN_TEST_HELPER") != "1" {
+		return
+	}
+	for index, argument := range os.Args {
+		if argument == "--" {
+			os.Args = append([]string{"openapi-sdkgen"}, os.Args[index+1:]...)
+			main()
+			return
+		}
+	}
+	t.Fatal("missing helper-process argument separator")
 }
 
 func TestRunReportsDevelopmentAndInjectedVersions(t *testing.T) {

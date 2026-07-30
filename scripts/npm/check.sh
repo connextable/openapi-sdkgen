@@ -15,14 +15,41 @@ package_version="$(node -e 'const fs = require("node:fs"); process.stdout.write(
 check_cli() {
   local expected_version="$1"
   shift
-  "$@" --help
-  "$@" generate --help
+  local capture_dir
+  capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/openapi-sdkgen-cli-check.XXXXXX")"
+  local root_help
+  local generate_help
   local actual_version
-  actual_version="$("$@" --version)"
-  if [[ "$actual_version" != "openapi-sdkgen $expected_version" ]]; then
-    echo "openapi-sdkgen version mismatch: $actual_version" >&2
+  "$@" --help >"$capture_dir/stdout" 2>"$capture_dir/stderr"
+  root_help="$(<"$capture_dir/stdout")"
+  if [[ -s "$capture_dir/stderr" ||
+    "$root_help" != *$'Usage:\n  openapi-sdkgen <command> [options]'* ||
+    "$root_help" != *$'Commands:\n  generate  Generate SDK source'* ]]; then
+    echo "openapi-sdkgen root help mismatch" >&2
+    rm -rf "$capture_dir"
     exit 1
   fi
+  "$@" generate --help >"$capture_dir/stdout" 2>"$capture_dir/stderr"
+  generate_help="$(<"$capture_dir/stdout")"
+  if [[ -s "$capture_dir/stderr" ||
+    "$generate_help" != *$'Usage:\n  openapi-sdkgen generate [options]'* ||
+    "$generate_help" != *$'Required:\n  --input <source>'* ]]; then
+    echo "openapi-sdkgen generate help mismatch" >&2
+    rm -rf "$capture_dir"
+    exit 1
+  fi
+  actual_version="$("$@" --version 2>"$capture_dir/stderr")"
+  if [[ "$actual_version" != "openapi-sdkgen $expected_version" ]]; then
+    echo "openapi-sdkgen version mismatch: $actual_version" >&2
+    rm -rf "$capture_dir"
+    exit 1
+  fi
+  if [[ -s "$capture_dir/stderr" ]]; then
+    echo "openapi-sdkgen wrote unexpected stderr" >&2
+    rm -rf "$capture_dir"
+    exit 1
+  fi
+  rm -rf "$capture_dir"
 }
 
 check_cli "$package_version" node "$package_dir/bin/openapi-sdkgen.js"

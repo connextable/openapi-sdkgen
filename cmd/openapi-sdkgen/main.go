@@ -3,7 +3,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -50,6 +49,18 @@ type cliRegistries struct {
 	addons  *generator.AddonRegistry
 }
 
+type cliRootOption struct {
+	Metadata helpOption
+	Aliases  []string
+	Run      func(string, []string) error
+}
+
+type cliApplication struct {
+	registries cliRegistries
+	commands   []cliCommand
+	options    []cliRootOption
+}
+
 type generateFlagValues struct {
 	input            *string
 	inputBase        *string
@@ -62,6 +73,7 @@ type generateFlagValues struct {
 	refLock          *string
 	updateRefLock    *bool
 	offline          *bool
+	help             *bool
 	tlsClientCert    *string
 	tlsClientKey     *string
 	tlsCAFile        *string
@@ -94,36 +106,100 @@ func run(args []string) error {
 }
 
 func runWithRegistries(args []string, runtime generationRuntime, registries cliRegistries) error {
+	application := newCLIApplication(runtime, registries)
+	return application.run(args)
+}
+
+func newCLIApplication(runtime generationRuntime, registries cliRegistries) *cliApplication {
+	application := &cliApplication{registries: registries}
+	application.commands = []cliCommand{
+		{
+			Name:    "generate",
+			Summary: "Generate SDK source",
+			Run: func(args []string) error {
+				return generateWithRegistries(args, runtime, registries)
+			},
+			Help: func() error {
+				return writeGenerateHelp(registries)
+			},
+		},
+	}
+	application.options = newRootOptions(application)
+	return application
+}
+
+func newRootOptions(application *cliApplication) []cliRootOption {
+	return []cliRootOption{
+		{
+			Metadata: helpOption{Name: "help", Short: "h", Summary: "Show help"},
+			Aliases:  []string{"help"},
+			Run: func(invoked string, args []string) error {
+				if strings.HasPrefix(invoked, "-") {
+					if len(args) != 0 {
+						return rootUsageError("help does not accept additional arguments")
+					}
+					return application.writeRootHelp()
+				}
+				switch len(args) {
+				case 0:
+					return application.writeRootHelp()
+				case 1:
+					if command, ok := lookupCommand(application.commands, args[0]); ok {
+						return command.Help()
+					}
+					return rootUsageError(fmt.Sprintf("unknown command %q", args[0]))
+				default:
+					return rootUsageError("help accepts at most one command")
+				}
+			},
+		},
+		{
+			Metadata: helpOption{Name: "version", Summary: "Show version"},
+			Run: func(_ string, args []string) error {
+				if len(args) != 0 {
+					return rootUsageError("version does not accept additional arguments")
+				}
+				return writeVersion()
+			},
+		},
+	}
+}
+
+func (application *cliApplication) run(args []string) error {
 	if len(args) == 0 {
-		return writeRootHelp(registries)
+		return application.writeRootHelp()
 	}
-	switch args[0] {
-	case "--version":
-		if len(args) != 1 {
-			return rootUsageError("version does not accept additional arguments")
-		}
-		return writeVersion()
-	case "--help", "-h":
-		if len(args) != 1 {
-			return rootUsageError("help does not accept additional arguments")
-		}
-		return writeRootHelp(registries)
-	case "help":
-		switch {
-		case len(args) == 1:
-			return writeRootHelp(registries)
-		case len(args) == 2 && args[1] == "generate":
-			return writeGenerateHelp(registries)
-		case len(args) == 2:
-			return rootUsageError(fmt.Sprintf("unknown command %q", args[1]))
-		default:
-			return rootUsageError("help accepts at most one command")
-		}
-	case "generate":
-		return generateWithRegistries(args[1:], runtime, registries)
-	default:
-		return rootUsageError(fmt.Sprintf("unknown command %q", args[0]))
+	if option, ok := lookupRootOption(application.options, args[0]); ok {
+		return option.Run(args[0], args[1:])
 	}
+	if command, ok := lookupCommand(application.commands, args[0]); ok {
+		return command.Run(args[1:])
+	}
+	return rootUsageError(fmt.Sprintf("unknown command %q", args[0]))
+}
+
+func lookupCommand(commands []cliCommand, name string) (cliCommand, bool) {
+	for _, command := range commands {
+		if command.Name == name {
+			return command, true
+		}
+	}
+	return cliCommand{}, false
+}
+
+func lookupRootOption(options []cliRootOption, name string) (cliRootOption, bool) {
+	for _, option := range options {
+		if name == "--"+option.Metadata.Name ||
+			option.Metadata.Short != "" && name == "-"+option.Metadata.Short {
+			return option, true
+		}
+		for _, alias := range option.Aliases {
+			if name == alias {
+				return option, true
+			}
+		}
+	}
+	return cliRootOption{}, false
 }
 
 func generate(args []string) error {
@@ -141,10 +217,10 @@ func generateWithRuntime(args []string, runtime generationRuntime) error {
 func generateWithRegistries(args []string, runtime generationRuntime, registries cliRegistries) error {
 	flags, values := newGenerateFlagSet(registries)
 	if err := flags.Flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return writeGenerateHelpWithFlags(registries, flags)
-		}
 		return generateUsageError(fmt.Sprintf("parse generate arguments: %v", err))
+	}
+	if *values.help {
+		return writeGenerateHelpWithFlags(registries, flags)
 	}
 	if flags.Flags.NArg() != 0 {
 		return generateUsageError(fmt.Sprintf("unexpected arguments: %s", strings.Join(flags.Flags.Args(), " ")))
@@ -218,6 +294,7 @@ func newGenerateFlagSet(registries cliRegistries) (*commandFlagSet, *generateFla
 		inputGroup
 		remoteReferenceGroup
 		schemaExtensionGroup
+		optionsGroup
 	)
 	flags := newCommandFlagSet(
 		"generate",
@@ -226,6 +303,7 @@ func newGenerateFlagSet(registries cliRegistries) (*commandFlagSet, *generateFla
 		"Input",
 		"Remote references",
 		"Schema extensions",
+		"Options",
 	)
 	values := &generateFlagValues{}
 	values.input = flags.String(requiredGroup, helpOption{
@@ -282,28 +360,30 @@ func newGenerateFlagSet(registries cliRegistries) (*commandFlagSet, *generateFla
 		Name: "schema-extension", Metavariable: "manifest",
 		Summary: "Register a trusted schema-extension manifest", Repeatable: true,
 	}, &values.schemaExtensions)
+	values.help = flags.Bool(optionsGroup, helpOption{
+		Name: "help", Short: "h", Summary: "Show help",
+	}, false)
 	return flags, values
 }
 
-func writeRootHelp(registries cliRegistries) error {
+func (application *cliApplication) writeRootHelp() error {
+	options := make([]helpOption, 0, len(application.options))
+	for _, option := range application.options {
+		options = append(options, option.Metadata)
+	}
 	document := helpDocument{
 		Description: "openapi-sdkgen generates application SDK source from OpenAPI documents.",
 		Usage:       "openapi-sdkgen <command> [options]",
-		Commands: []helpCommand{
-			{Name: "generate", Summary: "Generate SDK source"},
-		},
+		Commands:    application.commands,
 		Groups: []helpOptionGroup{
 			{
-				Title: "Options",
-				Options: []helpOption{
-					{Name: "help", Short: "h", Summary: "Show help"},
-					{Name: "version", Summary: "Show version"},
-				},
+				Title:   "Options",
+				Options: options,
 			},
 		},
 		Footer: `Run "openapi-sdkgen <command> --help" for command details.`,
 	}
-	if registries.targets == nil || registries.addons == nil {
+	if application.registries.targets == nil || application.registries.addons == nil {
 		return errors.New("CLI registries are not configured")
 	}
 	if err := renderHelp(standardOutput, document); err != nil {
@@ -324,17 +404,10 @@ func writeGenerateHelpWithFlags(registries cliRegistries, flags *commandFlagSet)
 	if registries.targets == nil || registries.addons == nil {
 		return errors.New("CLI registries are not configured")
 	}
-	groups := append([]helpOptionGroup(nil), flags.Groups...)
-	groups = append(groups, helpOptionGroup{
-		Title: "Options",
-		Options: []helpOption{
-			{Name: "help", Short: "h", Summary: "Show help"},
-		},
-	})
 	document := helpDocument{
 		Description: "Generate application SDK source from an OpenAPI document.",
 		Usage:       "openapi-sdkgen generate [options]",
-		Groups:      groups,
+		Groups:      flags.Groups,
 		Examples: []string{`openapi-sdkgen generate \
   --input ./openapi.yaml \
   --target typescript \
