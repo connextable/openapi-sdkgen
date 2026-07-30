@@ -399,18 +399,16 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 			if err != nil {
 				return err
 			}
-			optional := ""
+			required, err := aggregateInputRequired(document, operation, field)
+			if err != nil {
+				return err
+			}
+			optional := "?"
 			valueType := inputType
-			if field == "Body" {
-				body, _ := operation.Raw["requestBody"].(map[string]any)
-				resolvedBody, err := resolveComponentObject(document, body, "requestBodies")
-				if err != nil {
-					return err
-				}
-				if !boolValue(resolvedBody, "required") {
-					optional = "?"
-					valueType += " | undefined"
-				}
+			if required {
+				optional = ""
+			} else {
+				valueType += " | undefined"
 			}
 			fmt.Fprintf(output, "  /** Generated %s input. See %s. */\n", strings.ToLower(field), jsDocTypeReference(inputType))
 			fmt.Fprintf(output, "  readonly %s%s: %s\n", property, optional, valueType)
@@ -450,8 +448,12 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 	if len(item.InputTypes) > 0 {
 		inputType = operationName + "Input"
 	}
+	inputRequired, err := operationInputRequired(document, operation, item.InputTypes, false)
+	if err != nil {
+		return err
+	}
 	emitOperationJSDoc(output, "", item)
-	if err := emitOperationCallInterface(output, document, operation, operationName+"Call", inputType, operationName+"Output", operationName+"RawResponse"); err != nil {
+	if err := emitOperationCallInterface(output, document, operation, operationName+"Call", inputType, inputType != "never" && !inputRequired, operationName+"Output", operationName+"RawResponse"); err != nil {
 		return err
 	}
 	if len(item.PathParameterOrder) > 0 {
@@ -460,14 +462,18 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 		if len(item.InputTypes) <= 1 {
 			resourceInput = "never"
 		}
-		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", resourceInput, operationName+"Output", operationName+"RawResponse"); err != nil {
+		resourceInputRequired, err := operationInputRequired(document, operation, item.InputTypes, true)
+		if err != nil {
+			return err
+		}
+		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", resourceInput, resourceInput != "never" && !resourceInputRequired, operationName+"Output", operationName+"RawResponse"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType, outputType, rawType string) error {
+func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, outputType, rawType string) error {
 	operationName := operationTypeName(operationRouteKey(operation))
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
@@ -482,17 +488,17 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 	if len(mediaTypes) > 1 {
 		for _, mediaType := range mediaTypes {
 			optionsType := "Omit<" + operationName + "Options, \"accept\"> & { readonly accept: " + quoteTS(mediaType) + " }"
-			emitCallSignature(output, inputType, optionsType, mediaOutputs[mediaType], false)
-			emitRawCallSignature(output, inputType, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
+			emitCallSignature(output, inputType, inputOptional, optionsType, mediaOutputs[mediaType], false)
+			emitRawCallSignature(output, inputType, inputOptional, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
 		}
 	}
-	emitCallSignature(output, inputType, operationName+"Options", outputType, true)
-	emitRawCallSignature(output, inputType, operationName+"Options", rawType, true)
+	emitCallSignature(output, inputType, inputOptional, operationName+"Options", outputType, true)
+	emitRawCallSignature(output, inputType, inputOptional, operationName+"Options", rawType, true)
 	output.WriteString("}\n\n")
 	return nil
 }
 
-func emitRawCallSignature(output *bytes.Buffer, inputType, optionsType, resultType string, optionsOptional bool) {
+func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional bool, optionsType, resultType string, optionsOptional bool) {
 	optional := ""
 	if optionsOptional {
 		optional = "?"
@@ -510,10 +516,16 @@ func emitRawCallSignature(output *bytes.Buffer, inputType, optionsType, resultTy
 		fmt.Fprintf(output, "  raw(options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
 		return
 	}
-	fmt.Fprintf(output, "  raw(input: %s, options%s: %s): Promise<%s>\n", inputType, optional, optionsType, resultType)
+	inputMarker := ""
+	if inputOptional && optionsOptional {
+		inputMarker = "?"
+	} else if inputOptional {
+		inputType += " | undefined"
+	}
+	fmt.Fprintf(output, "  raw(input%s: %s, options%s: %s): Promise<%s>\n", inputMarker, inputType, optional, optionsType, resultType)
 }
 
-func emitCallSignature(output *bytes.Buffer, inputType, optionsType, resultType string, optionsOptional bool) {
+func emitCallSignature(output *bytes.Buffer, inputType string, inputOptional bool, optionsType, resultType string, optionsOptional bool) {
 	optional := ""
 	if optionsOptional {
 		optional = "?"
@@ -531,7 +543,13 @@ func emitCallSignature(output *bytes.Buffer, inputType, optionsType, resultType 
 		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
 		return
 	}
-	fmt.Fprintf(output, "  (input: %s, options%s: %s): Promise<%s>\n", inputType, optional, optionsType, resultType)
+	inputMarker := ""
+	if inputOptional && optionsOptional {
+		inputMarker = "?"
+	} else if inputOptional {
+		inputType += " | undefined"
+	}
+	fmt.Fprintf(output, "  (input%s: %s, options%s: %s): Promise<%s>\n", inputMarker, inputType, optional, optionsType, resultType)
 }
 
 func aggregateInputProperty(field string) (string, error) {
@@ -543,6 +561,47 @@ func aggregateInputProperty(field string) (string, error) {
 	default:
 		return naming.Property(field)
 	}
+}
+
+func aggregateInputRequired(document *ir.Document, operation ir.Operation, field string) (bool, error) {
+	if field == "Body" {
+		body, _ := operation.Raw["requestBody"].(map[string]any)
+		resolvedBody, err := resolveComponentObject(document, body, "requestBodies")
+		if err != nil {
+			return false, err
+		}
+		return boolValue(resolvedBody, "required"), nil
+	}
+	location := strings.ToLower(field)
+	parameters, err := clientParametersIn(document, operation, location)
+	if err != nil {
+		return false, err
+	}
+	for _, parameter := range parameters {
+		if clientParameterRequired(parameter) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func operationInputRequired(document *ir.Document, operation ir.Operation, inputTypes []string, omitPath bool) (bool, error) {
+	operationName := operationTypeName(operationRouteKey(operation))
+	for _, inputType := range inputTypes {
+		field := strings.TrimPrefix(inputType, operationName)
+		field = strings.TrimSuffix(field, "Input")
+		if omitPath && field == "Path" {
+			continue
+		}
+		required, err := aggregateInputRequired(document, operation, field)
+		if err != nil {
+			return false, err
+		}
+		if required {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir.Operation, typeName, location string) error {

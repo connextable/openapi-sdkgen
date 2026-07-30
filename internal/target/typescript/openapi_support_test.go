@@ -93,6 +93,16 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
         "responses": {"204": {"description": "OK"}}
       }
     },
+    "/managed-only": {
+      "get": {
+        "operationId": "managedOnly",
+        "parameters": [
+          {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}},
+          {"name": "Sec-Fetch-Site", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "OK"}}
+      }
+    },
     "/override": {
       "post": {
         "operationId": "override",
@@ -143,6 +153,22 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 			} {
 				if !strings.Contains(client, expected) {
 					t.Fatalf("client missing %q:\n%s", expected, client)
+				}
+			}
+			managedOnlyName := operationTypeName(operationRouteKey(findOperation(document, "managedOnly")))
+			oauthName := operationTypeName(operationRouteKey(findOperation(document, "oauth")))
+			overrideName := operationTypeName(operationRouteKey(findOperation(document, "override")))
+			for _, expected := range []string{
+				`readonly headerParams?: ` + managedOnlyName + `HeaderInput | undefined`,
+				`(input?: ` + managedOnlyName + `Input, options?: ` + managedOnlyName + `Options)`,
+				`raw(input?: ` + managedOnlyName + `Input, options?: ` + managedOnlyName + `Options)`,
+				`readonly headerParams?: ` + oauthName + `HeaderInput | undefined`,
+				`readonly body: ` + oauthName + `BodyInput`,
+				`(input: ` + oauthName + `Input, options?: ` + oauthName + `Options)`,
+				`readonly headerParams: ` + overrideName + `HeaderInput`,
+			} {
+				if !strings.Contains(client, expected) {
+					t.Fatalf("client missing optional input contract %q:\n%s", expected, client)
 				}
 			}
 			if metadata := string(artifactByPath(t, artifacts, "metadata.ts")); !strings.Contains(metadata, `"Origin"`) {
