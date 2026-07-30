@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -39,6 +40,43 @@ type helpOption struct {
 	Available    func() []string
 }
 
+type commandFlagSet struct {
+	Flags  *flag.FlagSet
+	Groups []helpOptionGroup
+}
+
+func newCommandFlagSet(name string, groupTitles ...string) *commandFlagSet {
+	groups := make([]helpOptionGroup, len(groupTitles))
+	for index, title := range groupTitles {
+		groups[index].Title = title
+	}
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	return &commandFlagSet{Flags: flags, Groups: groups}
+}
+
+func (set *commandFlagSet) String(group int, option helpOption, defaultValue string) *string {
+	set.addOption(group, option)
+	return set.Flags.String(option.Name, defaultValue, option.Summary)
+}
+
+func (set *commandFlagSet) Bool(group int, option helpOption, defaultValue bool) *bool {
+	set.addOption(group, option)
+	return set.Flags.Bool(option.Name, defaultValue, option.Summary)
+}
+
+func (set *commandFlagSet) Var(group int, option helpOption, value flag.Value) {
+	set.addOption(group, option)
+	set.Flags.Var(value, option.Name, option.Summary)
+}
+
+func (set *commandFlagSet) addOption(group int, option helpOption) {
+	if group < 0 || group >= len(set.Groups) {
+		panic(fmt.Sprintf("help option --%s has invalid group %d", option.Name, group))
+	}
+	set.Groups[group].Options = append(set.Groups[group].Options, option)
+}
+
 func renderHelp(output io.Writer, document helpDocument) error {
 	var rendered strings.Builder
 	writeHelpParagraph(&rendered, document.Description)
@@ -59,7 +97,8 @@ func renderHelp(output io.Writer, document helpDocument) error {
 		writeHelpSection(&rendered, "Examples", lines)
 	}
 	writeHelpParagraph(&rendered, document.Footer)
-	_, err := io.WriteString(output, rendered.String())
+	value := strings.TrimRight(rendered.String(), "\n") + "\n"
+	_, err := io.WriteString(output, value)
 	return err
 }
 

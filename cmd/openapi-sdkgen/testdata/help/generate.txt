@@ -1,0 +1,42 @@
+Generate application SDK source from an OpenAPI document.
+
+Usage:
+  openapi-sdkgen generate [options]
+
+Required:
+  --input <source>                OpenAPI file, file:// URL, HTTP(S) URL, or -
+  --target <name>                 SDK target (available: typescript)
+  --output <directory>            Fresh output directory
+
+Generation:
+  --with <addon>                  Add generated artifacts (available: server)
+                                  (repeatable)
+
+Input:
+  --input-base <source>           Base location for relative references from stdin
+  --http-header-env <header=env>  Read an input request header from an environment
+                                  variable (repeatable)
+  --tls-client-cert <path>        PEM client certificate for an HTTPS input
+  --tls-client-key <path>         PEM private key for an HTTPS input
+  --tls-ca-file <path>            Additional PEM certificate authorities for an HTTPS
+                                  input
+
+Remote references:
+  --allow-remote-ref <origin>     Allow an exact HTTPS remote-reference origin
+                                  (repeatable)
+  --ref-lock <path>               Remote-reference and extension lock path
+  --update-ref-lock               Create or update the integrity lock
+  --offline                       Use only locked cached remote references
+
+Schema extensions:
+  --schema-extension <manifest>   Register a trusted schema-extension manifest
+                                  (repeatable)
+
+Options:
+  -h, --help                      Show help
+
+Examples:
+  openapi-sdkgen generate \
+    --input ./openapi.yaml \
+    --target typescript \
+    --output ./src/generated/api

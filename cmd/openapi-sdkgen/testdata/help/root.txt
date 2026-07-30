@@ -1,0 +1,12 @@
+openapi-sdkgen generates application SDK source from OpenAPI documents.
+
+Usage:
+  openapi-sdkgen <command> [options]
+
+Commands:
+  generate  Generate SDK source
+
+Options:
+  -h, --help                      Show help
+
+Run "openapi-sdkgen <command> --help" for command details.

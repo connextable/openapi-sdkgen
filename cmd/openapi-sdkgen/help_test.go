@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -76,7 +78,6 @@ Generation:
 
 Options:
   -h, --help                      Show help
-
 `
 	if output.String() != expected {
 		t.Fatalf("help output mismatch:\n%s", output.String())
@@ -110,7 +111,7 @@ func TestRenderHelpIncludesCommandsExamplesAndFooter(t *testing.T) {
 	for _, expected := range []string{
 		"Commands:\n  generate  Generate SDK source\n\n",
 		"Examples:\n  openapi-sdkgen generate \\\n    --input ./openapi.yaml\n\n",
-		`Run "openapi-sdkgen <command> --help" for command details.` + "\n\n",
+		`Run "openapi-sdkgen <command> --help" for command details.` + "\n",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("help output missing %q:\n%s", expected, rendered)
@@ -140,4 +141,96 @@ func TestRenderHelpRejectsEmptyDynamicAvailability(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatalf("partial help was written: %q", output.String())
 	}
+}
+
+func TestRunRendersRootHelpAliases(t *testing.T) {
+	expected := readHelpGolden(t, "root.txt")
+	for _, args := range [][]string{nil, {"--help"}, {"-h"}, {"help"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			output, diagnostics := captureCLIOutput(t)
+			if err := run(args); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != expected {
+				t.Fatalf("root help mismatch:\n%s", output.String())
+			}
+			if diagnostics.Len() != 0 {
+				t.Fatalf("root help diagnostics = %q", diagnostics.String())
+			}
+		})
+	}
+}
+
+func TestRunRendersGenerateHelpAliases(t *testing.T) {
+	expected := readHelpGolden(t, "generate.txt")
+	for _, args := range [][]string{
+		{"generate", "--help"},
+		{"generate", "-h"},
+		{"help", "generate"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			output, diagnostics := captureCLIOutput(t)
+			if err := run(args); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != expected {
+				t.Fatalf("generate help mismatch:\n%s", output.String())
+			}
+			if diagnostics.Len() != 0 {
+				t.Fatalf("generate help diagnostics = %q", diagnostics.String())
+			}
+		})
+	}
+}
+
+func TestRunUsageErrorsIncludeScopedHelpHints(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		hint string
+	}{
+		{name: "unknown command", args: []string{"publish"}, hint: `Try "openapi-sdkgen --help" for usage`},
+		{name: "unknown help command", args: []string{"help", "publish"}, hint: `Try "openapi-sdkgen --help" for usage`},
+		{name: "unknown flag", args: []string{"generate", "--unknown"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
+		{name: "unexpected positional", args: []string{"generate", "extra"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
+		{name: "missing required", args: []string{"generate"}, hint: `Try "openapi-sdkgen generate --help" for usage`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output, diagnostics := captureCLIOutput(t)
+			err := run(test.args)
+			if err == nil || !strings.Contains(err.Error(), test.hint) {
+				t.Fatalf("error = %v", err)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("usage error stdout = %q", output.String())
+			}
+			if diagnostics.Len() != 0 {
+				t.Fatalf("usage error diagnostics = %q", diagnostics.String())
+			}
+		})
+	}
+}
+
+func captureCLIOutput(t *testing.T) (*bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	var output bytes.Buffer
+	var diagnostics bytes.Buffer
+	previousOutput := standardOutput
+	previousError := standardError
+	standardOutput = &output
+	standardError = &diagnostics
+	t.Cleanup(func() {
+		standardOutput = previousOutput
+		standardError = previousError
+	})
+	return &output, &diagnostics
+}
+
+func readHelpGolden(t *testing.T, name string) string {
+	t.Helper()
+	value, err := os.ReadFile(filepath.Join("testdata", "help", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(value)
 }
