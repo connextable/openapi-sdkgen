@@ -207,6 +207,30 @@
         "responses": { "204": { "description": "Accepted" } }
       }
     },
+    "/stream": {
+      "get": {
+        "operationId": "streamEnvironmentHeaders",
+        "security": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/x-ndjson": {
+                "itemSchema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/security": {
       "get": {
         "operationId": "securedByOrigin",

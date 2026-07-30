@@ -76,9 +76,22 @@ wire headers.
 
 OpenAPI requiredness remains unchanged in `metadata.js`. Generated Webhook and
 Callback handlers also preserve and validate the full inbound header contract.
-Link request-header expressions read the original invocation input; when the
-caller omitted an optional value, the expression resolves to `undefined`.
-Header values assigned by a Link are forwarded to Fetch normally.
+Link request-header expressions read `invocation.sourceInput`; source input is
+not retained automatically with a raw response. Pass it again when following a
+Link that uses `$request.header.*`:
+
+```ts
+const sourceInput = {
+  headerParams: { Origin: "https://app.example.test" },
+};
+const response = await api.$operations.createSource.raw(sourceInput);
+
+await api.$links.createSource.follow(response, { sourceInput });
+```
+
+Without `sourceInput`, the request-header expression resolves to `undefined`,
+even when the source call received an explicit value. Header values assigned by
+a Link are forwarded to Fetch normally.
 
 This projection is source-compatible with callers that already pass values such
 as `headerParams.Origin`; callers may now omit them. It is suitable for a patch

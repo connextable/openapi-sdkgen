@@ -62,6 +62,13 @@ if (false) {
   typedClient.$operations.allEnvironmentHeaders.raw(undefined, { headers: { "X-Raw": "raw" } });
   typedClient.$operations.mixedHeaders(mixedInput);
   typedClient.$operations.overrideMethod(overrideInput);
+  typedClient.$streams.streamEnvironmentHeaders();
+  typedClient.$streams.streamEnvironmentHeaders(undefined, { headers: { "X-Raw": "stream" } });
+  typedClient.$operations.streamEnvironmentHeaders.stream();
+  typedClient.$operations.streamEnvironmentHeaders.stream({
+    headerParams: { Origin: "https://stream.example" },
+  });
+  typedClient.$routes["GET /stream"].stream();
   // @ts-expect-error ordinary required headers still require operation input
   typedClient.$operations.mixedHeaders();
   // @ts-expect-error ordinary required headers remain required inside headerParams
@@ -128,6 +135,43 @@ describe("transport-native request headers", () => {
     expect(seen[2]!.get("X-Method-Override")).toBe("TRACK");
   });
 
+  it("keeps environment-only streaming inputs optional and forwards explicit values", async () => {
+    const seen: Headers[] = [];
+    const api = createClient({
+      baseURL: "https://api.example.test",
+      fetch: async (_input, init) => {
+        seen.push(new Headers(init?.headers));
+        return new Response('"event"\n', {
+          status: 200,
+          headers: { "Content-Type": "application/x-ndjson" },
+        });
+      },
+    });
+    const consume = async (stream: AsyncIterable<string>): Promise<void> => {
+      for await (const _item of stream) {
+        // Consume the generated stream.
+      }
+    };
+
+    await consume(api.$streams.streamEnvironmentHeaders());
+    await consume(
+      api.$streams.streamEnvironmentHeaders(undefined, {
+        headers: { "X-Raw": "stream-options" },
+      }),
+    );
+    await consume(
+      api.$operations.streamEnvironmentHeaders.stream({
+        headerParams: { Origin: "https://stream.example" },
+      }),
+    );
+    await consume(api.$routes["GET /stream"].stream());
+
+    expect(seen[0]!.has("Origin")).toBe(false);
+    expect(seen[1]!.get("X-Raw")).toBe("stream-options");
+    expect(seen[2]!.get("Origin")).toBe("https://stream.example");
+    expect(seen[3]!.has("Origin")).toBe(false);
+  });
+
   it("forwards undeclared raw and header API-key values while retaining ownership", async () => {
     const seen: Array<{ path: string; headers: Headers }> = [];
     const api = createClient({
@@ -177,6 +221,7 @@ describe("transport-native request headers", () => {
     const explicit = await api.$operations.linkSource.raw({
       headerParams: { Origin: "https://source.example" },
     });
+    await api.$links.linkSource.copy(explicit);
     await api.$links.linkSource.copy(explicit, {
       sourceInput: { headerParams: { Origin: "https://source.example" } },
     });
@@ -186,6 +231,7 @@ describe("transport-native request headers", () => {
 
     expect(seen.map(({ path, headers }) => [path, Object.fromEntries(headers.entries())])).toEqual([
       ["/link-source", { origin: "https://source.example" }],
+      ["/link-target", {}],
       ["/link-target", { "x-trace": "https://source.example" }],
       ["/link-source", {}],
       ["/link-target", {}],

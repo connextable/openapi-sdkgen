@@ -578,7 +578,7 @@ func aggregateInputRequired(document *ir.Document, operation ir.Operation, field
 		return false, err
 	}
 	for _, parameter := range parameters {
-		if clientParameterRequired(parameter) {
+		if parameter.Required {
 			return true, nil
 		}
 	}
@@ -618,7 +618,7 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 			return err
 		}
 		optional := "?"
-		if clientParameterRequired(parameter) {
+		if parameter.Required {
 			optional = ""
 		} else {
 			valueType += " | undefined"
@@ -1569,7 +1569,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 	if operation.OperationID != "" {
 		fields = append(fields, "operationID: "+quoteTS(operation.OperationID))
 	}
-	parameters, err := operationParameters(document, irOperation)
+	parameters, err := clientOperationParameters(document, irOperation)
 	if err != nil {
 		return "", err
 	}
@@ -1588,7 +1588,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 				"style: " + quoteTS(parameter.Style),
 				fmt.Sprintf("explode: %t", parameter.Explode),
 				fmt.Sprintf("allowReserved: %t", parameter.AllowReserved),
-				fmt.Sprintf("required: %t", clientParameterRequired(parameter)),
+				fmt.Sprintf("required: %t", parameter.Required),
 				"schema: " + descriptor,
 			}
 			if parameter.ContentType != "" {

@@ -72,9 +72,22 @@ API key 인증 정보도 같은 방식으로 전달합니다. 선언 헤더 및 
 
 OpenAPI의 필수 여부는 `metadata.js`에 그대로 남습니다. 생성된 Webhook과
 Callback 핸들러도 전체 인바운드 헤더 계약과 필수 검사를 유지합니다. Link의
-요청 헤더 표현식은 원래 호출 입력을 읽으므로 선택 값을 생략했다면
-`undefined`로 해석합니다. Link가 대상 요청에 지정한 헤더도 Fetch로 그대로
-전달합니다.
+요청 헤더 표현식은 `invocation.sourceInput`을 읽습니다. 원시 응답에는 원래
+호출 입력이 자동 보관되지 않으므로 `$request.header.*`를 쓰는 Link를 따라갈
+때 다시 전달해야 합니다.
+
+```ts
+const sourceInput = {
+  headerParams: { Origin: "https://app.example.test" },
+};
+const response = await api.$operations.createSource.raw(sourceInput);
+
+await api.$links.createSource.follow(response, { sourceInput });
+```
+
+`sourceInput`을 전달하지 않으면 소스 호출에 값을 명시했더라도 요청 헤더
+표현식은 `undefined`로 해석합니다. Link가 대상 요청에 지정한 헤더는 Fetch로
+그대로 전달합니다.
 
 `headerParams.Origin`처럼 값을 이미 전달하던 호출 코드는 계속 호환되며, 이제
 해당 값을 생략할 수도 있습니다. 패치 릴리스에 적합한 변경입니다.

@@ -214,9 +214,33 @@ func parametersIn(document *ir.Document, operation ir.Operation, location string
 }
 
 func clientParametersIn(document *ir.Document, operation ir.Operation, location string) ([]operationParameter, error) {
-	return parametersIn(document, operation, location)
+	parameters, err := clientOperationParameters(document, operation)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]operationParameter, 0, len(parameters))
+	for _, parameter := range parameters {
+		if parameter.Location == location {
+			result = append(result, parameter)
+		}
+	}
+	return result, nil
 }
 
-func clientParameterRequired(parameter operationParameter) bool {
-	return parameter.Required && !parameter.EnvironmentControlled
+func clientOperationParameters(document *ir.Document, operation ir.Operation) ([]operationParameter, error) {
+	parameters, err := operationParameters(document, operation)
+	if err != nil {
+		return nil, err
+	}
+	for index := range parameters {
+		parameters[index] = projectClientParameter(parameters[index])
+	}
+	return parameters, nil
+}
+
+func projectClientParameter(parameter operationParameter) operationParameter {
+	if parameter.EnvironmentControlled {
+		parameter.Required = false
+	}
+	return parameter
 }

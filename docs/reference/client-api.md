@@ -104,8 +104,10 @@ headers, and header API-key credentials are forwarded to the active Fetch
 implementation. Declared/reserved raw-header collisions remain errors.
 
 Method-override headers retain their OpenAPI requiredness and reach Fetch
-without SDK-side value filtering. Links read request-header sources from the
-original invocation input and forward target values through the same path.
+without SDK-side value filtering. Links read request-header sources from
+`invocation.sourceInput`, which must be passed explicitly when following the
+Link; source calls do not retain their input automatically. Target values are
+forwarded through the same path.
 
 The original requiredness remains available through `openapi.document`.
 Generated Webhook and Callback server-add-on input types and runtime validation

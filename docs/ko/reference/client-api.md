@@ -104,8 +104,9 @@ const todos = await api.$operations["listTodos"]({
 예약 헤더와 원시 헤더 사이의 소유권 충돌은 계속 오류입니다.
 
 Method override 헤더는 OpenAPI의 필수 여부를 유지하며 SDK의 값 필터 없이
-Fetch로 전달됩니다. Link는 원래 호출 입력에서 요청 헤더 소스를 읽고, 대상
-값도 같은 경로로 전달합니다.
+Fetch로 전달됩니다. Link는 명시적으로 전달한 `invocation.sourceInput`에서
+요청 헤더 소스를 읽습니다. 소스 호출 입력은 자동 보관되지 않습니다. 대상
+값은 같은 경로로 전달합니다.
 
 원본 필수 여부는 `openapi.document`에 남습니다. 생성된 Webhook과 Callback
 서버 애드온 입력 타입 및 런타임 검사는 전체 인바운드 계약을 유지합니다.
