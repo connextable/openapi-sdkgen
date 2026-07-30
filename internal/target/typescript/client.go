@@ -559,7 +559,7 @@ func emitParameterType(output *bytes.Buffer, document *ir.Document, operation ir
 			return err
 		}
 		optional := "?"
-		if parameter.Required {
+		if clientParameterRequired(parameter) {
 			optional = ""
 		} else {
 			valueType += " | undefined"
@@ -1535,7 +1535,7 @@ func operationDefinition(document *ir.Document, irOperation ir.Operation, operat
 			if parameter.ContentType != "" {
 				fields = append(fields, "contentType: "+quoteTS(parameter.ContentType))
 			}
-			if parameter.HostManaged {
+			if parameter.EnvironmentControlled {
 				fields = append(fields, "hostManaged: true")
 			}
 			if parameter.ForbiddenMethodValue {

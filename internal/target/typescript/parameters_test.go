@@ -5,7 +5,7 @@ import "testing"
 func TestClassifyFetchRequestHeader(t *testing.T) {
 	t.Parallel()
 
-	hostManaged := []string{
+	environmentControlled := []string{
 		"accept-charset",
 		"accept-encoding",
 		"access-control-request-headers",
@@ -34,9 +34,9 @@ func TestClassifyFetchRequestHeader(t *testing.T) {
 		"Sec-Fetch-Site",
 		"SEC-CUSTOM",
 	}
-	for _, name := range hostManaged {
-		if got := classifyFetchRequestHeader(name); got != requestHeaderHostManaged {
-			t.Errorf("classifyFetchRequestHeader(%q) = %v, want host managed", name, got)
+	for _, name := range environmentControlled {
+		if got := classifyFetchRequestHeader(name); got != requestHeaderEnvironmentControlled {
+			t.Errorf("classifyFetchRequestHeader(%q) = %v, want environment controlled", name, got)
 		}
 	}
 

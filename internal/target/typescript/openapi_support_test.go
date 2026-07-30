@@ -68,7 +68,7 @@ func TestSourceArtifactsAcceptsJSONSchemaResourceScopeMetadata(t *testing.T) {
 	}
 }
 
-func TestSourceArtifactsProjectFetchManagedHeadersOutOfClientInputs(t *testing.T) {
+func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInputs(t *testing.T) {
 	t.Parallel()
 
 	for _, version := range []string{"3.0.4", "3.1.1", "3.2.0"} {
@@ -121,11 +121,10 @@ func TestSourceArtifactsProjectFetchManagedHeadersOutOfClientInputs(t *testing.T
 					break
 				}
 			}
-			if len(oauth.InputTypes) != 1 || !strings.HasSuffix(oauth.InputTypes[0], "BodyInput") {
-				t.Fatalf("oauth input types = %v, want only body input", oauth.InputTypes)
-			}
-			if strings.Contains(oauth.CallExpression, "headerParams") {
-				t.Fatalf("oauth call requires host-managed header input: %s", oauth.CallExpression)
+			if len(oauth.InputTypes) != 2 ||
+				!strings.HasSuffix(oauth.InputTypes[0], "HeaderInput") ||
+				!strings.HasSuffix(oauth.InputTypes[1], "BodyInput") {
+				t.Fatalf("oauth input types = %v, want header and body input", oauth.InputTypes)
 			}
 
 			artifacts, err := SourceArtifacts(document)
@@ -133,10 +132,8 @@ func TestSourceArtifactsProjectFetchManagedHeadersOutOfClientInputs(t *testing.T
 				t.Fatal(err)
 			}
 			client := string(artifactByPath(t, artifacts, "generated/client.ts"))
-			if strings.Contains(client, `readonly "Origin"`) {
-				t.Fatalf("client exposes host-managed Origin input:\n%s", client)
-			}
 			for _, expected := range []string{
+				`readonly "Origin"?: string | undefined`,
 				`readonly "X-Trace": string`,
 				`readonly "X-HTTP-Method-Override"?: string | undefined`,
 				`name: "Origin"`,
