@@ -129,19 +129,28 @@ const api = createClient({
 OpenAPI는 `security` 배열의 각 객체를 Security Requirement Object라고
 부릅니다. 객체 사이는 OR이고, 한 객체 안의 scheme은 모두 함께 충족해야
 합니다(AND). 생성된 operation 옵션은 각 객체의 안정적인 ID를 정확한
-`securityRequirement` 유니언으로 제공합니다.
+`securityRequirement` 유니언으로 제공합니다. 적용되는 requirement가 둘 이상이면
+이 속성과 operation의 options 인자가 필수입니다. 빈 requirement의 안정적인 ID는
+`"optional"`이며 다른 requirement가 함께 있으면 익명 요청도 명시적으로
+선택해야 합니다.
 
 ```ts
 await api.$operations.updateCheckout({
   securityRequirement: "GuestCapability",
   authorization: "Bearer example-token",
 });
+
+await api.$operations.startOAuth(input, {
+  securityRequirement: "optional",
+});
 ```
 
-호스트에서 requirement를 선택하거나 요청마다 인증 정보를 가져와야 한다면
+선택된 requirement에 필요한 인증 정보를 호스트에서 가져오려면
 `securityProvider`를 사용합니다. `requirements`에는 operation에 적용되는
-Security Requirement Object가 들어 있습니다. 요청이 requirement를 선택했지만
-provider 인증 정보가 더 필요하면 `selectedRequirement`도 전달됩니다.
+Security Requirement Object가 들어 있습니다. requirement가 둘 이상이면 호출자가
+선택한 값이 `selectedRequirement`로 전달됩니다. 적용되는 requirement가 정확히
+하나이고 호출자가 선택을 생략한 경우에만 provider가 그 단일 requirement를
+선택할 수 있습니다.
 
 ```ts
 const api = createClient({
@@ -164,12 +173,18 @@ const api = createClient({
 API key, HTTP Basic/Bearer, OAuth2, OpenID Connect, mTLS 요구 사항을 지원합니다.
 로그인, 토큰 갱신, 인증 정보 저장은 애플리케이션에서 구현해야 합니다.
 
-선택 순서는 명시적인 `securityRequirement`, `securityProvider`, SDK 소유 옵션만으로
-정확히 하나의 requirement가 충족되는 경우의 자동 추론 순서입니다. 선택한
-scheme과 일치하는 `authorization` 또는 `csrfToken`은 인증 정보를 충족합니다.
-provider는 해당 scheme을 생략하거나 같은 값을 반환할 수 있습니다. 다른 값을
-반환하면 Fetch 전에 실패합니다. 원시 `headers`는 security scheme을 충족하지
-않습니다.
+적용되는 requirement가 둘 이상이면 `securityRequirement`를 반드시 명시해야
+합니다. 생략하면 `securityProvider`나 Fetch를 호출하기 전에
+`SECURITY_REQUIREMENT_REQUIRED`로 실패합니다. 적용되는 requirement가 정확히
+하나이면 selector는 선택 사항이며 provider를 사용하거나 SDK 소유 옵션이 단일
+requirement를 이미 충족할 때 자동 추론할 수 있습니다. 선택한 scheme과 일치하는
+`authorization` 또는 `csrfToken`은 인증 정보를 충족합니다. provider는 해당
+scheme을 생략하거나 같은 값을 반환할 수 있습니다. 다른 값을 반환하면 Fetch
+전에 실패합니다. 원시 `headers`는 security scheme을 충족하지 않습니다.
+
+업그레이드 후 client를 다시 생성해야 합니다. requirement가 둘 이상인 기존
+호출은 명시적인 selector를 전달할 때까지 TypeScript 오류가 됩니다. 익명 요청은
+`"optional"`을 전달합니다.
 
 OpenAPI cookie API key security scheme은 브라우저의 ambient cookie로 충족할 수
 있습니다. JavaScript에서 쿠키 값을 읽을 필요가 없습니다.
@@ -182,9 +197,9 @@ const api = createClient({
 ```
 
 `credentials`는 Fetch의 `RequestCredentials` 정책만 나타냅니다.
-`securityProvider`와 함께 설정할 수 있으며, ambient cookie가 provider의
-requirement 선택을 건너뛰게 하지 않습니다. `"include"`를 사용하면 cookie
-security는 실행 중인 Fetch 구현에 맡깁니다. SDK는 쿠키 값을 요구하거나
+`securityProvider`와 함께 설정할 수 있으며, ambient cookie는 여러 requirement
+중 하나를 선택하지 않습니다. requirement를 선택한 뒤 `"include"`를 사용하면
+cookie security는 실행 중인 Fetch 구현에 맡깁니다. SDK는 쿠키 값을 요구하거나
 `Cookie` 헤더를 만들지 않습니다. 실제 전송 여부는 Fetch와 브라우저 쿠키
 정책이 결정합니다.
 

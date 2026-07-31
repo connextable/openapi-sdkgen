@@ -384,10 +384,11 @@ OpenID Connect, mutual TLS, optional access, and operation overrides.
 
 Required result:
 
-- Generated code identifies declared Security Requirement Objects, lets the
-  request or host select one requirement, and applies credentials not already
-  satisfied by SDK-owned request options at their declared header, query, or
-  cookie locations.
+- Generated code identifies declared Security Requirement Objects, requires
+  the request to select one when multiple requirements apply, lets the host
+  complete credentials for the selected requirement, and applies credentials
+  not already satisfied by SDK-owned request options at their declared header,
+  query, or cookie locations.
 - Credential acquisition remains host-owned. The SDK does not embed token
   storage, login UX, refresh logic, or secrets.
 - Generated security metadata preserves every declared OAuth2 flow URL and
@@ -413,14 +414,18 @@ const api = createClient({
 ```
 
 Generated operation options expose `securityRequirement` as an exact union of
-the operation's stable requirement IDs. Selection order is explicit request
-selection, host `securityProvider`, then inference when exactly one requirement
-is already satisfied. The provider receives the final normalized origin and
-effective requirement definitions. Its `credentials` may contain only schemes
-from the selected requirement and may omit schemes already satisfied by
-`authorization`, `csrfToken`, ambient Fetch cookies, or selected mTLS
-capability. Matching dedicated and provider values are idempotent; conflicting,
-missing, malformed, or extra values fail before Fetch without exposing secrets.
+the operation's stable requirement IDs. The property and operation options
+argument are required when multiple effective requirements exist, including an
+empty anonymous requirement. Omission fails before `securityProvider` or Fetch.
+With exactly one effective requirement, selection remains optional and the
+runtime may use the provider or infer that sole requirement when it is already
+satisfied. The provider receives the final normalized origin, effective
+requirement definitions, and the explicit selection when one is required. Its
+`credentials` may contain only schemes from the selected requirement and may
+omit schemes already satisfied by `authorization`, `csrfToken`, ambient Fetch
+cookies, or selected mTLS capability. Matching dedicated and provider values
+are idempotent; conflicting, missing, malformed, or extra values fail before
+Fetch without exposing secrets.
 `ClientOptions.credentials` remains only the Fetch `RequestCredentials` mode.
 With mode `"include"`, cookie API-key security is ambient: the SDK neither
 requests its value nor synthesizes a `Cookie` header. Fetch and browser cookie

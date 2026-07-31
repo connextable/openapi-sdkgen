@@ -135,19 +135,28 @@ const api = createClient({
 OpenAPI calls each object in the `security` array a Security Requirement Object.
 The objects are OR choices; all schemes inside one object are required together
 (AND). Generated operation options expose their stable IDs as an exact
-`securityRequirement` union:
+`securityRequirement` union. When an operation has more than one effective
+requirement, the property and the operation's options argument are required.
+An empty requirement uses the stable ID `"optional"` and must still be selected
+when another requirement is available:
 
 ```ts
 await api.$operations.updateCheckout({
   securityRequirement: "GuestCapability",
   authorization: "Bearer example-token",
 });
+
+await api.$operations.startOAuth(input, {
+  securityRequirement: "optional",
+});
 ```
 
-Use `securityProvider` when the host must select a requirement or load
-credentials for each request. `requirements` contains the effective Security
-Requirement Objects for the operation. `selectedRequirement` is present when
-the request chose one but still needs provider credentials.
+Use `securityProvider` when the host must load credentials for a selected
+requirement. `requirements` contains the effective Security Requirement Objects
+for the operation. `selectedRequirement` identifies the caller's choice when
+the operation has multiple requirements. A provider may select only the sole
+effective requirement when the operation has exactly one and the caller omits
+the optional selector.
 
 ```ts
 const api = createClient({
@@ -171,11 +180,18 @@ Generated clients support API keys, HTTP Basic and Bearer authentication,
 OAuth2, OpenID Connect, and mTLS requirements. Your application remains
 responsible for login, token refresh, and credential storage.
 
-Selection order is explicit `securityRequirement`, then `securityProvider`, then
-automatic inference when exactly one requirement is already satisfied by
-SDK-owned options. A matching `authorization` or `csrfToken` satisfies its
-scheme. A provider may omit that scheme or return the same value; a different
-value fails before Fetch. Raw `headers` never satisfy a security scheme.
+Multiple effective requirements always require an explicit
+`securityRequirement`. Omission fails with `SECURITY_REQUIREMENT_REQUIRED`
+before `securityProvider` or Fetch. With exactly one effective requirement, the
+selector remains optional and the runtime may use the provider or infer the
+sole requirement when SDK-owned options already satisfy it. A matching
+`authorization` or `csrfToken` satisfies its scheme. A provider may omit that
+scheme or return the same value; a different value fails before Fetch. Raw
+`headers` never satisfy a security scheme.
+
+Regenerate clients after upgrading. Existing calls to operations with multiple
+requirements become TypeScript errors until they pass an explicit selector,
+including `"optional"` for anonymous access.
 
 For an OpenAPI cookie API-key security scheme, browser applications can use
 ambient cookies without reading their values:
@@ -188,11 +204,11 @@ const api = createClient({
 ```
 
 `credentials` is only the Fetch `RequestCredentials` policy. It can be combined
-with `securityProvider`; ambient cookies do not bypass the provider's requirement
-selection. `"include"` satisfies cookie security through the active Fetch
-implementation. The SDK neither asks for the cookie value nor creates a
-`Cookie` header. Fetch and the browser cookie policy decide whether a cookie is
-sent.
+with `securityProvider`; ambient cookies do not select among multiple
+requirements. `"include"` satisfies cookie security through the active Fetch
+implementation after the requirement is selected. The SDK neither asks for the
+cookie value nor creates a `Cookie` header. Fetch and the browser cookie policy
+decide whether a cookie is sent.
 
 For a requirement that combines a session cookie and CSRF header, select the
 requirement and satisfy both schemes through dedicated request options:

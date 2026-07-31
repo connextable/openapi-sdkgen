@@ -120,8 +120,10 @@ const todos = await api.$operations["listTodos"]({
 
 operation에 OpenAPI Security Requirement Object가 선언되어 있으면 생성된 요청
 옵션의 `securityRequirement`가 해당 operation의 안정적인 requirement ID
-유니언으로 생성됩니다. 적용되는 security requirement가 없는 operation에는 이
-옵션이 생성되지 않습니다.
+유니언으로 생성됩니다. 적용되는 requirement가 둘 이상이면 빈 `{}`가
+`"optional"`로 표현되는 경우를 포함해 이 속성과 operation options 인자가
+필수입니다. requirement가 정확히 하나이면 이 속성은 선택 사항입니다. 적용되는
+security requirement가 없는 operation에는 생성되지 않습니다.
 
 ```ts
 await api.$operations.updateCheckout({
@@ -131,8 +133,9 @@ await api.$operations.updateCheckout({
 ```
 
 `ClientOptions.credentials`와 요청별 `credentials`는 Fetch의
-`RequestCredentials`입니다. 호스트가 requirement를 선택하고 인증 정보를
-가져오려면 `ClientOptions.securityProvider`를 사용합니다. 자세한 내용은
+`RequestCredentials`입니다. 요청에서 선택한 requirement의 인증 정보를
+가져오려면 `ClientOptions.securityProvider`를 사용합니다. 모호한 선택을
+생략하면 provider와 Fetch를 호출하기 전에 실패합니다. 자세한 내용은
 [Security Requirement 선택과 인증 정보 제공](../guide/transport.md#security-requirement-선택과-인증-정보-제공)을
 참고하세요.
 
