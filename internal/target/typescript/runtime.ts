@@ -10,6 +10,10 @@ export const TransportErrorCode = {
   REQUEST_TIMEOUT: "REQUEST_TIMEOUT",
   /** The HTTP response body could not be decoded as its declared media type. */
   RESPONSE_DECODE_FAILED: "RESPONSE_DECODE_FAILED",
+  /** The operation has multiple already-satisfied security requirements and needs an explicit selection. */
+  SECURITY_REQUIREMENT_REQUIRED: "SECURITY_REQUIREMENT_REQUIRED",
+  /** The requested or provider-selected security requirement is not valid for the operation. */
+  SECURITY_REQUIREMENT_INVALID: "SECURITY_REQUIREMENT_INVALID",
   /** The operation requires credentials but the client did not provide a usable selection. */
   SECURITY_CREDENTIALS_REQUIRED: "SECURITY_CREDENTIALS_REQUIRED",
   /** Credentials conflict with caller-controlled request data or cannot be applied safely. */
@@ -283,6 +287,8 @@ export interface SecurityRequirementSelection {
 export interface SecurityCredentialContext {
   readonly operation: Pick<OperationDefinition, "route" | "operationID" | "method" | "path">;
   readonly requirements: Readonly<Record<string, SecurityRequirementDefinition>>;
+  /** Explicit request selection when the caller needs the provider to complete its credentials. */
+  readonly selectedRequirement?: SecurityRequirementDefinition;
   readonly origin: string;
 }
 
@@ -303,6 +309,8 @@ export interface RequestOptions {
   readonly authorization?: string;
   /** Requested response media type for operations with multiple representations. */
   readonly accept?: string;
+  /** Stable generated ID of the OpenAPI security requirement selected for this request. */
+  readonly securityRequirement?: string;
   /** Value sent through the `X-CSRF-Token` header. */
   readonly csrfToken?: string;
   /** Caller-provided value sent through the `X-Request-Id` header. */
@@ -1055,7 +1063,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
     try {
 		const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
 		encoded = isPromise(pending) ? await pending : pending;
-		const secured = applyOperationSecurity(options, operation, encoded, credentials);
+		const secured = applyOperationSecurity(options, operation, encoded, requestOptions, credentials);
 		encoded = isPromise(secured) ? await secured : secured;
     } catch (cause) {
       if (isAPIError(cause)) {
@@ -1191,9 +1199,10 @@ async function* streamOperation<Item>(
   try {
     const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
     encoded = isPromise(pending) ? await pending : pending;
-    const secured = applyOperationSecurity(options, operation, encoded, credentials);
+    const secured = applyOperationSecurity(options, operation, encoded, requestOptions, credentials);
     encoded = isPromise(secured) ? await secured : secured;
   } catch (cause) {
+    if (isAPIError(cause)) throw cause;
     throw transportError(TransportErrorCode.REQUEST_ENCODE_FAILED, `Failed to encode ${operationDiagnosticName(operation)} stream request`, cause);
   }
   const timeoutMS = requestOptions.timeoutMS ?? options.timeoutMS;
@@ -1522,49 +1531,186 @@ function applyOperationSecurity(
 	options: ClientOptions,
   operation: OperationDefinition,
   encoded: EncodedRequest,
+  requestOptions: RequestOptions,
   credentials: RequestCredentials | undefined,
 ): EncodedRequest | Promise<EncodedRequest> {
   const declared = operation.security;
-  if (declared === undefined || declared.length === 0 || declared.some((alternative) => alternative.schemes.length === 0)) return encoded;
-  const ambientCookies = credentials === "include";
-  if (ambientCookies && declared.some((alternative) => alternative.schemes.every(isCookieSecurityScheme))) return encoded;
-	if (typeof options.securityProvider !== "function") {
-    throw transportError(
-      TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
-      `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
-      undefined,
-    );
+  const requestedID = requestOptions.securityRequirement;
+  if (declared === undefined || declared.length === 0) {
+    if (requestedID !== undefined) throw securityRequirementInvalid("The operation does not declare an OpenAPI security requirement");
+    return encoded;
   }
   const requirements = Object.create(null) as Record<string, SecurityRequirementDefinition>;
   for (const requirement of declared) defineOwnDataProperty(requirements, requirement.id, requirement);
+  const requested = requestedID === undefined ? undefined : requirements[requestedID];
+  if (requestedID !== undefined && requested === undefined) {
+    throw securityRequirementInvalid(`Operation ${operationDiagnosticName(operation)} does not declare security requirement ${requestedID}`);
+  }
+  if (requested !== undefined && securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, requested, true)) {
+    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, requested, {}, false);
+  }
+  if (typeof options.securityProvider !== "function") {
+    if (requested !== undefined) {
+      return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, requested, {}, false);
+    }
+    const satisfied = declared.filter((requirement) => securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, requirement, false));
+    if (satisfied.length === 0) {
+      throw transportError(
+        TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
+        `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
+        undefined,
+      );
+    }
+    if (satisfied.length > 1) {
+      throw transportError(
+        TransportErrorCode.SECURITY_REQUIREMENT_REQUIRED,
+        `Operation ${operationDiagnosticName(operation)} requires an explicit OpenAPI security requirement`,
+        undefined,
+      );
+    }
+    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, satisfied[0]!, {}, false);
+  }
   const context: SecurityCredentialContext = {
     operation: { route: operation.route, operationID: operation.operationID, method: operation.method, path: operation.path },
     requirements,
+    ...(requested === undefined ? {} : { selectedRequirement: requested }),
     origin: new URL(encoded.url).origin,
   };
 	const selection = options.securityProvider(context);
   const apply = (resolved: SecurityRequirementSelection): EncodedRequest => {
     const selected = requirements[resolved?.requirement?.id];
     if (selected === undefined || selected !== resolved.requirement) {
-      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider selected an unknown security requirement", undefined);
+      throw securityRequirementInvalid("Security credential provider selected an unknown security requirement");
     }
-    const expected = selected.schemes.filter((scheme) => !ambientCookies || !isCookieSecurityScheme(scheme)).map((scheme) => scheme.name).sort();
-    const supplied = Object.keys(resolved.credentials ?? {}).sort();
-    if (expected.length !== supplied.length || expected.some((name, index) => name !== supplied[index])) {
-      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider values do not exactly match the selected security requirement", undefined);
+    if (requested !== undefined && selected !== requested) {
+      throw securityRequirementInvalid("Security credential provider selected a different security requirement than the request");
     }
-    const url = new URL(encoded.url);
-	for (const scheme of selected.schemes) {
-      if (ambientCookies && isCookieSecurityScheme(scheme)) continue;
-      applySecurityCredential(options.transport, scheme, resolved.credentials[scheme.name]!, encoded.headers, url);
-    }
-    return { ...encoded, url: url.href };
+    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, resolved?.credentials, true);
   };
   return isPromise(selection) ? selection.then(apply) : apply(selection);
 }
 
-function isCookieSecurityScheme(scheme: SecuritySchemeDefinition): boolean {
-  return scheme.type === "apiKey" && scheme.location === "cookie";
+type SDKSecuritySource =
+  | { readonly state: "none" }
+  | { readonly state: "conflict"; readonly location: string }
+  | { readonly state: "satisfied"; readonly kind: "header"; readonly name: string; readonly value: string }
+  | { readonly state: "satisfied"; readonly kind: "cookie" | "mutualTLS" };
+
+function securityRequirementIsSatisfied(
+  options: ClientOptions,
+  requestOptions: RequestOptions,
+  encoded: EncodedRequest,
+  credentials: RequestCredentials | undefined,
+  requirement: SecurityRequirementDefinition,
+  allowMutualTLS: boolean,
+): boolean {
+  return requirement.schemes.every(
+    (scheme) => securitySourceForScheme(options, requestOptions, encoded, credentials, scheme, allowMutualTLS).state === "satisfied",
+  );
+}
+
+function securitySourceForScheme(
+  options: ClientOptions,
+  requestOptions: RequestOptions,
+  encoded: EncodedRequest,
+  credentials: RequestCredentials | undefined,
+  scheme: SecuritySchemeDefinition,
+  allowMutualTLS: boolean,
+): SDKSecuritySource {
+  if (usesAuthorizationHeader(scheme)) {
+    if (requestOptions.authorization === undefined && options.authorization === undefined) return { state: "none" };
+    const value = encoded.headers.get("Authorization") ?? "";
+    return matchesAuthorizationScheme(scheme, value)
+      ? { state: "satisfied", kind: "header", name: "Authorization", value }
+      : { state: "conflict", location: "Authorization header" };
+  }
+  if (isCSRFHeaderScheme(scheme)) {
+    if (requestOptions.csrfToken === undefined) return { state: "none" };
+    const value = encoded.headers.get("X-CSRF-Token") ?? "";
+    return value === ""
+      ? { state: "conflict", location: "X-CSRF-Token header" }
+      : { state: "satisfied", kind: "header", name: "X-CSRF-Token", value };
+  }
+  if (scheme.type === "apiKey" && scheme.location === "cookie" && credentials === "include") {
+    return { state: "satisfied", kind: "cookie" };
+  }
+  if (scheme.type === "mutualTLS" && allowMutualTLS && options.transport?.capabilities?.mutualTLS) {
+    return { state: "satisfied", kind: "mutualTLS" };
+  }
+  return { state: "none" };
+}
+
+function usesAuthorizationHeader(scheme: SecuritySchemeDefinition): boolean {
+  return (
+    scheme.type === "http" ||
+    scheme.type === "oauth2" ||
+    scheme.type === "openIdConnect" ||
+    (scheme.type === "apiKey" && scheme.location === "header" && scheme.parameterName?.toLowerCase() === "authorization")
+  );
+}
+
+function isCSRFHeaderScheme(scheme: SecuritySchemeDefinition): boolean {
+  return scheme.type === "apiKey" && scheme.location === "header" && scheme.parameterName?.toLowerCase() === "x-csrf-token";
+}
+
+function matchesAuthorizationScheme(scheme: SecuritySchemeDefinition, value: string): boolean {
+  if (value === "") return false;
+  if (scheme.type === "apiKey") return true;
+  const separator = value.indexOf(" ");
+  if (separator <= 0 || value.slice(separator + 1).trim() === "") return false;
+  const protocol = value.slice(0, separator).toLowerCase();
+  if (scheme.type === "oauth2" || scheme.type === "openIdConnect") return protocol === "bearer";
+  return protocol === scheme.scheme?.toLowerCase();
+}
+
+function applySelectedSecurityRequirement(
+  options: ClientOptions,
+  requestOptions: RequestOptions,
+  encoded: EncodedRequest,
+  credentialsMode: RequestCredentials | undefined,
+  requirement: SecurityRequirementDefinition,
+  suppliedCredentials: unknown,
+  providerReturned: boolean,
+): EncodedRequest {
+  if (!isRecord(suppliedCredentials)) {
+    throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider returned an invalid credentials object", undefined);
+  }
+  const declaredNames = new Set(requirement.schemes.map((scheme) => scheme.name));
+  if (Object.keys(suppliedCredentials).some((name) => !declaredNames.has(name))) {
+    throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider returned credentials outside the selected requirement", undefined);
+  }
+  const url = new URL(encoded.url);
+  for (const scheme of requirement.schemes) {
+    const source = securitySourceForScheme(options, requestOptions, encoded, credentialsMode, scheme, true);
+    const credential = suppliedCredentials[scheme.name] as SecurityCredential | undefined;
+    if (source.state === "conflict") throw securityCollision(scheme.name, source.location);
+    if (source.state === "satisfied") {
+      if (credential === undefined) continue;
+      if (source.kind === "header") {
+        const header = securityCredentialHeader(scheme, credential);
+        if (header !== undefined && header.name.toLowerCase() === source.name.toLowerCase() && normalizeHeaderValue(header.name, header.value) === source.value) continue;
+        throw securityCollision(scheme.name, source.name);
+      }
+      if (source.kind === "mutualTLS") {
+        assertSecurityCredentialShape(scheme, credential);
+        continue;
+      }
+      assertSecurityCredentialShape(scheme, credential);
+      throw securityCollision(scheme.name, "ambient Cookie credentials");
+    }
+    if (credential === undefined) {
+      if (providerReturned) {
+        throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, `Security credential provider omitted scheme ${scheme.name}`, undefined);
+      }
+      throw transportError(
+        TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
+        `Security requirement ${requirement.id} requires credentials for scheme ${scheme.name}`,
+        undefined,
+      );
+    }
+    applySecurityCredential(options.transport, scheme, credential, encoded.headers, url);
+  }
+  return { ...encoded, url: url.href };
 }
 
 function applySecurityCredential(
@@ -1574,55 +1720,94 @@ function applySecurityCredential(
   headers: Headers,
   url: URL,
 ): void {
+  const header = securityCredentialHeader(scheme, credential);
+  if (header !== undefined) {
+    if (headers.has(header.name)) throw securityCollision(scheme.name, `header ${header.name}`);
+    headers.set(header.name, header.value);
+    return;
+  }
   switch (scheme.type) {
     case "apiKey": {
-      if (credential.kind !== "api-key" || typeof credential.value !== "string" || credential.value === "") throw securityCredentialError(scheme.name, "api-key value");
-      if (scheme.location === "header") {
-        if (headers.has(scheme.parameterName!)) throw securityCollision(scheme.name, `header ${scheme.parameterName}`);
-        headers.set(scheme.parameterName!, credential.value);
-        return;
-      }
+      const apiKey = credential as APIKeyCredential;
       if (scheme.location === "query") {
         if (url.searchParams.has(scheme.parameterName!)) throw securityCollision(scheme.name, `query parameter ${scheme.parameterName}`);
-        url.searchParams.set(scheme.parameterName!, credential.value);
+        url.searchParams.set(scheme.parameterName!, apiKey.value);
         return;
       }
 		if (!transport?.capabilities?.cookieJar) {
 			throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a cookie-jar transport`, undefined);
 		}
 		if (headers.has("Cookie")) throw securityCollision(scheme.name, "Cookie header");
-		headers.set("Cookie", `${encodeURIComponent(scheme.parameterName!)}=${encodeURIComponent(credential.value)}`);
+		headers.set("Cookie", `${encodeURIComponent(scheme.parameterName!)}=${encodeURIComponent(apiKey.value)}`);
 		return;
     }
-    case "http": {
-      if (headers.has("Authorization")) throw securityCollision(scheme.name, "Authorization header");
-      if (scheme.scheme === "basic") {
-        if (credential.kind !== "http-basic") throw securityCredentialError(scheme.name, "http-basic credential");
-        headers.set("Authorization", `Basic ${base64(`${credential.username}:${credential.password}`)}`);
-        return;
-      }
-      if (scheme.scheme === "bearer") {
-        if (credential.kind !== "http-bearer" || credential.token === "") throw securityCredentialError(scheme.name, "http-bearer token");
-        headers.set("Authorization", `Bearer ${credential.token}`);
-        return;
-      }
-      if (credential.kind !== "http" || credential.value === "") throw securityCredentialError(scheme.name, "http credential");
-      headers.set("Authorization", `${scheme.scheme} ${credential.value}`);
-      return;
-    }
+    case "http":
     case "oauth2":
     case "openIdConnect":
-      if (credential.kind !== scheme.type || credential.token === "") throw securityCredentialError(scheme.name, `${scheme.type} token`);
-      if (headers.has("Authorization")) throw securityCollision(scheme.name, "Authorization header");
-      headers.set("Authorization", `Bearer ${credential.token}`);
       return;
     case "mutualTLS":
-      if (credential.kind !== "mutual-tls") throw securityCredentialError(scheme.name, "mutual-tls credential");
 		if (!transport?.capabilities?.mutualTLS) {
 			throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a mutual-TLS transport`, undefined);
 		}
 		return;
   }
+}
+
+function securityCredentialHeader(
+  scheme: SecuritySchemeDefinition,
+  credential: SecurityCredential,
+): { readonly name: string; readonly value: string } | undefined {
+  assertSecurityCredentialShape(scheme, credential);
+  if (scheme.type === "apiKey") {
+    const apiKey = credential as APIKeyCredential;
+    return scheme.location === "header" ? { name: scheme.parameterName!, value: apiKey.value } : undefined;
+  }
+  if (scheme.type === "http") {
+    if (scheme.scheme === "basic") {
+      const basic = credential as HTTPBasicCredential;
+      return { name: "Authorization", value: `Basic ${base64(`${basic.username}:${basic.password}`)}` };
+    }
+    if (scheme.scheme === "bearer") return { name: "Authorization", value: `Bearer ${(credential as HTTPBearerCredential).token}` };
+    return { name: "Authorization", value: `${scheme.scheme} ${(credential as HTTPCredential).value}` };
+  }
+  if (scheme.type === "oauth2" || scheme.type === "openIdConnect") {
+    return { name: "Authorization", value: `Bearer ${(credential as OAuthCredential).token}` };
+  }
+  return undefined;
+}
+
+function assertSecurityCredentialShape(scheme: SecuritySchemeDefinition, credential: SecurityCredential): void {
+  if (scheme.type === "apiKey") {
+    if (credential?.kind !== "api-key" || typeof credential.value !== "string" || credential.value === "") throw securityCredentialError(scheme.name, "api-key value");
+    return;
+  }
+  if (scheme.type === "http") {
+    if (scheme.scheme === "basic") {
+      if (credential?.kind !== "http-basic" || typeof credential.username !== "string" || typeof credential.password !== "string") throw securityCredentialError(scheme.name, "http-basic credential");
+      return;
+    }
+    if (scheme.scheme === "bearer") {
+      if (credential?.kind !== "http-bearer" || typeof credential.token !== "string" || credential.token === "") throw securityCredentialError(scheme.name, "http-bearer token");
+      return;
+    }
+    if (credential?.kind !== "http" || typeof credential.value !== "string" || credential.value === "") throw securityCredentialError(scheme.name, "http credential");
+    return;
+  }
+  if (scheme.type === "oauth2" || scheme.type === "openIdConnect") {
+    if (credential?.kind !== scheme.type || typeof credential.token !== "string" || credential.token === "") throw securityCredentialError(scheme.name, `${scheme.type} token`);
+    return;
+  }
+  if (credential?.kind !== "mutual-tls") throw securityCredentialError(scheme.name, "mutual-tls credential");
+}
+
+function normalizeHeaderValue(name: string, value: string): string {
+  const headers = new Headers();
+  headers.set(name, value);
+  return headers.get(name)!;
+}
+
+function securityRequirementInvalid(message: string): TransportError {
+  return transportError(TransportErrorCode.SECURITY_REQUIREMENT_INVALID, message, undefined);
 }
 
 function securityCredentialError(scheme: string, expected: string): TransportError {

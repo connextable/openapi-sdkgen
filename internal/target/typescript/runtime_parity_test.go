@@ -1952,7 +1952,207 @@ if (widget.widget_id !== "output") throw new Error("reusable response media type
 	}
 }
 
-func TestRuntimeAppliesOpenAPISecurityAlternativesAndOperationOverride(t *testing.T) {
+func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfaces(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0",
+  "info":{"title":"Security requirement options","version":"1"},
+  "components":{"securitySchemes":{
+    "GuestCapability":{"type":"http","scheme":"bearer"},
+    "BuyerSessionCookie":{"type":"apiKey","in":"cookie","name":"buyer_session"},
+    "BuyerCSRFHeader":{"type":"apiKey","in":"header","name":"X-CSRF-Token"},
+    "OperatorKey":{"type":"apiKey","in":"query","name":"operator_key"}
+  }},
+  "paths":{
+    "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/events":{"get":{"operationId":"watchEvents","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
+    "/items":{"get":{"operationId":"listItems","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"parameters":[{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"pagination":{"type":"object","properties":{"nextCursor":{"type":["string","null"]}}}}}}}}},"x-pagination":"cursor"}},
+    "/operator":{"get":{"operationId":"getOperator","security":[{"OperatorKey":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/public":{"get":{"operationId":"getPublic","security":[],"responses":{"200":{"description":"OK","links":{"checkout":{"operationId":"mutateCheckout"}}}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { createClient, type Routes } from "./index.js"
+declare const api: ReturnType<typeof createClient>
+declare const source: Routes["GET /public"]["rawResponse"]
+api.$operations.mutateCheckout({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$operations.mutateCheckout.raw({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
+api.$routes["POST /checkout"]({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.checkout.post({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$streams.watchEvents({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$operations.listItems.paginate({ query: {} }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$links.getPublic.checkout(source, { options: { securityRequirement: "GuestCapability", authorization: "Bearer guest" } })
+// @ts-expect-error unknown requirement ID
+api.$operations.mutateCheckout({ securityRequirement: "Unknown" })
+// @ts-expect-error another operation's requirement ID
+api.$operations.mutateCheckout({ securityRequirement: "OperatorKey" })
+// @ts-expect-error unsecured operations do not expose securityRequirement
+api.$operations.getPublic({ securityRequirement: "GuestCapability" })
+// @ts-expect-error stream options retain the target operation's requirement IDs
+api.$streams.watchEvents({ securityRequirement: "OperatorKey" })
+// @ts-expect-error Link target options retain the target operation's requirement IDs
+api.$links.getPublic.checkout(source, { options: { securityRequirement: "OperatorKey" } })
+`
+	compileTypeScriptArtifactsWithProbe(t, document, "security-requirements.probe.ts", probe)
+}
+
+func TestRuntimeSelectsAndSatisfiesOpenAPISecurityRequirementsConsistently(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi":"3.2.0",
+  "info":{"title":"Security requirement planner","version":"1"},
+  "components":{"securitySchemes":{
+    "GuestCapability":{"type":"http","scheme":"bearer"},
+    "BuyerSessionCookie":{"type":"apiKey","in":"cookie","name":"buyer_session"},
+    "BuyerCSRFHeader":{"type":"apiKey","in":"header","name":"X-CSRF-Token"}
+  }},
+  "paths":{
+    "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/optional":{"get":{"operationId":"getOptional","security":[{}, {"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/events":{"get":{"operationId":"watchEvents","security":[{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := compileTypeScriptArtifacts(t, document)
+	script := `
+import { pathToFileURL } from "node:url";
+const { createClient } = await import(pathToFileURL(process.argv[1]).href);
+const calls = [];
+const fetch = async (input, init) => {
+  const headers = new Headers(init.headers);
+  calls.push({ path: new URL(String(input)).pathname, authorization: headers.get("authorization"), csrf: headers.get("x-csrf-token"), credentials: init.credentials });
+  return new Response(null, { status: 204 });
+};
+
+let providerCalls = 0;
+const providerSelectedGuest = createClient({
+  baseURL: "https://api.example.test",
+  credentials: "include",
+  securityProvider: ({ requirements, selectedRequirement }) => {
+    providerCalls++;
+    if (selectedRequirement !== undefined) throw new Error("unexpected explicit requirement");
+    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "provider" } } };
+  },
+  fetch,
+});
+await providerSelectedGuest.$operations.mutateCheckout();
+if (providerCalls !== 1) throw new Error("ambient cookies bypassed the security provider");
+
+const explicitGuest = createClient({
+  baseURL: "https://api.example.test",
+  securityProvider: () => { throw new Error("fully satisfied explicit requirement called provider"); },
+  fetch,
+});
+await explicitGuest.$operations.mutateCheckout({ securityRequirement: "GuestCapability", authorization: "Bearer explicit" });
+
+const explicitBuyer = createClient({
+  baseURL: "https://api.example.test",
+  securityProvider: () => { throw new Error("fully satisfied cookie requirement called provider"); },
+  fetch,
+});
+await explicitBuyer.$operations.mutateCheckout({
+  securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie",
+  credentials: "include",
+  csrfToken: "csrf",
+});
+
+let matchingProviderCalls = 0;
+const matchingProvider = createClient({
+  baseURL: "https://api.example.test",
+  authorization: "Bearer same",
+  securityProvider: ({ requirements }) => {
+    matchingProviderCalls++;
+    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "same" } } };
+  },
+  fetch,
+});
+await matchingProvider.$operations.mutateCheckout();
+if (matchingProviderCalls !== 1) throw new Error("provider was not authoritative without an explicit request selection");
+
+await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional();
+let optionalProviderCalls = 0;
+await createClient({
+  baseURL: "https://api.example.test",
+  securityProvider: ({ requirements }) => {
+    optionalProviderCalls++;
+    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "optional-provider" } } };
+  },
+  fetch,
+}).$operations.getOptional();
+if (optionalProviderCalls !== 1) throw new Error("anonymous access bypassed the security provider");
+
+const noFetch = async () => { throw new Error("invalid security request reached fetch"); };
+const expectCode = async (promise, code) => promise.then(
+  () => { throw new Error("expected " + code); },
+  (error) => { if (error.code !== code) throw error; },
+);
+
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.mutateCheckout({ securityRequirement: "Unknown" }),
+  "SECURITY_REQUIREMENT_INVALID",
+);
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.watchEvents.stream({ securityRequirement: "Unknown" })[Symbol.asyncIterator]().next(),
+  "SECURITY_REQUIREMENT_INVALID",
+);
+await expectCode(
+  createClient({
+    baseURL: "https://api.example.test",
+    securityProvider: ({ requirements, selectedRequirement }) => {
+      if (selectedRequirement !== requirements.BuyerCSRFHeader__BuyerSessionCookie) throw new Error("explicit requirement missing from provider context");
+      return { requirement: requirements.GuestCapability, credentials: {} };
+    },
+    fetch: noFetch,
+  }).$operations.mutateCheckout({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie" }),
+  "SECURITY_REQUIREMENT_INVALID",
+);
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", credentials: "include", authorization: "Bearer both", fetch: noFetch }).$operations.mutateCheckout({ csrfToken: "csrf" }),
+  "SECURITY_REQUIREMENT_REQUIRED",
+);
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", authorization: "Bearer ambiguous", fetch: noFetch }).$operations.getOptional(),
+  "SECURITY_REQUIREMENT_REQUIRED",
+);
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.mutateCheckout(),
+  "SECURITY_CREDENTIALS_REQUIRED",
+);
+await expectCode(
+  createClient({
+    baseURL: "https://api.example.test",
+    authorization: "Bearer dedicated",
+    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "different" } } }),
+    fetch: noFetch,
+  }).$operations.mutateCheckout(),
+  "SECURITY_CREDENTIALS_INVALID",
+);
+await expectCode(
+  createClient({
+    baseURL: "https://api.example.test",
+    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability, credentials: {} }),
+    fetch: noFetch,
+  }).$operations.mutateCheckout(),
+  "SECURITY_CREDENTIALS_INVALID",
+);
+
+if (JSON.stringify(calls) !== JSON.stringify([
+  { path: "/checkout", authorization: "Bearer provider", csrf: null, credentials: "include" },
+  { path: "/checkout", authorization: "Bearer explicit", csrf: null },
+  { path: "/checkout", authorization: null, csrf: "csrf", credentials: "include" },
+  { path: "/checkout", authorization: "Bearer same", csrf: null },
+  { path: "/optional", authorization: null, csrf: null },
+  { path: "/optional", authorization: "Bearer optional-provider", csrf: null },
+])) throw new Error("security dispatch mismatch: " + JSON.stringify(calls));
+`
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
+		t.Fatalf("execute TypeScript security-requirement planner test: %v\n%s", err, output)
+	}
+}
+
+func TestRuntimeAppliesOpenAPISecurityRequirementsAndOperationOverride(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{"openapi":"3.2.0","info":{"title":"Security","version":"1"},"security":[{"ApiKey":[]},{"Bearer":[]}],"components":{"securitySchemes":{"ApiKey":{"type":"apiKey","in":"header","name":"X-API-Key"},"Bearer":{"type":"http","scheme":"bearer"}}},"paths":{"/protected":{"get":{"operationId":"readSecure","responses":{"204":{"description":"OK"}}}},"/public":{"get":{"operationId":"getPublic","security":[],"responses":{"204":{"description":"OK"}}}}}}`))
 	if err != nil {
 		t.Fatal(err)

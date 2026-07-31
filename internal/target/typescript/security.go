@@ -8,46 +8,35 @@ import (
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 )
 
-// operationSecurityDefinition lowers an operation's effective OpenAPI Security
-// Requirement Object. An absent operation field inherits the root field;
-// explicit `security: []` disables that inheritance.
-func operationSecurityDefinition(document *ir.Document, operation ir.Operation) (string, bool, error) {
+type operationSecurityRequirement struct {
+	id    string
+	names []string
+	value map[string]any
+}
+
+func operationSecurityRequirements(document *ir.Document, operation ir.Operation) ([]operationSecurityRequirement, bool, error) {
 	value, exists := operation.Raw["security"]
 	if !exists {
 		value, exists = document.Raw["security"]
 	}
 	if !exists {
-		return "", false, nil
+		return nil, false, nil
 	}
-	requirements, ok := value.([]any)
+	values, ok := value.([]any)
 	if !ok {
-		return "", false, fmt.Errorf("security must be an array")
+		return nil, false, fmt.Errorf("security must be an array")
 	}
-	if len(requirements) == 0 {
-		return "", false, nil
+	if len(values) == 0 {
+		return nil, false, nil
 	}
-	components, _ := document.Raw["components"].(map[string]any)
-	schemes, _ := components["securitySchemes"].(map[string]any)
-	entries := make([]string, 0, len(requirements))
-	ids := make(map[string]int, len(requirements))
-	for index, value := range requirements {
+	result := make([]operationSecurityRequirement, 0, len(values))
+	ids := make(map[string]int, len(values))
+	for index, value := range values {
 		requirement, ok := value.(map[string]any)
 		if !ok {
-			return "", false, fmt.Errorf("security requirement %d must be an object", index)
+			return nil, false, fmt.Errorf("security requirement %d must be an object", index)
 		}
 		names := sortedAnyKeys(requirement)
-		definitions := make([]string, 0, len(names))
-		for _, name := range names {
-			scheme, ok := schemes[name].(map[string]any)
-			if !ok {
-				return "", false, fmt.Errorf("security requirement %d references unknown scheme %q", index, name)
-			}
-			definition, err := securitySchemeDefinition(name, scheme, requirement[name])
-			if err != nil {
-				return "", false, err
-			}
-			definitions = append(definitions, definition)
-		}
 		id := "optional"
 		if len(names) > 0 {
 			id = strings.Join(names, "__")
@@ -57,7 +46,36 @@ func operationSecurityDefinition(document *ir.Document, operation ir.Operation) 
 			id = fmt.Sprintf("%s__%d", baseID, count+1)
 		}
 		ids[baseID]++
-		entries = append(entries, "{ id: "+quoteTS(id)+", schemes: ["+strings.Join(definitions, ", ")+"] }")
+		result = append(result, operationSecurityRequirement{id: id, names: names, value: requirement})
+	}
+	return result, true, nil
+}
+
+// operationSecurityDefinition lowers an operation's effective OpenAPI Security
+// Requirement Object. An absent operation field inherits the root field;
+// explicit `security: []` disables that inheritance.
+func operationSecurityDefinition(document *ir.Document, operation ir.Operation) (string, bool, error) {
+	requirements, hasSecurity, err := operationSecurityRequirements(document, operation)
+	if err != nil || !hasSecurity {
+		return "", hasSecurity, err
+	}
+	components, _ := document.Raw["components"].(map[string]any)
+	schemes, _ := components["securitySchemes"].(map[string]any)
+	entries := make([]string, 0, len(requirements))
+	for index, requirement := range requirements {
+		definitions := make([]string, 0, len(requirement.names))
+		for _, name := range requirement.names {
+			scheme, ok := schemes[name].(map[string]any)
+			if !ok {
+				return "", false, fmt.Errorf("security requirement %d references unknown scheme %q", index, name)
+			}
+			definition, err := securitySchemeDefinition(name, scheme, requirement.value[name])
+			if err != nil {
+				return "", false, err
+			}
+			definitions = append(definitions, definition)
+		}
+		entries = append(entries, "{ id: "+quoteTS(requirement.id)+", schemes: ["+strings.Join(definitions, ", ")+"] }")
 	}
 	return "[" + strings.Join(entries, ", ") + "]", true, nil
 }

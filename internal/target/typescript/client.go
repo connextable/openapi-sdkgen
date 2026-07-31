@@ -647,7 +647,7 @@ func emitOperationParameterJSDoc(output *bytes.Buffer, indent string, parameter 
 }
 
 func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operationName string, operation ir.Operation) error {
-	parts := []string{`Omit<RequestOptions, "accept">`}
+	parts := []string{`Omit<RequestOptions, "accept" | "securityRequirement">`}
 	mediaTypes, err := operationResponseMediaTypes(document, operation)
 	if err != nil {
 		return err
@@ -658,6 +658,17 @@ func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operation
 			quoted = append(quoted, quoteTS(mediaType))
 		}
 		parts = append(parts, "{\n  /** Requested successful response media type. */\n  readonly accept?: "+strings.Join(quoted, " | ")+" | undefined\n}")
+	}
+	requirements, hasSecurity, err := operationSecurityRequirements(document, operation)
+	if err != nil {
+		return err
+	}
+	if hasSecurity {
+		ids := make([]string, 0, len(requirements))
+		for _, requirement := range requirements {
+			ids = append(ids, quoteTS(requirement.id))
+		}
+		parts = append(parts, "{\n  /** OpenAPI security requirement selected for this request. */\n  readonly securityRequirement?: "+strings.Join(ids, " | ")+" | undefined\n}")
 	}
 	fmt.Fprintf(output, "/**\n * Per-request transport options for `%s` (`%s %s`).\n", operation.OperationID, operation.Method, operation.Path)
 	if boolValue(operation.Raw, "deprecated") {
