@@ -1967,6 +1967,7 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
     "/auth/oauth":{"post":{"operationId":"startOAuth","security":[{}, {"BuyerSessionCookie":[],"BuyerCSRFHeader":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"string"}}}},"responses":{"204":{"description":"OK"}}}},
     "/search":{"get":{"operationId":"searchSecure","security":[{}, {"GuestCapability":[]}],"parameters":[{"name":"query","in":"query","schema":{"type":"string"}}],"responses":{"204":{"description":"OK"}}}},
     "/events":{"get":{"operationId":"watchEvents","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
+    "/event-search":{"get":{"operationId":"searchEvents","security":[{}, {"GuestCapability":[]}],"parameters":[{"name":"query","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
     "/items":{"get":{"operationId":"listItems","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"parameters":[{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"pagination":{"type":"object","properties":{"nextCursor":{"type":["string","null"]}}}}}}}}},"x-pagination":"cursor"}},
     "/operator":{"get":{"operationId":"getOperator","security":[{"OperatorKey":[]}],"responses":{"204":{"description":"OK"}}}},
     "/public":{"get":{"operationId":"getPublic","security":[],"responses":{"200":{"description":"OK","links":{"checkout":{"operationId":"mutateCheckout"}}}}}}
@@ -1990,6 +1991,9 @@ api.$operations.searchSecure({ query: { query: "input" } }, { securityRequiremen
 api.$operations.searchSecure(undefined, { securityRequirement: "optional" })
 api.$operations.getOperator()
 api.$streams.watchEvents({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$streams.searchEvents({ securityRequirement: "optional" })
+api.$streams.searchEvents({ query: { query: "input" } }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$streams.searchEvents(undefined, { securityRequirement: "optional" })
 api.$operations.listItems.paginate({ query: {} }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$links.getPublic.checkout(source, { options: { securityRequirement: "GuestCapability", authorization: "Bearer guest" } })
 // @ts-expect-error ambiguous no-input operation requires options
@@ -2010,6 +2014,18 @@ api.auth.oauth.post({ body: "input" })
 api.$operations.searchSecure()
 // @ts-expect-error ambiguous optional-input operation cannot omit options after input
 api.$operations.searchSecure({ query: { query: "input" } })
+// @ts-expect-error ambiguous stream requires options
+api.$streams.watchEvents()
+// @ts-expect-error ambiguous optional-input stream cannot omit all arguments
+api.$streams.searchEvents()
+// @ts-expect-error ambiguous optional-input stream cannot omit options after input
+api.$streams.searchEvents({ query: { query: "input" } })
+// @ts-expect-error ambiguous pagination target requires options
+api.$operations.listItems.paginate({ query: {} })
+// @ts-expect-error ambiguous Link target requires invocation options
+api.$links.getPublic.checkout(source)
+// @ts-expect-error ambiguous Link target requires security selection in invocation options
+api.$links.getPublic.checkout(source, {})
 // @ts-expect-error unknown requirement ID
 api.$operations.mutateCheckout({ securityRequirement: "Unknown" })
 // @ts-expect-error another operation's requirement ID

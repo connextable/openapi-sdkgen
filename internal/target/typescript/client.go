@@ -110,7 +110,11 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 			if err != nil {
 				return nil, err
 			}
-			paginationType = paginationFunctionType(operation, itemType)
+			optionsRequired, err := operationRequiresOptions(document, operationsByRoute[routeKey])
+			if err != nil {
+				return nil, err
+			}
+			paginationType = paginationFunctionType(operation, itemType, optionsRequired)
 			hasPagination = true
 		}
 		linksType, err := routeLinksType(document, links, routeKey)
@@ -1613,7 +1617,7 @@ func operationInputAlias(operation ManifestOperation) string {
 	return operationTypeName(manifestRouteKey(operation)) + "Input"
 }
 
-func paginationFunctionType(operation ManifestOperation, itemType string) string {
+func paginationFunctionType(operation ManifestOperation, itemType string, optionsRequired bool) string {
 	operationName := operationTypeName(manifestRouteKey(operation))
 	cursor := operation.paginationRequest.Cursor
 	offset := operation.paginationRequest.Offset
@@ -1623,7 +1627,11 @@ func paginationFunctionType(operation ManifestOperation, itemType string) string
 	if offset == "" && (operation.Pagination == "offset" || operation.Pagination == "both") {
 		offset = "offset"
 	}
-	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ", " + quoteTS(cursor) + ", " + quoteTS(offset) + ">, options?: " + operationName + "Options) => AsyncIterable<" + itemType + ">"
+	optionsMarker := "?"
+	if optionsRequired {
+		optionsMarker = ""
+	}
+	return "(input: PaginateInput<" + operationName + "Input, " + quoteTS(operation.Pagination) + ", " + quoteTS(cursor) + ", " + quoteTS(offset) + ">, options" + optionsMarker + ": " + operationName + "Options) => AsyncIterable<" + itemType + ">"
 }
 
 func operationValueName(operationID string) string {

@@ -163,7 +163,11 @@ func streamFunctionType(document *ir.Document, stream generatedStream) (string, 
 	}
 	optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
 	optionMarker := "?"
-	if operationRequiresOptions(stream.Operation) {
+	optionsRequired, err := operationRequiresOptions(document, stream.Operation)
+	if err != nil {
+		return "", err
+	}
+	if optionsRequired {
 		optionMarker = ""
 	}
 	if len(inputs) == 0 {
@@ -185,8 +189,8 @@ func streamFunctionType(document *ir.Document, stream generatedStream) (string, 
 	return "(input" + inputMarker + ": " + inputType + ", options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
 }
 
-func operationRequiresOptions(ir.Operation) bool {
-	return false
+func operationRequiresOptions(document *ir.Document, operation ir.Operation) (bool, error) {
+	return operationRequiresSecuritySelection(document, operation)
 }
 
 func isStreamMediaType(mediaType string) bool {

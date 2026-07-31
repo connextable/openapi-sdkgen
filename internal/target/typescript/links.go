@@ -380,14 +380,18 @@ func linkGroupContract(document *ir.Document, group generatedLinkGroup) (string,
 		targetInputs[input] = true
 		targetOptions[operationSlotType(operationRouteKey(link.TargetOperation), "options")] = true
 		targetOutputs[output] = true
-		if operationRequiresOptions(link.TargetOperation) {
+		targetRequiresOptions, err := operationRequiresOptions(document, link.TargetOperation)
+		if err != nil {
+			return "", err
+		}
+		if targetRequiresOptions {
 			requiresOptions = true
 		}
 		statusProperty, err := linkStatusProperty(link.Status)
 		if err != nil {
 			return "", err
 		}
-		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse")+" | APIError, "+linkInvocationParameter(input, operationSlotType(operationRouteKey(link.TargetOperation), "options"), sourceInput, operationRequiresOptions(link.TargetOperation))+") => Promise<"+output+">")
+		statusMembers = append(statusMembers, "readonly "+statusProperty+": (response: "+operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse")+" | APIError, "+linkInvocationParameter(input, operationSlotType(operationRouteKey(link.TargetOperation), "options"), sourceInput, targetRequiresOptions)+") => Promise<"+output+">")
 	}
 	return "{ (response: " + operationSlotType(operationRouteKey(group.SourceOperation), "rawResponse") + " | APIError, " + linkInvocationParameter(sortedStringSet(targetInputs), sortedStringIntersection(targetOptions), sourceInput, requiresOptions) + "): Promise<" + sortedStringSet(targetOutputs) + ">; readonly byStatus: { " + strings.Join(statusMembers, "; ") + " } }", nil
 }
@@ -473,7 +477,11 @@ func emitLinkValues(output *bytes.Buffer, document *ir.Document, links []generat
 		targetOutput := operationSlotType(operationRouteKey(link.TargetOperation), "output")
 		invocationType := "LinkInvocation"
 		invocationDefault := " = {}"
-		if operationRequiresOptions(link.TargetOperation) {
+		targetRequiresOptions, err := operationRequiresOptions(document, link.TargetOperation)
+		if err != nil {
+			return err
+		}
+		if targetRequiresOptions {
 			invocationType = "RequiredLinkInvocation"
 			invocationDefault = ""
 		}
@@ -523,7 +531,11 @@ func emitLinkGroupValue(output *bytes.Buffer, document *ir.Document, group gener
 		targetInputs[input] = true
 		targetOptions[operationSlotType(operationRouteKey(link.TargetOperation), "options")] = true
 		targetOutputs[output] = true
-		if operationRequiresOptions(link.TargetOperation) {
+		targetRequiresOptions, err := operationRequiresOptions(document, link.TargetOperation)
+		if err != nil {
+			return err
+		}
+		if targetRequiresOptions {
 			requiresOptions = true
 		}
 	}
