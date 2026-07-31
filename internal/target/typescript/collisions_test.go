@@ -286,7 +286,7 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	if !strings.Contains(source, `readonly list: Routes["GET /users"]["call"] & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
+	if !strings.Contains(source, `readonly list: ResourceCall<"GET /users"> & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
 		t.Fatalf("callable namespace was not emitted:\n%s", source)
 	}
 }

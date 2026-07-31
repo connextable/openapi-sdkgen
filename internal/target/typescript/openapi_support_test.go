@@ -164,7 +164,7 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 			for _, expected := range []string{
 				`readonly headerParams?: ` + managedOnlyName + `HeaderInput | undefined`,
 				`(input?: ` + managedOnlyName + `Input, options?: ` + managedOnlyName + `Options)`,
-				`raw(input?: ` + managedOnlyName + `Input, options?: ` + managedOnlyName + `Options)`,
+				`readonly raw: ` + managedOnlyName + `RawCall`,
 				`readonly headerParams?: ` + oauthName + `HeaderInput | undefined`,
 				`readonly body: ` + oauthName + `BodyInput`,
 				`(input: ` + oauthName + `Input, options?: ` + oauthName + `Options)`,

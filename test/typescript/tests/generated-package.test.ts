@@ -8,16 +8,60 @@ import {
   isErrorCategory,
   isErrorCode,
 } from "../fixtures/generated/client/index.js";
-import type { Operations } from "../fixtures/generated/client/index.js";
+import type {
+  LinkCalls,
+  Operations,
+  PaginateCall,
+  RawCall,
+  ResourceCall,
+  RouteContract,
+  StreamCall,
+} from "../fixtures/generated/client/index.js";
 import { openapi } from "../fixtures/generated/client/metadata.js";
 
 type Expect<Value extends true> = Value;
 type RootHidesMetadata = Expect<
   "openapi" extends keyof typeof import("../fixtures/generated/client/index.js") ? false : true
 >;
+type CreateAfterSale = RouteContract<
+  "POST /orders/{orderID}/after-sales-requests"
+>;
+type CreateAfterSaleSlots = [
+  CreateAfterSale["input"],
+  CreateAfterSale["resourceInput"],
+  CreateAfterSale["options"],
+  CreateAfterSale["output"],
+  CreateAfterSale["error"],
+  CreateAfterSale["rawResponse"],
+  CreateAfterSale["call"],
+  CreateAfterSale["resourceCall"],
+  CreateAfterSale["pagination"],
+  CreateAfterSale["links"],
+  CreateAfterSale["stream"],
+];
+type CreateAfterSaleCall = ResourceCall<
+  "POST /orders/{orderID}/after-sales-requests"
+>;
+type CreateAfterSaleRawCall = RawCall<
+  "POST /orders/{orderID}/after-sales-requests"
+>;
+type AfterSalePagination = PaginateCall<"GET /after-sales-requests">;
+type NoStream = StreamCall<"POST /orders/{orderID}/after-sales-requests">;
+type NoLinks = LinkCalls<"POST /orders/{orderID}/after-sales-requests">;
+// @ts-expect-error Unknown route keys are rejected by the public helper.
+type UnknownRoute = RouteContract<"GET /missing">;
 
 const rootHidesMetadata: RootHidesMetadata = true;
-void rootHidesMetadata;
+void [
+  rootHidesMetadata,
+  null as unknown as CreateAfterSaleSlots,
+  null as unknown as CreateAfterSaleCall,
+  null as unknown as CreateAfterSaleRawCall,
+  null as unknown as AfterSalePagination,
+  null as unknown as NoStream,
+  null as unknown as NoLinks,
+  null as unknown as UnknownRoute,
+];
 
 describe("generated TypeScript source", () => {
   it("keeps lossless OpenAPI metadata behind its explicit entry", () => {
@@ -74,6 +118,32 @@ describe("generated TypeScript source", () => {
       id: "widget/2",
       name: "nested",
     });
+  });
+
+  it("preserves bound path input through a concise resource call", async () => {
+    const api = createClient({
+      baseURL: "https://api.example.test/api",
+      fetch: async (input, init) => {
+        expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
+          "POST /api/orders/order%2F1/after-sales-requests",
+        );
+        return Response.json(
+          {
+            id: "request-1",
+            orderID: "order/1",
+            reason: "Changed my mind",
+            type: "CANCELLATION",
+          },
+          { status: 201 },
+        );
+      },
+    });
+
+    await expect(
+      api.orders("order/1").afterSalesRequests.create({
+        body: { reason: "Changed my mind", type: "CANCELLATION" },
+      }),
+    ).resolves.toMatchObject({ id: "request-1", orderID: "order/1" });
   });
 
   it("exposes raw responses through the generated operation call", async () => {

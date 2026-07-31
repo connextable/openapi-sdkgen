@@ -91,11 +91,7 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 		if stream.Operation.OperationID == "" {
 			continue
 		}
-		functionType, err := streamFunctionType(document, stream)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(output, "    readonly %s: %s\n", quoteTS(stream.Operation.OperationID), functionType)
+		fmt.Fprintf(output, "    readonly %s: StreamCall<%s>\n", quoteTS(stream.Operation.OperationID), quoteTS(operationRouteKey(stream.Operation)))
 	}
 	output.WriteString("  }\n")
 	return nil

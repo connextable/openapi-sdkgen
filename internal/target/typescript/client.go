@@ -104,35 +104,38 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 			resourceInputType = operationName + "ResourceInput"
 		}
 		paginationType := "never"
-		callType := operationName + "Call"
+		hasPagination := false
 		if operationsByRoute[routeKey].PaginationPlan != nil {
 			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
 			if err != nil {
 				return nil, err
 			}
 			paginationType = paginationFunctionType(operation, itemType)
-			callType = "(" + callType + ") & { readonly paginate: " + paginationType + " }"
+			hasPagination = true
 		}
 		linksType, err := routeLinksType(document, links, routeKey)
 		if err != nil {
 			return nil, err
 		}
-		if linksType != "never" {
-			callType = "(" + callType + ") & { readonly links: " + linksType + " }"
-		}
+		hasLinks := linksType != "never"
 		streamType := "never"
+		hasStream := false
 		if stream, exists := streamForRoute(streams, routeKey); exists {
 			streamType, err = streamFunctionType(document, stream)
 			if err != nil {
 				return nil, err
 			}
-			callType = "(" + callType + ") & { readonly stream: " + streamType + " }"
+			hasStream = true
 		}
-		resourceCallType := callType
+		callType := operationCallWithCapabilities(operationName+"Call", routeKey, hasPagination, hasLinks, hasStream)
+		resourceCallType := "never"
 		if operation.Visibility == "internal" || !resourceReachable[routeKey] {
 			resourceCallType = "never"
-		} else if len(operation.PathParameterOrder) > 0 {
+		} else {
 			resourceCallType = operationName + "ResourceCall"
+			if len(operation.PathParameterOrder) == 0 {
+				resourceCallType = operationCallWithCapabilities(resourceCallType, routeKey, hasPagination, hasLinks, hasStream)
+			}
 		}
 		emitOperationCatalogJSDoc(&output, "  ", operation)
 		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(routeKey))
@@ -161,6 +164,36 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n\n")
+	output.WriteString("interface ResourceRawCalls {\n")
+	for _, operation := range manifest.Operations {
+		if operation.Visibility == "hidden" {
+			continue
+		}
+		routeKey := manifestRouteKey(operation)
+		rawCallType := "never"
+		if operation.Visibility == "public" && resourceReachable[routeKey] {
+			rawCallType = operationTypeName(routeKey) + "ResourceRawCall"
+		}
+		fmt.Fprintf(&output, "  /** Raw resource-operation call for `%s`. */\n", sanitizeComment(routeKey))
+		fmt.Fprintf(&output, "  readonly %s: %s\n", quoteTS(routeKey), rawCallType)
+	}
+	output.WriteString("}\n\n")
+	output.WriteString("declare const routeTypeBrand: unique symbol\n")
+	output.WriteString("interface RouteTypeIdentity<Route extends keyof Routes> { readonly [routeTypeBrand]?: Route }\n\n")
+	output.WriteString("/** Raw-call member shared by resource-oriented operation contracts. */\n")
+	output.WriteString("export interface ResourceRawCapability<Route extends keyof Routes> { readonly raw: RawCall<Route> }\n\n")
+	output.WriteString("/** Complete generated contract for one exact route. */\n")
+	output.WriteString("export type RouteContract<Route extends keyof Routes> = Routes[Route]\n\n")
+	output.WriteString("/** Resource-oriented operation call for one exact route. */\n")
+	output.WriteString("export type ResourceCall<Route extends keyof Routes> = RouteContract<Route>[\"resourceCall\"] & RouteTypeIdentity<Route>\n\n")
+	output.WriteString("/** Raw resource-operation call for one exact route. */\n")
+	output.WriteString("export type RawCall<Route extends keyof Routes> = ResourceRawCalls[Route] & RouteTypeIdentity<Route>\n\n")
+	output.WriteString("/** Streaming operation call for one exact route. */\n")
+	output.WriteString("export type StreamCall<Route extends keyof Routes> = RouteContract<Route>[\"stream\"] & RouteTypeIdentity<Route>\n\n")
+	output.WriteString("/** Pagination operation call for one exact route. */\n")
+	output.WriteString("export type PaginateCall<Route extends keyof Routes> = RouteContract<Route>[\"pagination\"] & RouteTypeIdentity<Route>\n\n")
+	output.WriteString("/** Response-link calls for one exact route. */\n")
+	output.WriteString("export type LinkCalls<Route extends keyof Routes> = RouteContract<Route>[\"links\"] & RouteTypeIdentity<Route>\n\n")
 
 	output.WriteString("/** Compatibility aliases keyed only by explicit OpenAPI operation IDs. */\n")
 	output.WriteString("export interface Operations {\n")
@@ -453,6 +486,7 @@ func emitOperationTypes(output *bytes.Buffer, document *ir.Document, operation i
 
 func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operation ir.Operation, item ManifestOperation) error {
 	operationName := operationTypeName(operationRouteKey(operation))
+	routeKey := operationRouteKey(operation)
 	inputType := "never"
 	if len(item.InputTypes) > 0 {
 		inputType = operationName + "Input"
@@ -461,28 +495,68 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 	if err != nil {
 		return err
 	}
-	emitOperationJSDoc(output, "", item)
-	if err := emitOperationCallInterface(output, document, operation, operationName+"Call", inputType, inputType != "never" && !inputRequired, operationName+"Output", operationName+"RawResponse"); err != nil {
+	if err := emitOperationRawCallInterface(output, document, operation, operationName+"RawCall", inputType, inputType != "never" && !inputRequired, operationName+"RawResponse"); err != nil {
 		return err
 	}
-	if len(item.PathParameterOrder) > 0 {
+	emitOperationJSDoc(output, "", item)
+	if err := emitOperationCallInterface(output, document, operation, operationName+"Call", inputType, inputType != "never" && !inputRequired, operationName+"Output", operationName+"RawCall", ""); err != nil {
+		return err
+	}
+	if item.Visibility == "public" {
 		emitOperationJSDoc(output, "", item)
-		resourceInput := operationName + "ResourceInput"
-		if len(item.InputTypes) <= 1 {
-			resourceInput = "never"
+		resourceInput := inputType
+		if len(item.PathParameterOrder) > 0 {
+			resourceInput = operationName + "ResourceInput"
+			if len(item.InputTypes) <= 1 {
+				resourceInput = "never"
+			}
 		}
 		resourceInputRequired, err := operationInputRequired(document, operation, item.InputTypes, true)
 		if err != nil {
 			return err
 		}
-		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", resourceInput, resourceInput != "never" && !resourceInputRequired, operationName+"Output", operationName+"RawResponse"); err != nil {
+		if err := emitOperationRawCallInterface(output, document, operation, operationName+"ResourceRawCall", resourceInput, resourceInput != "never" && !resourceInputRequired, operationName+"RawResponse"); err != nil {
+			return err
+		}
+		if err := emitOperationCallInterface(output, document, operation, operationName+"ResourceCall", resourceInput, resourceInput != "never" && !resourceInputRequired, operationName+"Output", "", "ResourceRawCapability<"+quoteTS(routeKey)+">"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, outputType, rawType string) error {
+func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, outputType, rawCallType, rawCapabilityType string) error {
+	operationName := operationTypeName(operationRouteKey(operation))
+	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
+	if err != nil {
+		return err
+	}
+	mediaTypes := make([]string, 0, len(mediaOutputs))
+	for mediaType := range mediaOutputs {
+		mediaTypes = append(mediaTypes, mediaType)
+	}
+	sort.Strings(mediaTypes)
+	extends := ""
+	if rawCapabilityType != "" {
+		extends = " extends " + rawCapabilityType
+	}
+	fmt.Fprintf(output, "interface %s%s {\n", callName, extends)
+	if len(mediaTypes) > 1 {
+		for _, mediaType := range mediaTypes {
+			optionsType := "Omit<" + operationName + "Options, \"accept\"> & { readonly accept: " + quoteTS(mediaType) + " }"
+			emitCallSignature(output, inputType, inputOptional, optionsType, mediaOutputs[mediaType], false)
+		}
+	}
+	emitCallSignature(output, inputType, inputOptional, operationName+"Options", outputType, true)
+	if rawCallType != "" {
+		output.WriteString("  /** Sends the request and returns the decoded body with HTTP response metadata. */\n")
+		fmt.Fprintf(output, "  readonly raw: %s\n", rawCallType)
+	}
+	output.WriteString("}\n\n")
+	return nil
+}
+
+func emitOperationRawCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, rawType string) error {
 	operationName := operationTypeName(operationRouteKey(operation))
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
@@ -497,11 +571,9 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 	if len(mediaTypes) > 1 {
 		for _, mediaType := range mediaTypes {
 			optionsType := "Omit<" + operationName + "Options, \"accept\"> & { readonly accept: " + quoteTS(mediaType) + " }"
-			emitCallSignature(output, inputType, inputOptional, optionsType, mediaOutputs[mediaType], false)
 			emitRawCallSignature(output, inputType, inputOptional, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
 		}
 	}
-	emitCallSignature(output, inputType, inputOptional, operationName+"Options", outputType, true)
 	emitRawCallSignature(output, inputType, inputOptional, operationName+"Options", rawType, true)
 	output.WriteString("}\n\n")
 	return nil
@@ -514,7 +586,7 @@ func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional 
 	}
 	if inputOptional {
 		output.WriteString("  /** Sends the request with transport options and no generated operation input. */\n")
-		fmt.Fprintf(output, "  raw(options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
+		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
 	}
 	output.WriteString("  /**\n")
 	output.WriteString("   * Sends the request and returns the decoded body with HTTP response metadata.\n")
@@ -526,7 +598,7 @@ func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional 
 	fmt.Fprintf(output, "   * @returns Decoded response and HTTP metadata as %s.\n", jsDocTypeReference(resultType))
 	output.WriteString("   */\n")
 	if inputType == "never" {
-		fmt.Fprintf(output, "  raw(options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
+		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
 		return
 	}
 	inputMarker := ""
@@ -535,7 +607,7 @@ func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional 
 	} else if inputOptional {
 		inputType += " | undefined"
 	}
-	fmt.Fprintf(output, "  raw(input%s: %s, options%s: %s): Promise<%s>\n", inputMarker, inputType, optional, optionsType, resultType)
+	fmt.Fprintf(output, "  (input%s: %s, options%s: %s): Promise<%s>\n", inputMarker, inputType, optional, optionsType, resultType)
 }
 
 func emitCallSignature(output *bytes.Buffer, inputType string, inputOptional bool, optionsType, resultType string, optionsOptional bool) {
@@ -1272,10 +1344,7 @@ func sortedResourceMemberNames(node *resourceNode) []string {
 }
 
 func resourceMemberOperationType(operation ManifestOperation) string {
-	if len(operation.PathParameterOrder) > 0 {
-		return operationResourceFunctionType(nil, operation)
-	}
-	return operationFunctionType(nil, operation)
+	return operationResourceFunctionType(operation)
 }
 
 func resourceMemberOperation(node *resourceNode, name string) (ManifestOperation, bool) {
@@ -1342,12 +1411,8 @@ func emitResourceTreeInterface(output *bytes.Buffer, document *ir.Document, root
 		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(root); ok {
-		itemType, err := operationItemTypeForScope(document, findOperation(document, manifestRouteKey(paginated)), typeRenderContract)
-		if err != nil {
-			return err
-		}
 		fmt.Fprintf(output, "  /** Lazily iterates every item from exact operation `%s` pagination. */\n", sanitizeComment(paginated.OperationID))
-		fmt.Fprintf(output, "  readonly paginate: %s\n", paginationFunctionType(paginated, itemType))
+		fmt.Fprintf(output, "  readonly paginate: PaginateCall<%s>\n", quoteTS(manifestRouteKey(paginated)))
 	}
 	return nil
 }
@@ -1362,12 +1427,8 @@ func emitResourceNodeInterface(output *bytes.Buffer, document *ir.Document, node
 		output.WriteString("\n")
 	}
 	if paginated, ok := paginatedResourceNodeOperation(node); ok {
-		itemType, err := operationItemTypeForScope(document, findOperation(document, manifestRouteKey(paginated)), typeRenderContract)
-		if err != nil {
-			return err
-		}
 		fmt.Fprintf(output, "%s/** Lazily iterates every item from exact operation `%s` pagination. */\n", memberIndent, sanitizeComment(paginated.OperationID))
-		fmt.Fprintf(output, "%sreadonly paginate: %s\n", memberIndent, paginationFunctionType(paginated, itemType))
+		fmt.Fprintf(output, "%sreadonly paginate: PaginateCall<%s>\n", memberIndent, quoteTS(manifestRouteKey(paginated)))
 	}
 	if node.parameterChild != nil {
 		parameter := node.parameterChild.parameter
@@ -1514,12 +1575,21 @@ func findOperation(document *ir.Document, identity string) ir.Operation {
 	return ir.Operation{RouteKey: identity}
 }
 
-func operationFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return "Routes[" + quoteTS(manifestRouteKey(operation)) + "][\"call\"]"
+func operationResourceFunctionType(operation ManifestOperation) string {
+	return "ResourceCall<" + quoteTS(manifestRouteKey(operation)) + ">"
 }
 
-func operationResourceFunctionType(document *ir.Document, operation ManifestOperation) string {
-	return "Routes[" + quoteTS(manifestRouteKey(operation)) + "][\"resourceCall\"]"
+func operationCallWithCapabilities(callType, routeKey string, pagination, links, stream bool) string {
+	if pagination {
+		callType = "(" + callType + ") & { readonly paginate: PaginateCall<" + quoteTS(routeKey) + "> }"
+	}
+	if links {
+		callType = "(" + callType + ") & { readonly links: LinkCalls<" + quoteTS(routeKey) + "> }"
+	}
+	if stream {
+		callType = "(" + callType + ") & { readonly stream: StreamCall<" + quoteTS(routeKey) + "> }"
+	}
+	return callType
 }
 
 func operationInputAlias(operation ManifestOperation) string {

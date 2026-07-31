@@ -321,15 +321,7 @@ func emitLinkInterface(output *bytes.Buffer, document *ir.Document, links []gene
 		if source.OperationID == "" {
 			continue
 		}
-		fmt.Fprintf(output, "    readonly %s: {\n", quoteTS(source.OperationID))
-		for _, group := range linkGroupsForSource(links, operationRouteKey(source)) {
-			contract, err := linkGroupContract(document, group)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(output, "      readonly %s: %s\n", quoteTS(group.Name), contract)
-		}
-		output.WriteString("    }\n")
+		fmt.Fprintf(output, "    readonly %s: LinkCalls<%s>\n", quoteTS(source.OperationID), quoteTS(operationRouteKey(source)))
 	}
 	output.WriteString("  }\n")
 	return nil

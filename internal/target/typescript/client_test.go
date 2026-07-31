@@ -30,7 +30,7 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	interfaceBody := func(name string) string {
 		t.Helper()
-		start := strings.Index(client, "interface "+name+" {")
+		start := strings.Index(client, "interface "+name)
 		if start < 0 {
 			t.Fatalf("missing interface %s:\n%s", name, client)
 		}
@@ -46,22 +46,34 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	for _, expected := range []string{
 		"(options?: " + optionalName + "Options)",
 		"(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
-		"raw(options?: " + optionalName + "Options)",
-		"raw(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
+		"readonly raw: " + optionalName + "RawCall",
 	} {
 		if !strings.Contains(optionalCall, expected) {
 			t.Fatalf("optional call missing %q:\n%s", expected, optionalCall)
 		}
 	}
+	optionalRawCall := interfaceBody(optionalName + "RawCall")
+	for _, expected := range []string{
+		"(options?: " + optionalName + "Options)",
+		"(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
+	} {
+		if !strings.Contains(optionalRawCall, expected) {
+			t.Fatalf("optional raw call missing %q:\n%s", expected, optionalRawCall)
+		}
+	}
 
 	requiredName := operationTypeName("POST /required")
-	if requiredCall := interfaceBody(requiredName + "Call"); strings.Contains(requiredCall, "(options?: "+requiredName+"Options)") || strings.Contains(requiredCall, "raw(options?: "+requiredName+"Options)") {
+	if requiredCall := interfaceBody(requiredName + "Call"); strings.Contains(requiredCall, "(options?: "+requiredName+"Options)") {
 		t.Fatalf("required call gained options-only overload:\n%s", requiredCall)
+	}
+	if requiredRawCall := interfaceBody(requiredName + "RawCall"); strings.Contains(requiredRawCall, "(options?: "+requiredName+"Options)") {
+		t.Fatalf("required raw call gained options-only overload:\n%s", requiredRawCall)
 	}
 
 	healthName := operationTypeName("GET /health")
 	healthCall := interfaceBody(healthName + "Call")
-	if strings.Count(healthCall, "\n  (options?: "+healthName+"Options)") != 1 || strings.Count(healthCall, "\n  raw(options?: "+healthName+"Options)") != 1 {
+	healthRawCall := interfaceBody(healthName + "RawCall")
+	if strings.Count(healthCall, "\n  (options?: "+healthName+"Options)") != 1 || strings.Count(healthRawCall, "\n  (options?: "+healthName+"Options)") != 1 {
 		t.Fatalf("no-input call should retain one options-only signature:\n%s", healthCall)
 	}
 
@@ -71,7 +83,8 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 		t.Fatalf("full path call gained options-only overload:\n%s", deleteCall)
 	}
 	deleteResourceCall := interfaceBody(deleteName + "ResourceCall")
-	if !strings.Contains(deleteResourceCall, "(options?: "+deleteName+"Options)") || !strings.Contains(deleteResourceCall, "raw(options?: "+deleteName+"Options)") {
+	deleteResourceRawCall := interfaceBody(deleteName + "ResourceRawCall")
+	if !strings.Contains(deleteResourceCall, "(options?: "+deleteName+"Options)") || !strings.Contains(deleteResourceRawCall, "(options?: "+deleteName+"Options)") {
 		t.Fatalf("optional resource call missing options-only overload:\n%s", deleteResourceCall)
 	}
 }

@@ -416,12 +416,18 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	}
 	client := string(byPath["generated/client.ts"])
 	for _, expected := range []string{
+		`export type RouteContract<Route extends keyof Routes> = Routes[Route]`,
+		`export type ResourceCall<Route extends keyof Routes> = RouteContract<Route>["resourceCall"] & RouteTypeIdentity<Route>`,
+		`export type RawCall<Route extends keyof Routes> = ResourceRawCalls[Route] & RouteTypeIdentity<Route>`,
+		`export type StreamCall<Route extends keyof Routes> = RouteContract<Route>["stream"] & RouteTypeIdentity<Route>`,
+		`export type PaginateCall<Route extends keyof Routes> = RouteContract<Route>["pagination"] & RouteTypeIdentity<Route>`,
+		`export type LinkCalls<Route extends keyof Routes> = RouteContract<Route>["links"] & RouteTypeIdentity<Route>`,
 		"readonly auth: {",
 		"readonly login: {",
-		`readonly post: Routes["POST /auth/login"]["call"]`,
+		`readonly post: ResourceCall<"POST /auth/login">`,
 		"readonly sessions: {",
 		"(__sdkgen_deleteAuthSessionsSessionIDPathSessionID_",
-		`readonly delete: Routes["DELETE /auth/sessions/{sessionId}"]["resourceCall"]`,
+		`readonly delete: ResourceCall<"DELETE /auth/sessions/{sessionId}">`,
 		"login: {\n      post: __sdkgen_",
 		"sessions: assignCallableProperties(",
 	} {
@@ -479,7 +485,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		`readonly get: Routes["GET /"]["call"]`,
+		`readonly get: ResourceCall<"GET /">`,
 		"get: __sdkgen_",
 	} {
 		if !strings.Contains(client, expected) {

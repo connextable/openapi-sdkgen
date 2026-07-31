@@ -5,6 +5,58 @@
     "version": "1.2.3"
   },
   "paths": {
+    "/after-sales-requests": {
+      "get": {
+        "operationId": "listAfterSalesRequests",
+        "summary": "List after-sales requests.",
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": { "id": { "type": "string" } }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "required": ["pagination"],
+                      "properties": {
+                        "pagination": {
+                          "type": "object",
+                          "required": ["nextCursor"],
+                          "properties": {
+                            "nextCursor": { "type": ["string", "null"] }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-envelope": "data",
+        "x-pagination": "cursor"
+      }
+    },
     "/widgets": {
       "post": {
         "operationId": "createWidget",
@@ -66,6 +118,54 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ValidationFailedError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{orderID}/after-sales-requests": {
+      "post": {
+        "operationId": "createAfterSalesRequest",
+        "summary": "Create an after-sales request.",
+        "parameters": [
+          {
+            "name": "orderID",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["reason", "type"],
+                "properties": {
+                  "reason": { "type": "string" },
+                  "type": { "type": "string", "enum": ["CANCELLATION", "RETURN"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "orderID", "reason", "type"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "orderID": { "type": "string" },
+                    "reason": { "type": "string" },
+                    "type": { "type": "string", "enum": ["CANCELLATION", "RETURN"] }
+                  }
+                }
               }
             }
           }
