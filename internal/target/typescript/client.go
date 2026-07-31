@@ -68,7 +68,7 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	output.WriteString("  isAPIError,\n")
 	output.WriteString("  isErrorCode,\n")
 	output.WriteString("} from \"./runtime.js\"\n")
-	output.WriteString("export type { APIKeyCredential, ClientOptions, CredentialContext, CredentialProvider, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationPlan, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityAlternative, SecurityCredential, SecurityCredentialSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
+	output.WriteString("export type { APIKeyCredential, ClientOptions, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationPlan, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityCredential, SecurityCredentialContext, SecurityCredentialProvider, SecurityRequirementDefinition, SecurityRequirementSelection, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
 
 	operationsByRoute := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {

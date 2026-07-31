@@ -33,14 +33,14 @@ func operationSecurityDefinition(document *ir.Document, operation ir.Operation) 
 	for index, value := range requirements {
 		requirement, ok := value.(map[string]any)
 		if !ok {
-			return "", false, fmt.Errorf("security alternative %d must be an object", index)
+			return "", false, fmt.Errorf("security requirement %d must be an object", index)
 		}
 		names := sortedAnyKeys(requirement)
 		definitions := make([]string, 0, len(names))
 		for _, name := range names {
 			scheme, ok := schemes[name].(map[string]any)
 			if !ok {
-				return "", false, fmt.Errorf("security alternative %d references unknown scheme %q", index, name)
+				return "", false, fmt.Errorf("security requirement %d references unknown scheme %q", index, name)
 			}
 			definition, err := securitySchemeDefinition(name, scheme, requirement[name])
 			if err != nil {

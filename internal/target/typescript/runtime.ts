@@ -157,12 +157,12 @@ export interface ClientOptions {
   /** Complete default `Authorization` header value, including its authentication scheme. */
   readonly authorization?: string;
   /**
-   * Either the default Fetch credentials mode or the host-owned provider for
-   * OpenAPI Security Requirement Objects. A string is passed to Fetch; a
-   * function is called only after the final operation origin is selected.
+   * Default Fetch credentials mode passed to the active Fetch implementation.
    * `"include"` satisfies cookie API-key security through ambient Fetch cookies.
    */
-  readonly credentials?: RequestCredentials | CredentialProvider;
+  readonly credentials?: RequestCredentials;
+  /** Host-owned OpenAPI security requirement selection and credential acquisition hook. */
+  readonly securityProvider?: SecurityCredentialProvider;
   /** Default positive timeout in milliseconds. Individual requests may override it. */
   readonly timeoutMS?: number;
   /** Maximum byte count a custom streaming codec may request in one read. */
@@ -211,7 +211,7 @@ export interface Transport {
   readonly capabilities?: TransportCapabilities;
 }
 
-/** One declared OpenAPI security scheme in a selected requirement alternative. */
+/** One declared OpenAPI security scheme in a selected requirement. */
 export interface SecuritySchemeDefinition {
   readonly name: string;
   readonly type: "apiKey" | "http" | "oauth2" | "openIdConnect" | "mutualTLS";
@@ -227,8 +227,8 @@ export interface SecuritySchemeDefinition {
   readonly deprecated?: boolean;
 }
 
-/** One OR alternative from an OpenAPI Security Requirement Object array. */
-export interface SecurityAlternative {
+/** Normalized OpenAPI Security Requirement Object available to an operation. */
+export interface SecurityRequirementDefinition {
   readonly id: string;
   readonly schemes: readonly SecuritySchemeDefinition[];
 }
@@ -272,22 +272,22 @@ export interface MutualTLSCredential {
 /** All credential shapes understood by generated security lowering. */
 export type SecurityCredential = APIKeyCredential | HTTPBasicCredential | HTTPBearerCredential | HTTPCredential | OAuthCredential | MutualTLSCredential;
 
-/** Selection returned by a host credential provider. */
-export interface SecurityCredentialSelection {
-  readonly alternative: SecurityAlternative;
+/** Security requirement selection returned by a host credential provider. */
+export interface SecurityRequirementSelection {
+  readonly requirement: SecurityRequirementDefinition;
   /** Credentials for selected schemes not already satisfied by ambient Fetch cookies. */
-  readonly values: Readonly<Record<string, SecurityCredential>>;
+  readonly credentials: Readonly<Record<string, SecurityCredential>>;
 }
 
-/** Context supplied to a host credential provider after final server selection. */
-export interface CredentialContext {
+/** Context supplied to a security credential provider after final server selection. */
+export interface SecurityCredentialContext {
   readonly operation: Pick<OperationDefinition, "route" | "operationID" | "method" | "path">;
-  readonly alternatives: Readonly<Record<string, SecurityAlternative>>;
+  readonly requirements: Readonly<Record<string, SecurityRequirementDefinition>>;
   readonly origin: string;
 }
 
-/** Host-owned security selection and credential acquisition hook. */
-export type CredentialProvider = (context: CredentialContext) => SecurityCredentialSelection | Promise<SecurityCredentialSelection>;
+/** Host-owned security requirement selection and credential acquisition hook. */
+export type SecurityCredentialProvider = (context: SecurityCredentialContext) => SecurityRequirementSelection | Promise<SecurityRequirementSelection>;
 
 /** Options applied to one generated operation call. */
 export interface RequestOptions {
@@ -350,8 +350,8 @@ export interface OperationDefinition {
   readonly requestBodyRequired?: boolean;
   /** Successful response representations keyed by status and media type. */
   readonly responses?: readonly WireResponseDefinition[];
-  /** Effective OpenAPI security requirement alternatives for this operation. */
-  readonly security?: readonly SecurityAlternative[];
+  /** Effective OpenAPI Security Requirement Objects for this operation. */
+  readonly security?: readonly SecurityRequirementDefinition[];
 }
 
 function operationDiagnosticName(operation: OperationDefinition): string {
@@ -1050,7 +1050,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
     requestOptions: RequestOptions = {},
     raw = false,
   ): Promise<Output | RawResponse<Output>> => {
-    const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
+    const credentials = requestOptions.credentials ?? options.credentials;
     let encoded: EncodedRequest;
     try {
 		const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
@@ -1186,7 +1186,7 @@ async function* streamOperation<Item>(
   input: unknown,
   requestOptions: RequestOptions,
 ): AsyncIterable<Item> {
-  const credentials = requestOptions.credentials ?? fetchCredentials(options.credentials);
+  const credentials = requestOptions.credentials ?? options.credentials;
   let encoded: EncodedRequest;
   try {
     const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
@@ -1518,10 +1518,6 @@ async function decodeResponseHeaders(operation: OperationDefinition, response: R
   return values;
 }
 
-function fetchCredentials(value: ClientOptions["credentials"]): RequestCredentials | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 function applyOperationSecurity(
 	options: ClientOptions,
   operation: OperationDefinition,
@@ -1532,35 +1528,35 @@ function applyOperationSecurity(
   if (declared === undefined || declared.length === 0 || declared.some((alternative) => alternative.schemes.length === 0)) return encoded;
   const ambientCookies = credentials === "include";
   if (ambientCookies && declared.some((alternative) => alternative.schemes.every(isCookieSecurityScheme))) return encoded;
-	if (typeof options.credentials !== "function") {
+	if (typeof options.securityProvider !== "function") {
     throw transportError(
       TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
       `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
       undefined,
     );
   }
-  const alternatives = Object.create(null) as Record<string, SecurityAlternative>;
-  for (const alternative of declared) defineOwnDataProperty(alternatives, alternative.id, alternative);
-  const context: CredentialContext = {
+  const requirements = Object.create(null) as Record<string, SecurityRequirementDefinition>;
+  for (const requirement of declared) defineOwnDataProperty(requirements, requirement.id, requirement);
+  const context: SecurityCredentialContext = {
     operation: { route: operation.route, operationID: operation.operationID, method: operation.method, path: operation.path },
-    alternatives,
+    requirements,
     origin: new URL(encoded.url).origin,
   };
-	const selection = options.credentials(context);
-  const apply = (resolved: SecurityCredentialSelection): EncodedRequest => {
-    const selected = alternatives[resolved?.alternative?.id];
-    if (selected === undefined || selected !== resolved.alternative) {
-      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Credential provider selected an unknown security alternative", undefined);
+	const selection = options.securityProvider(context);
+  const apply = (resolved: SecurityRequirementSelection): EncodedRequest => {
+    const selected = requirements[resolved?.requirement?.id];
+    if (selected === undefined || selected !== resolved.requirement) {
+      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider selected an unknown security requirement", undefined);
     }
     const expected = selected.schemes.filter((scheme) => !ambientCookies || !isCookieSecurityScheme(scheme)).map((scheme) => scheme.name).sort();
-    const supplied = Object.keys(resolved.values ?? {}).sort();
+    const supplied = Object.keys(resolved.credentials ?? {}).sort();
     if (expected.length !== supplied.length || expected.some((name, index) => name !== supplied[index])) {
-      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Credential provider values do not exactly match the selected security alternative", undefined);
+      throw transportError(TransportErrorCode.SECURITY_CREDENTIALS_INVALID, "Security credential provider values do not exactly match the selected security requirement", undefined);
     }
     const url = new URL(encoded.url);
 	for (const scheme of selected.schemes) {
       if (ambientCookies && isCookieSecurityScheme(scheme)) continue;
-      applySecurityCredential(options.transport, scheme, resolved.values[scheme.name]!, encoded.headers, url);
+      applySecurityCredential(options.transport, scheme, resolved.credentials[scheme.name]!, encoded.headers, url);
     }
     return { ...encoded, url: url.href };
   };

@@ -1963,25 +1963,25 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let calls = 0;
 let credentialCalls = 0;
-const credentials = ({ alternatives, origin }) => {
+const securityProvider = ({ requirements, origin }) => {
   credentialCalls++;
   if (origin !== "https://api.example.test") throw new Error("credential origin mismatch");
-  return { alternative: alternatives.ApiKey, values: { ApiKey: { kind: "api-key", value: "secret" } } };
+  return { requirement: requirements.ApiKey, credentials: { ApiKey: { kind: "api-key", value: "secret" } } };
 };
-const api = createClient({ baseURL: "https://api.example.test", credentials, fetch: async (_url, init) => {
+const api = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
   calls++;
   if (new Headers(init.headers).get("x-api-key") !== "secret") throw new Error("API key not applied");
   return new Response(null, { status: 204 });
 } });
 await api.$operations.readSecure();
 if (credentialCalls !== 1 || calls !== 1) throw new Error("protected request selection mismatch");
-const publicAPI = createClient({ baseURL: "https://api.example.test", credentials, fetch: async (_url, init) => {
+const publicAPI = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
   if (new Headers(init.headers).has("x-api-key")) throw new Error("operation security override was ignored");
   return new Response(null, { status: 204 });
 } });
 await publicAPI.$operations.getPublic();
 if (credentialCalls !== 1) throw new Error("public operation requested credentials");
-await createClient({ baseURL: "https://api.example.test", credentials, headers: { "x-api-key": "caller" }, fetch: async () => { throw new Error("fetch must not run after credential collision"); } }).$operations.readSecure().then(() => { throw new Error("credential collision was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
+await createClient({ baseURL: "https://api.example.test", securityProvider, headers: { "x-api-key": "caller" }, fetch: async () => { throw new Error("fetch must not run after credential collision"); } }).$operations.readSecure().then(() => { throw new Error("credential collision was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript security runtime test: %v\n%s", err, output)
@@ -2012,18 +2012,18 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let override = 123;
 let calls = 0;
-const credentials = ({ alternatives, operation }) => {
-  const alternative = Object.values(alternatives)[0];
+const securityProvider = ({ requirements, operation }) => {
+  const requirement = Object.values(requirements)[0];
   const values = {
     getOrigin: "https://caller.example",
     getOverride: override,
     getAgent: "openapi-sdkgen-test",
   };
-  return { alternative, values: { [alternative.schemes[0].name]: { kind: "api-key", value: values[operation.operationID] } } };
+  return { requirement, credentials: { [requirement.schemes[0].name]: { kind: "api-key", value: values[operation.operationID] } } };
 };
 const api = createClient({
   baseURL: "https://api.example.test",
-  credentials,
+  securityProvider,
   fetch: async (input, init) => {
     calls++;
     const url = new URL(String(input));
@@ -2076,12 +2076,12 @@ const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const expectedNames = ["__proto__", "api-key", "api_key", "constructor"];
 const api = createClient({
   baseURL: "https://api.example.test",
-  credentials: ({ alternatives }) => {
-    const alternative = Object.values(alternatives)[0];
-    if (JSON.stringify(alternative.schemes.map(({ name }) => name).sort()) !== JSON.stringify(expectedNames)) throw new Error("security scheme identities changed");
+  securityProvider: ({ requirements }) => {
+    const requirement = Object.values(requirements)[0];
+    if (JSON.stringify(requirement.schemes.map(({ name }) => name).sort()) !== JSON.stringify(expectedNames)) throw new Error("security scheme identities changed");
     return {
-      alternative,
-      values: Object.fromEntries(expectedNames.map((name, index) => [name, { kind: "api-key", value: String(index + 1) }])),
+      requirement,
+      credentials: Object.fromEntries(expectedNames.map((name, index) => [name, { kind: "api-key", value: String(index + 1) }])),
     };
   },
   fetch: async (_input, init) => {
@@ -2143,10 +2143,10 @@ for await (const item of requestAmbient.$operations.streamCookie.stream({ creden
 let providerCalls = 0;
 const mixed = createClient({
   baseURL: "https://api.example.test",
-  credentials: ({ alternatives }) => {
+  securityProvider: ({ requirements }) => {
     providerCalls++;
-    const alternative = Object.values(alternatives)[0];
-    return { alternative, values: { Bearer: { kind: "http-bearer", token: "token" } } };
+    const requirement = Object.values(requirements)[0];
+    return { requirement, credentials: { Bearer: { kind: "http-bearer", token: "token" } } };
   },
   fetch,
 });
@@ -2181,9 +2181,9 @@ func TestRuntimeAppliesEveryHostManagedSecurityCredentialShape(t *testing.T) {
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
-const credentials = ({ alternatives }) => {
-  const alternative = Object.values(alternatives)[0];
-  const scheme = alternative.schemes[0];
+const securityProvider = ({ requirements }) => {
+  const requirement = Object.values(requirements)[0];
+  const scheme = requirement.schemes[0];
   if (scheme.name === "Bearer" && scheme.bearerFormat !== "JWT") throw new Error("bearer format metadata missing");
   if (scheme.name === "OAuth" && (scheme.oauth2MetadataUrl !== "https://auth.example.test/metadata" || scheme.flows.authorizationCode.refreshUrl !== "https://auth.example.test/refresh" || scheme.flows.deviceAuthorization.deviceAuthorizationUrl !== "https://auth.example.test/device" || scheme.scopes[0] !== "widgets:read")) throw new Error("OAuth metadata missing");
   if (scheme.name === "OpenID" && scheme.openIdConnectUrl !== "https://auth.example.test/openid") throw new Error("OpenID metadata missing");
@@ -2198,7 +2198,7 @@ const credentials = ({ alternatives }) => {
     OpenID: { kind: "openIdConnect", token: "openid-token" },
     Mutual: { kind: "mutual-tls" },
   };
-  return { alternative, values: { [scheme.name]: values[scheme.name] } };
+  return { requirement, credentials: { [scheme.name]: values[scheme.name] } };
 };
 const expected = {
   "/basic": "Basic YTpi",
@@ -2207,7 +2207,7 @@ const expected = {
   "/oauth": "Bearer oauth-token",
   "/openid": "Bearer openid-token",
 };
-const api = createClient({ baseURL: "https://api.example.test", credentials, fetch: async (input, init) => {
+const api = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (input, init) => {
   const url = new URL(String(input));
   if (url.pathname === "/query") {
     if (url.searchParams.get("api_key") !== "query-value") throw new Error("query API key mismatch");
@@ -2224,14 +2224,14 @@ await api.$operations.getOAuth();
 await api.$operations.getOpenID();
 await api.$operations.getCookie().then(() => { throw new Error("cookie security unexpectedly dispatched"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
 await api.$operations.getMTLS().then(() => { throw new Error("mTLS security unexpectedly dispatched"); }, (error) => { if (error.code !== "TRANSPORT_CAPABILITY_REQUIRED") throw error; });
-const capable = createClient({ baseURL: "https://api.example.test", credentials, transport: { capabilities: { cookieJar: true, mutualTLS: true }, fetch: async (input, init) => {
+const capable = createClient({ baseURL: "https://api.example.test", securityProvider, transport: { capabilities: { cookieJar: true, mutualTLS: true }, fetch: async (input, init) => {
   const url = new URL(String(input));
   if (url.pathname === "/cookie" && new Headers(init.headers).get("cookie") !== "session=cookie-value") throw new Error("cookie capability was not used");
   return new Response(null, { status: 204 });
 } } });
 await capable.$operations.getCookie();
 await capable.$operations.getMTLS();
-const invalid = createClient({ baseURL: "https://api.example.test", credentials: ({ alternatives }) => ({ alternative: alternatives.Bearer, values: { Basic: { kind: "http-basic", username: "a", password: "b" } } }), fetch: async () => { throw new Error("invalid credentials reached fetch"); } });
+const invalid = createClient({ baseURL: "https://api.example.test", securityProvider: ({ requirements }) => ({ requirement: requirements.Bearer, credentials: { Basic: { kind: "http-basic", username: "a", password: "b" } } }), fetch: async () => { throw new Error("invalid credentials reached fetch"); } });
 await invalid.$operations.getBearer().then(() => { throw new Error("invalid credential set was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
