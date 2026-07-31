@@ -309,8 +309,6 @@ export interface RequestOptions {
   readonly authorization?: string;
   /** Requested response media type for operations with multiple representations. */
   readonly accept?: string;
-  /** Stable generated ID of the OpenAPI security requirement selected for this request. */
-  readonly securityRequirement?: string;
   /** Value sent through the `X-CSRF-Token` header. */
   readonly csrfToken?: string;
   /** Caller-provided value sent through the `X-Request-Id` header. */
@@ -323,6 +321,11 @@ export interface RequestOptions {
   readonly multipartContentTypes?: Readonly<Record<string, string>>;
   /** Maximum byte count a custom streaming codec may request in one read. */
   readonly maxStreamItemBytes?: number;
+}
+
+/** Internal operation options after generated security selection is attached. */
+interface OperationRequestOptions extends RequestOptions {
+  readonly securityRequirement?: string;
 }
 
 /** Binary body values supported by generated request encoders. */
@@ -1594,7 +1597,7 @@ function applyOperationSecurity(
 	options: ClientOptions,
   operation: OperationDefinition,
   encoded: EncodedRequest,
-  requestOptions: RequestOptions,
+  requestOptions: OperationRequestOptions,
   credentials: RequestCredentials | undefined,
 ): EncodedRequest | Promise<EncodedRequest> {
   const declared = operation.security;

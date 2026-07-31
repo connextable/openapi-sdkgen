@@ -764,18 +764,12 @@ func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operation
 	if err != nil {
 		return err
 	}
-	if hasSecurity {
+	if hasSecurity && len(requirements) > 1 {
 		ids := make([]string, 0, len(requirements))
 		for _, requirement := range requirements {
 			ids = append(ids, quoteTS(requirement.id))
 		}
-		marker := "?"
-		valueType := strings.Join(ids, " | ") + " | undefined"
-		if len(requirements) > 1 {
-			marker = ""
-			valueType = strings.Join(ids, " | ")
-		}
-		parts = append(parts, "{\n  /** OpenAPI security requirement selected for this request. */\n  readonly securityRequirement"+marker+": "+valueType+"\n}")
+		parts = append(parts, "{\n  /** OpenAPI security requirement selected for this request. */\n  readonly securityRequirement: "+strings.Join(ids, " | ")+"\n}")
 	}
 	fmt.Fprintf(output, "/**\n * Per-request transport options for `%s` (`%s %s`).\n", operation.OperationID, operation.Method, operation.Path)
 	if boolValue(operation.Raw, "deprecated") {

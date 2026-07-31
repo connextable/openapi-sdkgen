@@ -1960,7 +1960,8 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
     "GuestCapability":{"type":"http","scheme":"bearer"},
     "BuyerSessionCookie":{"type":"apiKey","in":"cookie","name":"buyer_session"},
     "BuyerCSRFHeader":{"type":"apiKey","in":"header","name":"X-CSRF-Token"},
-    "OperatorKey":{"type":"apiKey","in":"query","name":"operator_key"}
+    "OperatorKey":{"type":"apiKey","in":"query","name":"operator_key"},
+    "anonymous":{"type":"apiKey","in":"query","name":"anonymous"}
   }},
   "paths":{
     "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
@@ -1969,6 +1970,7 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
     "/events":{"get":{"operationId":"watchEvents","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
     "/event-search":{"get":{"operationId":"searchEvents","security":[{}, {"GuestCapability":[]}],"parameters":[{"name":"query","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
     "/items":{"get":{"operationId":"listItems","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"parameters":[{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"pagination":{"type":"object","properties":{"nextCursor":{"type":["string","null"]}}}}}}}}},"x-pagination":"cursor"}},
+    "/security-id-collision":{"get":{"operationId":"testSecurityRequirementIDs","security":[{}, {}, {"anonymous":[]}],"responses":{"204":{"description":"OK"}}}},
     "/operator":{"get":{"operationId":"getOperator","security":[{"OperatorKey":[]}],"responses":{"204":{"description":"OK"}}}},
     "/public":{"get":{"operationId":"getPublic","security":[],"responses":{"200":{"description":"OK","links":{"checkout":{"operationId":"mutateCheckout"}}}}}}
   }
@@ -1976,26 +1978,39 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := `import { createClient, type Routes } from "./index.js"
+	probe := `import { createClient, type RequestOptions, type Routes } from "./index.js"
 declare const api: ReturnType<typeof createClient>
 declare const source: Routes["GET /public"]["rawResponse"]
+const baseOptions: RequestOptions = {}
+void baseOptions
 api.$operations.mutateCheckout({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$operations.mutateCheckout.raw({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
 api.$routes["POST /checkout"]({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.checkout.post({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
-api.$operations.startOAuth({ body: "input" }, { securityRequirement: "optional" })
+api.$operations.startOAuth({ body: "input" }, { securityRequirement: "anonymous" })
 api.$routes["POST /auth/oauth"]({ body: "input" }, { securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
-api.auth.oauth.post({ body: "input" }, { securityRequirement: "optional" })
-api.$operations.searchSecure({ securityRequirement: "optional" })
+api.auth.oauth.post({ body: "input" }, { securityRequirement: "anonymous" })
+api.$operations.searchSecure({ securityRequirement: "anonymous" })
 api.$operations.searchSecure({ query: { query: "input" } }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
-api.$operations.searchSecure(undefined, { securityRequirement: "optional" })
+api.$operations.searchSecure(undefined, { securityRequirement: "anonymous" })
 api.$operations.getOperator()
+api.$operations.getOperator({ headers: { "x-trace": "one" } })
+api.$operations.testSecurityRequirementIDs({ securityRequirement: "anonymous" })
+api.$operations.testSecurityRequirementIDs({ securityRequirement: "anonymous__2" })
+api.$operations.testSecurityRequirementIDs({ securityRequirement: "anonymous__3" })
 api.$streams.watchEvents({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
-api.$streams.searchEvents({ securityRequirement: "optional" })
+api.$streams.searchEvents({ securityRequirement: "anonymous" })
 api.$streams.searchEvents({ query: { query: "input" } }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
-api.$streams.searchEvents(undefined, { securityRequirement: "optional" })
+api.$streams.searchEvents(undefined, { securityRequirement: "anonymous" })
 api.$operations.listItems.paginate({ query: {} }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$links.getPublic.checkout(source, { options: { securityRequirement: "GuestCapability", authorization: "Bearer guest" } })
+// @ts-expect-error generic RequestOptions does not expose operation security selection
+const looseSecurityOptions: RequestOptions = { securityRequirement: "GuestCapability" }
+void looseSecurityOptions
+// @ts-expect-error a sole requirement is selected by the SDK and exposes no selector
+api.$operations.getOperator({ securityRequirement: "OperatorKey" })
+// @ts-expect-error the empty requirement ID is anonymous in v4
+api.$operations.startOAuth({ body: "input" }, { securityRequirement: "optional" })
 // @ts-expect-error ambiguous no-input operation requires options
 api.$operations.mutateCheckout()
 // @ts-expect-error ambiguous raw operation requires options
@@ -2117,7 +2132,7 @@ const matchingProvider = createClient({
 await matchingProvider.$operations.mutateCheckout({ securityRequirement: "GuestCapability__OperatorKey" });
 if (matchingProviderCalls !== 1) throw new Error("provider did not complete explicit request selection");
 
-await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional({ securityRequirement: "optional" });
+await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional({ securityRequirement: "anonymous" });
 await createClient({ baseURL: "https://api.example.test", authorization: "Bearer single", fetch }).$operations.getSingle();
 
 const noFetch = async () => { throw new Error("invalid security request reached fetch"); };

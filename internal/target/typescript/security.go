@@ -37,7 +37,7 @@ func operationSecurityRequirements(document *ir.Document, operation ir.Operation
 			return nil, false, fmt.Errorf("security requirement %d must be an object", index)
 		}
 		names := sortedAnyKeys(requirement)
-		id := "optional"
+		id := "anonymous"
 		if len(names) > 0 {
 			id = strings.Join(names, "__")
 		}
