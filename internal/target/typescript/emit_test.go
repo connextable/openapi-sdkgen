@@ -164,9 +164,9 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"HTTP: `POST /products`.",
 		"* ```ts\n * await api.products.create({ headerParams, body })\n * ```",
 		"Sends the request and returns the decoded response body.",
-		"@returns Decoded response body as",
+		"@returns Decoded response body.",
 		"Sends the request and returns the decoded body with HTTP response metadata.",
-		"@returns Decoded response and HTTP metadata as",
+		"@returns Decoded response body with HTTP metadata.",
 		"Creates one catalog product from the supplied body.",
 		"Product values accepted during creation.",
 		"Product identifier.",
@@ -185,6 +185,10 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("operation JSDoc missing %q:\n%s", expected, clientSource)
 		}
 	}
+	if strings.Contains(clientSource, "@returns Decoded response body as __sdkgen_") ||
+		strings.Contains(clientSource, "@returns Decoded response and HTTP metadata as __sdkgen_") {
+		t.Fatalf("private operation type leaked through public return documentation:\n%s", clientSource)
+	}
 	if !strings.Contains(clientSource, "POST /products") {
 		t.Fatalf("operation JSDoc missing:\n%s", clientSource)
 	}
@@ -201,7 +205,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, `readonly "createProduct": Routes["POST /products"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "(__sdkgen_getProductsProductIDPathProductID_") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
+	if !strings.Contains(clientSource, "(productID: string)") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
 		t.Fatalf("instance resource builder missing:\n%s", clientSource)
 	}
 	for _, expected := range []string{
@@ -230,7 +234,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if manifest.Operations[2].Description != "Creates one catalog product from the supplied body." {
 		t.Fatalf("manifest JSDoc metadata = %#v", manifest.Operations[2])
 	}
-	if !strings.HasPrefix(manifest.Operations[3].CallExpression, "api.products(__sdkgen_") || !strings.HasSuffix(manifest.Operations[3].CallExpression, ").get()") {
+	if manifest.Operations[3].CallExpression != "api.products(productID).get()" {
 		t.Fatalf("get manifest = %#v", manifest.Operations[3])
 	}
 	if !manifest.Operations[3].Deprecated {
@@ -426,7 +430,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 		"readonly login: {",
 		`readonly post: ResourceCall<"POST /auth/login">`,
 		"readonly sessions: {",
-		"(__sdkgen_deleteAuthSessionsSessionIDPathSessionID_",
+		"(sessionID: string)",
 		`readonly delete: ResourceCall<"DELETE /auth/sessions/{sessionId}">`,
 		"login: {\n      post: __sdkgen_",
 		"sessions: assignCallableProperties(",
@@ -452,7 +456,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 			t.Fatalf("%s call = %q, want %q", id, got[id], want)
 		}
 	}
-	if call := got["revokeSession"]; !strings.HasPrefix(call, "api.auth.sessions(__sdkgen_") || !strings.HasSuffix(call, ").delete()") {
+	if call := got["revokeSession"]; call != "api.auth.sessions(sessionID).delete()" {
 		t.Fatalf("revokeSession call = %q", call)
 	}
 }

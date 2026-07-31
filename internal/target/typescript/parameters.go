@@ -5,8 +5,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
 )
 
 type operationParameter struct {
@@ -159,7 +161,47 @@ func operationParameters(document *ir.Document, operation ir.Operation) ([]opera
 		}
 		return pathParameterIndex(operation.PathParameterOrder, result[i].Name) < pathParameterIndex(operation.PathParameterOrder, result[j].Name)
 	})
+	usedPathBindings := make(map[string]bool, len(operation.PathParameterOrder))
+	for index := range result {
+		if result[index].Location == "path" {
+			result[index].Binding = readablePathParameterBinding(result[index].Name, usedPathBindings)
+		}
+	}
 	return result, nil
+}
+
+func readablePathParameterBinding(name string, used map[string]bool) string {
+	base, err := naming.Property(name)
+	if err != nil || !isTypeScriptBindingIdentifier(base) {
+		public, publicErr := naming.Public(name)
+		if publicErr == nil && public != "" {
+			runes := []rune(public)
+			runes[0] = unicode.ToLower(runes[0])
+			base = string(runes)
+		}
+	}
+	if !isTypeScriptBindingIdentifier(base) {
+		base = "pathParameter"
+	}
+	binding := base
+	for suffix := 2; used[binding]; suffix++ {
+		binding = base + strconv.Itoa(suffix)
+	}
+	used[binding] = true
+	return binding
+}
+
+func isTypeScriptBindingIdentifier(value string) bool {
+	runes := []rune(value)
+	if len(runes) == 0 || !(runes[0] == '_' || runes[0] == '$' || unicode.IsLetter(runes[0])) {
+		return false
+	}
+	for _, value := range runes[1:] {
+		if value != '_' && value != '$' && !unicode.IsLetter(value) && !unicode.IsDigit(value) {
+			return false
+		}
+	}
+	return true
 }
 
 func operationPathItemPointer(operation ir.Operation) string {

@@ -199,6 +199,47 @@ func TestManifestExamplesUsePlannedBindingsForNormalizationEquivalentPathKeys(t 
 	}
 }
 
+func TestResourceSelectorsUseReadableLocallyUniquePathBindings(t *testing.T) {
+	names := []string{"foo-bar", "foo_bar", "default", "123-id", "한글", "$"}
+	parameters := make([]any, 0, len(names))
+	for _, name := range names {
+		parameters = append(parameters, map[string]any{
+			"name": name, "in": "path", "required": true, "schema": map[string]any{"type": "string"},
+		})
+	}
+	operation := ir.Operation{
+		OperationID:        "getSelectorTest",
+		Method:             "GET",
+		Path:               "/selectors/{foo-bar}/{foo_bar}/{default}/{123-id}/{한글}/{$}",
+		PathParameterOrder: names,
+		Raw:                map[string]any{"parameters": parameters},
+	}
+	document := &ir.Document{Operations: []ir.Operation{operation}}
+	manifest, err := buildManifest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCall := "api.selectors(fooBar)(fooBar2)(defaultValue)(value123ID)(한글)(pathParameter).get()"
+	if call := manifest.Operations[0].CallExpression; call != wantCall {
+		t.Fatalf("call expression = %q, want %q", call, wantCall)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	for _, expected := range []string{
+		"(fooBar: string):", "(fooBar2: string):", "(defaultValue: string):",
+		"(value123ID: string):", "(한글: string):", "(pathParameter: string):",
+		`"foo-bar": fooBar`, `"foo_bar": fooBar2`, `"default": defaultValue`,
+		`"123-id": value123ID`, `"한글": 한글`, `"$": pathParameter`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("readable selector source missing %q:\n%s", expected, source)
+		}
+	}
+}
+
 func TestOperationParametersFollowURIPathParameterOrder(t *testing.T) {
 	parameters, err := operationParameters(&ir.Document{}, ir.Operation{
 		PathParameterOrder: []string{"customerID", "widgetID"},
@@ -394,7 +435,7 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 		t.Fatal(err)
 	}
 	calls := manifestCalls(manifest)
-	if calls["listUsers"] != `api.$operations["listUsers"]()` || !strings.HasPrefix(calls["getListedUser"], "api.users.list(__sdkgen_") || !strings.HasSuffix(calls["getListedUser"], ").get()") {
+	if calls["listUsers"] != `api.$operations["listUsers"]()` || calls["getListedUser"] != "api.users.list(id).get()" {
 		t.Fatalf("calls = %#v", calls)
 	}
 	tree, err := buildResourceTree(document, manifest)
@@ -533,7 +574,7 @@ func TestBuildResourceTreeFallsBackForRootParameterBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if call := manifest.Operations[0].CallExpression; !strings.HasPrefix(call, `api.$operations["getTenant"]({ path: { "tenant": __sdkgen_`) || !strings.HasSuffix(call, ` } })`) {
+	if call := manifest.Operations[0].CallExpression; call != `api.$operations["getTenant"]({ path: { "tenant": tenant } })` {
 		t.Fatalf("call = %q", call)
 	}
 }
@@ -559,7 +600,7 @@ func TestBuildResourceTreeSharesCompatibleParameterPositionAndRemapsNames(t *tes
 		t.Fatal(err)
 	}
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
-	if !strings.Contains(source, `{ "id": __sdkgen_`) || !strings.Contains(source, `{ "userID": __sdkgen_`) {
+	if !strings.Contains(source, `{ "id": id`) || !strings.Contains(source, `{ "userID": id`) {
 		t.Fatalf("terminal parameter remapping missing:\n%s", source)
 	}
 }
@@ -618,7 +659,7 @@ func TestBuildResourceTreePreservesLiteralAndTemplateTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := manifestCalls(manifest)
-	if calls["getCurrentUser"] != "api.users.me.get()" || !strings.HasPrefix(calls["getUser"], "api.users(__sdkgen_") || !strings.HasSuffix(calls["getUser"], ").get()") {
+	if calls["getCurrentUser"] != "api.users.me.get()" || calls["getUser"] != "api.users(id).get()" {
 		t.Fatalf("calls = %#v", calls)
 	}
 }

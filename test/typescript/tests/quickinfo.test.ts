@@ -20,6 +20,7 @@ declare const openAPI32: ReturnType<typeof createOpenAPI32Client>
 contract.orders("order-1").afterSalesRequests.create
 contract.orders("order-1").afterSalesRequests.create.raw
 contract.afterSalesRequests.paginate
+contract.customers
 openAPI31.source.get.links
 openAPI32.events.get.stream
 `;
@@ -196,7 +197,18 @@ describe("generated client QuickInfo", () => {
       'ResourceCall<"POST /orders/{orderID}/after-sales-requests">',
     );
     expect(info.display.match(/POST \/orders\/\{orderID\}\/after-sales-requests/g)).toHaveLength(1);
-    expect(info.display).not.toContain("__sdkgen_");
+    expect(info.text).not.toContain("__sdkgen_");
+    expect(info.text).toContain("Create an after-sales request.");
+    expect(info.text).toContain("Operation ID: `createAfterSalesRequest`.");
+    expect(info.text).toContain("await api.orders(orderID).afterSalesRequests.create");
+    expect(info.text).not.toContain("HTTP:");
+  });
+
+  it("uses readable path selector names", async () => {
+    const info = await quickInfo("contract.customers");
+
+    expect(info.display).toContain("(customerID: string)");
+    expect(info.text).not.toContain("__sdkgen_");
   });
 
   it.each([

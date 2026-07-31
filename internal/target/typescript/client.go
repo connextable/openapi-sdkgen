@@ -503,7 +503,7 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 		return err
 	}
 	if item.Visibility == "public" {
-		emitOperationJSDoc(output, "", item)
+		emitResourceOperationJSDoc(output, "", item)
 		resourceInput := inputType
 		if len(item.PathParameterOrder) > 0 {
 			resourceInput = operationName + "ResourceInput"
@@ -595,7 +595,7 @@ func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional 
 		output.WriteString("   * @param input Generated operation input.\n")
 	}
 	output.WriteString("   * @param options Per-request transport options.\n")
-	fmt.Fprintf(output, "   * @returns Decoded response and HTTP metadata as %s.\n", jsDocTypeReference(resultType))
+	output.WriteString("   * @returns Decoded response body with HTTP metadata.\n")
 	output.WriteString("   */\n")
 	if inputType == "never" {
 		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
@@ -626,7 +626,7 @@ func emitCallSignature(output *bytes.Buffer, inputType string, inputOptional boo
 		output.WriteString("   * @param input Generated operation input.\n")
 	}
 	output.WriteString("   * @param options Per-request transport options.\n")
-	fmt.Fprintf(output, "   * @returns Decoded response body as %s.\n", jsDocTypeReference(resultType))
+	output.WriteString("   * @returns Decoded response body.\n")
 	output.WriteString("   */\n")
 	if inputType == "never" {
 		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
@@ -1356,7 +1356,7 @@ func emitResourceMemberInterface(output *bytes.Buffer, document *ir.Document, no
 	operation, hasOperation := resourceMemberOperation(node, name)
 	child := node.children[name]
 	if hasOperation {
-		emitOperationJSDoc(output, indent, operation)
+		emitResourceOperationJSDoc(output, indent, operation)
 	} else {
 		output.WriteString(indent + "/** Nested resource path segment. */\n")
 	}
@@ -1886,6 +1886,14 @@ func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation Ma
 }
 
 func emitOperationJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
+	emitOperationCallJSDoc(output, indent, operation, true)
+}
+
+func emitResourceOperationJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
+	emitOperationCallJSDoc(output, indent, operation, false)
+}
+
+func emitOperationCallJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation, includeHTTP bool) {
 	comment := operation.Summary
 	if comment == "" {
 		comment = manifestRouteKey(operation)
@@ -1900,7 +1908,9 @@ func emitOperationJSDoc(output *bytes.Buffer, indent string, operation ManifestO
 	if operation.OperationID != "" {
 		fmt.Fprintf(output, "%s * Operation ID: `%s`.\n", indent, operation.OperationID)
 	}
-	fmt.Fprintf(output, "%s * HTTP: `%s %s`.\n", indent, operation.Method, operation.Path)
+	if includeHTTP {
+		fmt.Fprintf(output, "%s * HTTP: `%s %s`.\n", indent, operation.Method, operation.Path)
+	}
 	if operation.Deprecated {
 		fmt.Fprintf(output, "%s *\n", indent)
 		fmt.Fprintf(output, "%s * @deprecated This operation is deprecated.\n", indent)
