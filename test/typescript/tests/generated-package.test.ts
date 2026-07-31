@@ -23,9 +23,7 @@ type Expect<Value extends true> = Value;
 type RootHidesMetadata = Expect<
   "openapi" extends keyof typeof import("../fixtures/generated/client/index.js") ? false : true
 >;
-type CreateAfterSale = RouteContract<
-  "POST /orders/{orderID}/after-sales-requests"
->;
+type CreateAfterSale = RouteContract<"POST /orders/{orderID}/after-sales-requests">;
 type CreateAfterSaleSlots = [
   CreateAfterSale["input"],
   CreateAfterSale["resourceInput"],
@@ -39,12 +37,8 @@ type CreateAfterSaleSlots = [
   CreateAfterSale["links"],
   CreateAfterSale["stream"],
 ];
-type CreateAfterSaleCall = ResourceCall<
-  "POST /orders/{orderID}/after-sales-requests"
->;
-type CreateAfterSaleRawCall = RawCall<
-  "POST /orders/{orderID}/after-sales-requests"
->;
+type CreateAfterSaleCall = ResourceCall<"POST /orders/{orderID}/after-sales-requests">;
+type CreateAfterSaleRawCall = RawCall<"POST /orders/{orderID}/after-sales-requests">;
 type AfterSalePagination = PaginateCall<"GET /after-sales-requests">;
 type NoStream = StreamCall<"POST /orders/{orderID}/after-sales-requests">;
 type NoLinks = LinkCalls<"POST /orders/{orderID}/after-sales-requests">;

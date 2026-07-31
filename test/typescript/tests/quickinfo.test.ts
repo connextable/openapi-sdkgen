@@ -193,9 +193,7 @@ describe("generated client QuickInfo", () => {
   it("keeps resource operation properties concise and public", async () => {
     const info = await quickInfo('contract.orders("order-1").afterSalesRequests.create');
 
-    expect(info.display).toContain(
-      'ResourceCall<"POST /orders/{orderID}/after-sales-requests">',
-    );
+    expect(info.display).toContain('ResourceCall<"POST /orders/{orderID}/after-sales-requests">');
     expect(info.display.match(/POST \/orders\/\{orderID\}\/after-sales-requests/g)).toHaveLength(1);
     expect(info.text).not.toContain("__sdkgen_");
     expect(info.text).toContain("Create an after-sales request.");
@@ -216,10 +214,7 @@ describe("generated client QuickInfo", () => {
       'contract.orders("order-1").afterSalesRequests.create.raw',
       'RawCall<"POST /orders/{orderID}/after-sales-requests">',
     ],
-    [
-      "contract.afterSalesRequests.paginate",
-      'PaginateCall<"GET /after-sales-requests">',
-    ],
+    ["contract.afterSalesRequests.paginate", 'PaginateCall<"GET /after-sales-requests">'],
     ["openAPI31.source.get.links", 'LinkCalls<"GET /source">'],
     ["openAPI32.events.get.stream", 'StreamCall<"GET /events">'],
   ])("keeps %s capability concise", async (expression, expected) => {
