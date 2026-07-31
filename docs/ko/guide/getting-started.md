@@ -21,12 +21,6 @@ macOS와 Linux에서는 Homebrew로 설치할 수도 있습니다.
 brew install connextable/tap/openapi-sdkgen
 ```
 
-Go가 설치되어 있다면 다음 명령도 사용할 수 있습니다.
-
-```sh
-go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
-```
-
 GitHub Releases에서도 운영체제별 실행 파일을 내려받을 수 있습니다.
 
 ## 2. OpenAPI 파일에서 클라이언트 생성

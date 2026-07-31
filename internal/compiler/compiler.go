@@ -14,10 +14,10 @@ import (
 	"github.com/pb33f/libopenapi/datamodel"
 	"go.yaml.in/yaml/v4"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	openapidoc "github.com/connextable/openapi-sdkgen/internal/compiler/openapi"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
+	"openapi-sdkgen/internal/compiler/ir"
+	openapidoc "openapi-sdkgen/internal/compiler/openapi"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/openapiwalk"
 )
 
 func Compile(data []byte) (*ir.Document, error) {

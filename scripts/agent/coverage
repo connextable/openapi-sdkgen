@@ -3,7 +3,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
 cd "$ROOT"
 mkdir -p "$ROOT/.tmp/coverage"
-agent_run "Go coverage" go test -covermode=atomic -coverpkg=github.com/connextable/openapi-sdkgen/... -coverprofile="$ROOT/.tmp/coverage/go.out" ./...
+agent_run "Go coverage" go test -covermode=atomic -coverpkg=openapi-sdkgen/... -coverprofile="$ROOT/.tmp/coverage/go.out" ./...
 agent_run "Go coverage summary" go tool cover -func="$ROOT/.tmp/coverage/go.out"
 go_coverage="$(go tool cover -func="$ROOT/.tmp/coverage/go.out" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')"
 awk -v coverage="$go_coverage" 'BEGIN { exit !(coverage >= 78) }' || {

@@ -19,12 +19,7 @@ pnpm dlx openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-You can also use the GitHub Release binary directly. Go users can install the
-same CLI from the module:
-
-```sh
-go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
-```
+You can also use the GitHub Release binary directly.
 
 On macOS or Linux, Homebrew installs the CLI without a separate Go setup:
 

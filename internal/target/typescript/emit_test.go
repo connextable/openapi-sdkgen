@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
+	"openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/generator"
 )
 
 func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {

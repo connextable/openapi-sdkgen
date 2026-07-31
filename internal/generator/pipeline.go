@@ -3,8 +3,8 @@ package generator
 import (
 	"fmt"
 
-	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	compiler "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 // Preparation is the complete compiler and target preflight outcome.

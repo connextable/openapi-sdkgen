@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 func TestHTTPHeaderEnvValidation(t *testing.T) {

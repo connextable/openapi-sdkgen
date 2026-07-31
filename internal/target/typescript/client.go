@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/naming"
 )
 
 func emitClient(document *ir.Document, manifest Manifest, links []generatedLink, streams []generatedStream) ([]byte, error) {

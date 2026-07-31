@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func TestCompileFileCarriesRootAndReferenceProvenance(t *testing.T) {

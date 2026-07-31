@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/openapiwalk"
 )
 
 var recognizedExtensionNames = map[string]bool{

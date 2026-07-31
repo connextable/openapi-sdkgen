@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
 	"go.yaml.in/yaml/v4"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/openapiwalk"
 )
 
 const reservedExtensionPrefix = "x-sdkgen-"

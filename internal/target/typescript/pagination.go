@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 type paginationRepresentation struct {

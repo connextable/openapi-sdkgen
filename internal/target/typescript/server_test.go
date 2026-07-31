@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
+	sdkgen "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/generator"
 )
 
 func TestGeneratedWebhookRouterExecutesThroughFetch(t *testing.T) {

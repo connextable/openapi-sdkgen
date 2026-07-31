@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	openapidoc "github.com/connextable/openapi-sdkgen/internal/compiler/openapi"
+	openapidoc "openapi-sdkgen/internal/compiler/openapi"
 )
 
 func TestBuildExtractsOperationsDeterministically(t *testing.T) {

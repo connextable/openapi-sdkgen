@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/openapiwalk"
 	"go.yaml.in/yaml/v4"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/openapiwalk"
 )
 
 // Result is the complete expected outcome of compilation. Diagnostics describe

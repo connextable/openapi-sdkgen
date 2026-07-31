@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/generator"
 )
 
 type helpTestTarget string

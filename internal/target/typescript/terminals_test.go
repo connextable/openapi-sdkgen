@@ -3,7 +3,7 @@ package typescript
 import (
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func TestMethodTerminalMapsSupportedHTTPMethods(t *testing.T) {

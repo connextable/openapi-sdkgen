@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 const (

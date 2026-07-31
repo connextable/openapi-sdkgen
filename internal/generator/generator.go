@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 // Artifact is one file emitted by a target, relative to the requested output directory.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	sdkgen "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func TestSourceArtifactsRejectsUnimplementedOpenAPIFeaturesWithPaths(t *testing.T) {

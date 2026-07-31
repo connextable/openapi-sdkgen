@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
-	"github.com/connextable/openapi-sdkgen/internal/target/typescript"
+	compiler "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/generator"
+	"openapi-sdkgen/internal/target/typescript"
 )
 
 var standardInput io.Reader = os.Stdin

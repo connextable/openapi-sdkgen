@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	openapidoc "github.com/connextable/openapi-sdkgen/internal/compiler/openapi"
+	openapidoc "openapi-sdkgen/internal/compiler/openapi"
 )
 
 var standardMethods = []string{"get", "put", "post", "delete", "options", "head", "patch", "trace", "query"}

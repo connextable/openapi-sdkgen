@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 func TestReservedExtensionScanDistinguishesKeywordsFromExactDataNames(t *testing.T) {

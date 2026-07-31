@@ -11,9 +11,9 @@ import (
 	"os"
 	"strings"
 
-	compiler "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"go.yaml.in/yaml/v4"
+	compiler "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 type repeatedStrings []string

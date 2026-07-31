@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
+	sdkgen "openapi-sdkgen/internal/compiler"
 )
 
 func TestVersionFeatureFixturesGenerateForTypeScript(t *testing.T) {

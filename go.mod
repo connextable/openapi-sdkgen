@@ -1,4 +1,4 @@
-module github.com/connextable/openapi-sdkgen
+module openapi-sdkgen
 
 go 1.26.5
 

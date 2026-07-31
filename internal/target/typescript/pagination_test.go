@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	sdkgen "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 func TestHermeticAfterSalesPaginationFixtureGenerates(t *testing.T) {

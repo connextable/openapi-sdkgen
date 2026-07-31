@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
 	"go.yaml.in/yaml/v4"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 func TestCompileResultSeparatesExpectedDiagnosticsFromInternalErrors(t *testing.T) {

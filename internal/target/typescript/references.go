@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func resolveComponentObject(document *ir.Document, object map[string]any, component string) (map[string]any, error) {

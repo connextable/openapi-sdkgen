@@ -56,12 +56,6 @@ Homebrew:
 brew install connextable/tap/openapi-sdkgen
 ```
 
-Go:
-
-```sh
-go install github.com/connextable/openapi-sdkgen/cmd/openapi-sdkgen@latest
-```
-
 Precompiled binaries are also available from
 [GitHub Releases](https://github.com/connextable/openapi-sdkgen/releases).
 

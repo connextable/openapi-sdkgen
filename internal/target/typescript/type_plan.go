@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
+	"openapi-sdkgen/internal/compiler/naming"
 )
 
 type typeRenderScope uint8

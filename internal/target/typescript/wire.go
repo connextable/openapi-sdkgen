@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func emitWireComponents(output *bytes.Buffer, document *ir.Document, name string, direction projection) error {

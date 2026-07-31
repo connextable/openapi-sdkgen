@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 	"go.yaml.in/yaml/v4"
+	"openapi-sdkgen/internal/compiler/ir"
 )
 
 func attachDocumentProvenance(document *ir.Document, source inputSource) {

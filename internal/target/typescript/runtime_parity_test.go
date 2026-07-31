@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
+	sdkgen "openapi-sdkgen/internal/compiler"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/generator"
 )
 
 func TestVersionedTypeScriptRuntime(t *testing.T) {

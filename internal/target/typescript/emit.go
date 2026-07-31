@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
-	"github.com/connextable/openapi-sdkgen/internal/compiler/naming"
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
-	"github.com/connextable/openapi-sdkgen/internal/generator"
+	"openapi-sdkgen/internal/compiler/ir"
+	"openapi-sdkgen/internal/compiler/naming"
+	"openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/generator"
 )
 
 //go:embed runtime.ts

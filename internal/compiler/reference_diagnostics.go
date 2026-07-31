@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/connextable/openapi-sdkgen/internal/diagnostic"
+	"openapi-sdkgen/internal/diagnostic"
 )
 
 func unresolvedLocalReferenceDiagnostics(value any, source string) []diagnostic.Diagnostic {
