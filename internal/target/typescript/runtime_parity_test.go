@@ -1964,6 +1964,8 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
   }},
   "paths":{
     "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/auth/oauth":{"post":{"operationId":"startOAuth","security":[{}, {"BuyerSessionCookie":[],"BuyerCSRFHeader":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"string"}}}},"responses":{"204":{"description":"OK"}}}},
+    "/search":{"get":{"operationId":"searchSecure","security":[{}, {"GuestCapability":[]}],"parameters":[{"name":"query","in":"query","schema":{"type":"string"}}],"responses":{"204":{"description":"OK"}}}},
     "/events":{"get":{"operationId":"watchEvents","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}},
     "/items":{"get":{"operationId":"listItems","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"parameters":[{"name":"cursor","in":"query","schema":{"type":"string"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"pagination":{"type":"object","properties":{"nextCursor":{"type":["string","null"]}}}}}}}}},"x-pagination":"cursor"}},
     "/operator":{"get":{"operationId":"getOperator","security":[{"OperatorKey":[]}],"responses":{"204":{"description":"OK"}}}},
@@ -1980,9 +1982,34 @@ api.$operations.mutateCheckout({ securityRequirement: "GuestCapability", authori
 api.$operations.mutateCheckout.raw({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
 api.$routes["POST /checkout"]({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.checkout.post({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$operations.startOAuth({ body: "input" }, { securityRequirement: "optional" })
+api.$routes["POST /auth/oauth"]({ body: "input" }, { securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
+api.auth.oauth.post({ body: "input" }, { securityRequirement: "optional" })
+api.$operations.searchSecure({ securityRequirement: "optional" })
+api.$operations.searchSecure({ query: { query: "input" } }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
+api.$operations.searchSecure(undefined, { securityRequirement: "optional" })
+api.$operations.getOperator()
 api.$streams.watchEvents({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$operations.listItems.paginate({ query: {} }, { securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$links.getPublic.checkout(source, { options: { securityRequirement: "GuestCapability", authorization: "Bearer guest" } })
+// @ts-expect-error ambiguous no-input operation requires options
+api.$operations.mutateCheckout()
+// @ts-expect-error ambiguous raw operation requires options
+api.$operations.mutateCheckout.raw()
+// @ts-expect-error ambiguous route call requires options
+api.$routes["POST /checkout"]()
+// @ts-expect-error ambiguous resource call requires options
+api.checkout.post()
+// @ts-expect-error ambiguous required-input operation requires separate options
+api.$operations.startOAuth({ body: "input" })
+// @ts-expect-error ambiguous required-input route requires separate options
+api.$routes["POST /auth/oauth"]({ body: "input" })
+// @ts-expect-error ambiguous required-input resource requires separate options
+api.auth.oauth.post({ body: "input" })
+// @ts-expect-error ambiguous optional-input operation cannot omit all arguments
+api.$operations.searchSecure()
+// @ts-expect-error ambiguous optional-input operation cannot omit options after input
+api.$operations.searchSecure({ query: { query: "input" } })
 // @ts-expect-error unknown requirement ID
 api.$operations.mutateCheckout({ securityRequirement: "Unknown" })
 // @ts-expect-error another operation's requirement ID

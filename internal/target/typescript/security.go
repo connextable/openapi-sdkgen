@@ -51,6 +51,14 @@ func operationSecurityRequirements(document *ir.Document, operation ir.Operation
 	return result, true, nil
 }
 
+func operationRequiresSecuritySelection(document *ir.Document, operation ir.Operation) (bool, error) {
+	requirements, _, err := operationSecurityRequirements(document, operation)
+	if err != nil {
+		return false, err
+	}
+	return len(requirements) > 1, nil
+}
+
 // operationSecurityDefinition lowers an operation's effective OpenAPI Security
 // Requirement Object. An absent operation field inherits the root field;
 // explicit `security: []` disables that inheritance.

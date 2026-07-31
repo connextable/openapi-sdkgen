@@ -527,6 +527,10 @@ func emitOperationCallTypes(output *bytes.Buffer, document *ir.Document, operati
 
 func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, outputType, rawCallType, rawCapabilityType string) error {
 	operationName := operationTypeName(operationRouteKey(operation))
+	optionsRequired, err := operationRequiresSecuritySelection(document, operation)
+	if err != nil {
+		return err
+	}
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
 		return err
@@ -547,7 +551,7 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 			emitCallSignature(output, inputType, inputOptional, optionsType, mediaOutputs[mediaType], false)
 		}
 	}
-	emitCallSignature(output, inputType, inputOptional, operationName+"Options", outputType, true)
+	emitCallSignature(output, inputType, inputOptional, operationName+"Options", outputType, !optionsRequired)
 	if rawCallType != "" {
 		output.WriteString("  /** Sends the request and returns the decoded body with HTTP response metadata. */\n")
 		fmt.Fprintf(output, "  readonly raw: %s\n", rawCallType)
@@ -558,6 +562,10 @@ func emitOperationCallInterface(output *bytes.Buffer, document *ir.Document, ope
 
 func emitOperationRawCallInterface(output *bytes.Buffer, document *ir.Document, operation ir.Operation, callName, inputType string, inputOptional bool, rawType string) error {
 	operationName := operationTypeName(operationRouteKey(operation))
+	optionsRequired, err := operationRequiresSecuritySelection(document, operation)
+	if err != nil {
+		return err
+	}
 	mediaOutputs, err := operationMediaOutputTypesForScope(document, operation, typeRenderContract)
 	if err != nil {
 		return err
@@ -574,7 +582,7 @@ func emitOperationRawCallInterface(output *bytes.Buffer, document *ir.Document, 
 			emitRawCallSignature(output, inputType, inputOptional, optionsType, "Extract<"+rawType+", { readonly contentType: "+quoteTS(mediaType)+" }>", false)
 		}
 	}
-	emitRawCallSignature(output, inputType, inputOptional, operationName+"Options", rawType, true)
+	emitRawCallSignature(output, inputType, inputOptional, operationName+"Options", rawType, !optionsRequired)
 	output.WriteString("}\n\n")
 	return nil
 }
@@ -757,7 +765,13 @@ func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operation
 		for _, requirement := range requirements {
 			ids = append(ids, quoteTS(requirement.id))
 		}
-		parts = append(parts, "{\n  /** OpenAPI security requirement selected for this request. */\n  readonly securityRequirement?: "+strings.Join(ids, " | ")+" | undefined\n}")
+		marker := "?"
+		valueType := strings.Join(ids, " | ") + " | undefined"
+		if len(requirements) > 1 {
+			marker = ""
+			valueType = strings.Join(ids, " | ")
+		}
+		parts = append(parts, "{\n  /** OpenAPI security requirement selected for this request. */\n  readonly securityRequirement"+marker+": "+valueType+"\n}")
 	}
 	fmt.Fprintf(output, "/**\n * Per-request transport options for `%s` (`%s %s`).\n", operation.OperationID, operation.Method, operation.Path)
 	if boolValue(operation.Raw, "deprecated") {
