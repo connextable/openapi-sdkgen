@@ -39,8 +39,14 @@ const api = createClient({
 import {
   Enums,
   type Components,
+  type LinkCalls,
   type Operations,
+  type PaginateCall,
+  type RawCall,
+  type ResourceCall,
+  type RouteContract,
   type Routes,
+  type StreamCall,
 } from "./generated/api";
 ```
 
@@ -48,14 +54,29 @@ import {
 - `Enums`: 컴포넌트 enum의 실제 값
 - `Routes`: HTTP 메서드와 OpenAPI 경로로 찾는 모든 API 타입
 - `Operations`: `operationId`로 찾는 API 타입
+- `RouteContract<Route>`: 정확한 route 하나의 전체 계약
+- `ResourceCall<Route>`: 리소스 메서드에 사용되는 호출 타입
+- `RawCall<Route>`, `PaginateCall<Route>`, `LinkCalls<Route>`,
+  `StreamCall<Route>`: route별 기능 호출 타입
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
 type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
+type CreateOrder = RouteContract<"POST /orders">;
+type CreateOrderInput = CreateOrder["input"];
+type CreateOrderOutput = CreateOrder["output"];
+type CreateOrderCall = ResourceCall<"POST /orders">;
+type CreateOrderRawCall = RawCall<"POST /orders">;
 const firstCurrency = Enums["Currency"][0];
 ```
+
+한 route에서 여러 타입을 꺼낼 때는 `RouteContract<Route>`의 이름 있는 슬롯을
+사용하는 편이 좋습니다. 입력, 출력, 옵션, 오류, raw 응답, 선택 기능을 하나의
+route 식별자 아래에서 찾을 수 있어 `RouteInput<Route>`, `RouteOutput<Route>` 같은
+개별 helper를 계속 늘리지 않아도 됩니다. route가 해당 기능을 지원하지 않으면
+기능 슬롯과 대응 helper 타입은 `never`가 됩니다.
 
 OpenAPI에 선언된 이름은 철자와 대소문자를 그대로 사용합니다. 하이픈처럼
 TypeScript 속성 이름으로 바로 쓸 수 없는 문자가 있다면 대괄호 표기법을

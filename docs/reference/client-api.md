@@ -40,8 +40,14 @@ configuration.
 import {
   Enums,
   type Components,
+  type LinkCalls,
   type Operations,
+  type PaginateCall,
+  type RawCall,
+  type ResourceCall,
+  type RouteContract,
   type Routes,
+  type StreamCall,
 } from "./generated/api";
 ```
 
@@ -49,14 +55,30 @@ import {
 - `Enums`: runtime values for component enums
 - `Routes`: types for every API, keyed by HTTP method and OpenAPI path
 - `Operations`: types for APIs that declare an `operationId`
+- `RouteContract<Route>`: the complete contract for one exact route
+- `ResourceCall<Route>`: the callable type used by a resource method
+- `RawCall<Route>`, `PaginateCall<Route>`, `LinkCalls<Route>`, and
+  `StreamCall<Route>`: route-keyed capability call types
 
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
 type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
+type CreateOrder = RouteContract<"POST /orders">;
+type CreateOrderInput = CreateOrder["input"];
+type CreateOrderOutput = CreateOrder["output"];
+type CreateOrderCall = ResourceCall<"POST /orders">;
+type CreateOrderRawCall = RawCall<"POST /orders">;
 const firstCurrency = Enums["Currency"][0];
 ```
+
+Prefer `RouteContract<Route>` and its named slots when extracting several
+types for one route. This keeps input, output, options, errors, raw responses,
+and optional capabilities under one route identity instead of adding separate
+helpers such as `RouteInput<Route>` and `RouteOutput<Route>`. Capability slots
+and their matching helper types resolve to `never` when the route does not
+declare that capability.
 
 Generated names preserve the spelling and case from OpenAPI. Use bracket
 notation when a name contains characters that are not valid in a TypeScript
