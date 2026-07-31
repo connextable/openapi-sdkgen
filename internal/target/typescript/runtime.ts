@@ -790,6 +790,28 @@ type OperationOptionsArguments<Options extends RequestOptions> =
     ? [options?: Options]
     : [options: Options];
 
+const generatedOperationInputKeys = ["body", "path", "query", "querystring", "headerParams", "cookieParams"] as const;
+
+function isGeneratedOperationInput(value: unknown): boolean {
+  return isRecord(value) && generatedOperationInputKeys.some((key) => Object.hasOwn(value, key));
+}
+
+function splitOptionalOperationArguments<Input, Options extends RequestOptions>(
+  args: readonly unknown[],
+): readonly [Input | undefined, Options | undefined] {
+  const [first, second] = args;
+  if (args.length > 1 || isGeneratedOperationInput(first)) {
+    return [first as Input | undefined, second as Options | undefined];
+  }
+  return [undefined, first as Options | undefined];
+}
+
+function operationOptionsArguments<Options extends RequestOptions>(
+  options: Options | undefined,
+): OperationOptionsArguments<Options> {
+  return (options === undefined ? [] : [options]) as OperationOptionsArguments<Options>;
+}
+
 /** Callable generated operation that requires typed input. */
 export interface InputOperationCall<Input, Output, Options extends RequestOptions, Raw> {
   /** Sends the request and returns the decoded response body. */
@@ -835,12 +857,23 @@ export function bindOperation<
   request: RequestFunction,
   operation: OperationDefinition,
   hasInput: boolean,
+  inputOptional = false,
 ): OperationCall<Input, Output, Options, Raw> {
   const call = hasInput
-    ? (input: Input, ...options: OperationOptionsArguments<Options>) => request<Output>(operation, input, options[0])
+    ? inputOptional
+      ? (...args: readonly unknown[]) => {
+          const [input, options] = splitOptionalOperationArguments<Input, Options>(args);
+          return request<Output>(operation, input, options);
+        }
+      : (input: Input, ...options: OperationOptionsArguments<Options>) => request<Output>(operation, input, options[0])
     : (...options: OperationOptionsArguments<Options>) => request<Output>(operation, undefined, options[0]);
   const raw = hasInput
-    ? (input: Input, ...options: OperationOptionsArguments<Options>) => request.raw<Output>(operation, input, options[0])
+    ? inputOptional
+      ? (...args: readonly unknown[]) => {
+          const [input, options] = splitOptionalOperationArguments<Input, Options>(args);
+          return request.raw<Output>(operation, input, options);
+        }
+      : (input: Input, ...options: OperationOptionsArguments<Options>) => request.raw<Output>(operation, input, options[0])
     : (...options: OperationOptionsArguments<Options>) => request.raw<Output>(operation, undefined, options[0]);
   return Object.assign(call, { raw }) as OperationCall<Input, Output, Options, Raw>;
 }
@@ -860,6 +893,7 @@ export function bindPathOperation<
   operation: InputOperationCall<FullInput, Output, Options, Raw>,
   path: Readonly<Record<string, unknown>>,
   hasInput: boolean,
+  inputOptional = false,
 ): OperationCall<Input, Output, Options, Raw> {
   const mergeInput = (input: Input | undefined): FullInput =>
     ({
@@ -867,10 +901,20 @@ export function bindPathOperation<
       path,
     }) as FullInput;
   const call = hasInput
-    ? (input: Input, ...options: OperationOptionsArguments<Options>) => operation(mergeInput(input), ...options)
+    ? inputOptional
+      ? (...args: readonly unknown[]) => {
+          const [input, options] = splitOptionalOperationArguments<Input, Options>(args);
+          return operation(mergeInput(input), ...operationOptionsArguments(options));
+        }
+      : (input: Input, ...options: OperationOptionsArguments<Options>) => operation(mergeInput(input), ...options)
     : (...options: OperationOptionsArguments<Options>) => operation(mergeInput(undefined), ...options);
   const raw = hasInput
-    ? (input: Input, ...options: OperationOptionsArguments<Options>) => operation.raw(mergeInput(input), ...options)
+    ? inputOptional
+      ? (...args: readonly unknown[]) => {
+          const [input, options] = splitOptionalOperationArguments<Input, Options>(args);
+          return operation.raw(mergeInput(input), ...operationOptionsArguments(options));
+        }
+      : (input: Input, ...options: OperationOptionsArguments<Options>) => operation.raw(mergeInput(input), ...options)
     : (...options: OperationOptionsArguments<Options>) => operation.raw(mergeInput(undefined), ...options);
   return Object.assign(call, { raw }) as OperationCall<Input, Output, Options, Raw>;
 }

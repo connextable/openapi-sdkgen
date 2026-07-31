@@ -241,11 +241,17 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		}
 		inputType := "never"
 		hasInput := false
+		inputOptional := false
 		if len(operation.InputTypes) > 0 {
 			inputType = operationTypeName(routeKey) + "Input"
 			hasInput = true
+			inputRequired, err := operationInputRequired(document, operationsByRoute[routeKey], operation.InputTypes, false)
+			if err != nil {
+				return nil, err
+			}
+			inputOptional = !inputRequired
 		}
-		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(routeKey), operationTypeName(routeKey), definition, hasInput, operationTypeName(routeKey))
+		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(routeKey), operationTypeName(routeKey), definition, hasInput, inputOptional, operationTypeName(routeKey))
 		paginationPlan := operationsByRoute[routeKey].PaginationPlan
 		if paginationPlan != nil {
 			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
@@ -503,6 +509,10 @@ func emitRawCallSignature(output *bytes.Buffer, inputType string, inputOptional 
 	if optionsOptional {
 		optional = "?"
 	}
+	if inputOptional {
+		output.WriteString("  /** Sends the request with transport options and no generated operation input. */\n")
+		fmt.Fprintf(output, "  raw(options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
+	}
 	output.WriteString("  /**\n")
 	output.WriteString("   * Sends the request and returns the decoded body with HTTP response metadata.\n")
 	output.WriteString("   *\n")
@@ -529,6 +539,10 @@ func emitCallSignature(output *bytes.Buffer, inputType string, inputOptional boo
 	optional := ""
 	if optionsOptional {
 		optional = "?"
+	}
+	if inputOptional {
+		output.WriteString("  /** Sends the request with transport options and no generated operation input. */\n")
+		fmt.Fprintf(output, "  (options%s: %s): Promise<%s>\n", optional, optionsType, resultType)
 	}
 	output.WriteString("  /**\n")
 	output.WriteString("   * Sends the request and returns the decoded response body.\n")
@@ -1476,7 +1490,15 @@ func emitResourceOperationValue(output *bytes.Buffer, document *ir.Document, ope
 	}
 	name := operationTypeName(routeKey)
 	hasInput := len(operation.InputTypes) > 1
-	fmt.Fprintf(output, "bindPathOperation<%sInput, %sResourceInput, %s, %sOptions, %sRawResponse>(%s, { %s }, %t)", name, name, operation.renderOutput(typeRenderContract), name, name, property, strings.Join(values, ", "), hasInput)
+	inputOptional := false
+	if hasInput {
+		inputRequired, err := operationInputRequired(document, findOperation(document, routeKey), operation.InputTypes, true)
+		if err != nil {
+			return err
+		}
+		inputOptional = !inputRequired
+	}
+	fmt.Fprintf(output, "bindPathOperation<%sInput, %sResourceInput, %s, %sOptions, %sRawResponse>(%s, { %s }, %t, %t)", name, name, operation.renderOutput(typeRenderContract), name, name, property, strings.Join(values, ", "), hasInput, inputOptional)
 	return nil
 }
 

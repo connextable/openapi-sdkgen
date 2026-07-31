@@ -16,6 +16,7 @@ import type {
   OperationDefinition,
   RawResponse,
   RequestFunction,
+  RequestOptions,
 } from "../fixtures/generated/client/generated/runtime.js";
 
 const operation = (overrides: Partial<OperationDefinition> = {}): OperationDefinition => ({
@@ -533,6 +534,65 @@ describe("generated runtime", () => {
     );
     await expect(noInput()).resolves.toEqual({ id: "widget-1" });
     await expect(noInput.raw()).resolves.toMatchObject({ data: { id: "widget-1" } });
+  });
+
+  it("splits sole options from optional generated input", async () => {
+    const calls: Array<{ input: unknown; options: RequestOptions | undefined }> = [];
+    const request = (async <Output>(
+      _operation: OperationDefinition,
+      input?: unknown,
+      options?: RequestOptions,
+    ) => {
+      calls.push({ input, options });
+      return { id: "widget-1" } as Output;
+    }) as RequestFunction;
+    request.raw = async <Output>(
+      _operation: OperationDefinition,
+      input?: unknown,
+      options?: RequestOptions,
+    ) => {
+      calls.push({ input, options });
+      return { data: { id: "widget-1" } as Output } as RawResponse<Output>;
+    };
+    type Input = { readonly query?: { readonly force?: boolean } };
+    type OptionalCall = {
+      (options?: RequestOptions): Promise<{ id: string }>;
+      (input?: Input, options?: RequestOptions): Promise<{ id: string }>;
+      raw(options?: RequestOptions): Promise<RawResponse<{ id: string }>>;
+      raw(input?: Input, options?: RequestOptions): Promise<RawResponse<{ id: string }>>;
+    };
+    const optional = bindOperation<Input, { id: string }>(
+      request,
+      operation({ path: "/optional" }),
+      true,
+      true,
+    ) as unknown as OptionalCall;
+
+    await optional({ credentials: "include" });
+    await optional({ query: { force: true } });
+    await optional(undefined, { credentials: "omit" });
+    await optional.raw({ credentials: "same-origin" });
+
+    const full = bindOperation<{ path: { accountID: string }; query?: { force?: boolean } }, { id: string }>(
+      request,
+      operation({ path: "/accounts/{accountID}/phone" }),
+      true,
+    );
+    const resource = bindPathOperation(full, { accountID: "account-1" }, true, true) as unknown as OptionalCall;
+    await resource({ credentials: "include" });
+    await resource({ query: { force: true } }, { credentials: "omit" });
+
+    expect(calls).toEqual([
+      { input: undefined, options: { credentials: "include" } },
+      { input: { query: { force: true } }, options: undefined },
+      { input: undefined, options: { credentials: "omit" } },
+      { input: undefined, options: { credentials: "same-origin" } },
+      { input: { path: { accountID: "account-1" } }, options: { credentials: "include" } },
+      {
+        input: { path: { accountID: "account-1" }, query: { force: true } },
+        options: { credentials: "omit" },
+      },
+    ]);
   });
 
   it("paginates cursor and offset profiles and rejects invalid modes", async () => {

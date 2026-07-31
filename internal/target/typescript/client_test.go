@@ -5,8 +5,76 @@ import (
 	"strings"
 	"testing"
 
+	sdkgen "github.com/connextable/openapi-sdkgen/internal/compiler"
 	"github.com/connextable/openapi-sdkgen/internal/compiler/ir"
 )
+
+func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(`{
+  "openapi": "3.1.0",
+  "info": {"title": "Optional calls", "version": "1"},
+  "paths": {
+    "/optional": {"get": {"operationId": "optional", "parameters": [{"name": "force", "in": "query", "schema": {"type": "boolean"}}], "responses": {"204": {"description": "OK"}}}},
+    "/required": {"post": {"operationId": "required", "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "string"}}}}, "responses": {"204": {"description": "OK"}}}},
+    "/health": {"get": {"operationId": "health", "responses": {"204": {"description": "OK"}}}},
+    "/accounts/{accountID}/phone": {"delete": {"operationId": "deletePhone", "parameters": [{"name": "accountID", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "force", "in": "query", "schema": {"type": "boolean"}}], "responses": {"204": {"description": "OK"}}}}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	interfaceBody := func(name string) string {
+		t.Helper()
+		start := strings.Index(client, "interface "+name+" {")
+		if start < 0 {
+			t.Fatalf("missing interface %s:\n%s", name, client)
+		}
+		end := strings.Index(client[start:], "\n}\n\n")
+		if end < 0 {
+			t.Fatalf("unterminated interface %s:\n%s", name, client[start:])
+		}
+		return client[start : start+end]
+	}
+
+	optionalName := operationTypeName("GET /optional")
+	optionalCall := interfaceBody(optionalName + "Call")
+	for _, expected := range []string{
+		"(options?: " + optionalName + "Options)",
+		"(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
+		"raw(options?: " + optionalName + "Options)",
+		"raw(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
+	} {
+		if !strings.Contains(optionalCall, expected) {
+			t.Fatalf("optional call missing %q:\n%s", expected, optionalCall)
+		}
+	}
+
+	requiredName := operationTypeName("POST /required")
+	if requiredCall := interfaceBody(requiredName + "Call"); strings.Contains(requiredCall, "(options?: "+requiredName+"Options)") || strings.Contains(requiredCall, "raw(options?: "+requiredName+"Options)") {
+		t.Fatalf("required call gained options-only overload:\n%s", requiredCall)
+	}
+
+	healthName := operationTypeName("GET /health")
+	healthCall := interfaceBody(healthName + "Call")
+	if strings.Count(healthCall, "\n  (options?: "+healthName+"Options)") != 1 || strings.Count(healthCall, "\n  raw(options?: "+healthName+"Options)") != 1 {
+		t.Fatalf("no-input call should retain one options-only signature:\n%s", healthCall)
+	}
+
+	deleteName := operationTypeName("DELETE /accounts/{accountID}/phone")
+	deleteCall := interfaceBody(deleteName + "Call")
+	if strings.Contains(deleteCall, "(options?: "+deleteName+"Options)") {
+		t.Fatalf("full path call gained options-only overload:\n%s", deleteCall)
+	}
+	deleteResourceCall := interfaceBody(deleteName + "ResourceCall")
+	if !strings.Contains(deleteResourceCall, "(options?: "+deleteName+"Options)") || !strings.Contains(deleteResourceCall, "raw(options?: "+deleteName+"Options)") {
+		t.Fatalf("optional resource call missing options-only overload:\n%s", deleteResourceCall)
+	}
+}
 
 func TestJSDocTypeReferenceFlattensInlineObjectComments(t *testing.T) {
 	value := jsDocTypeReference("{\n  /** property docs */\n  readonly id: string\n}")
