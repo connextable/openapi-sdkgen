@@ -134,11 +134,12 @@ const api = createClient({
 
 OpenAPI calls each object in the `security` array a Security Requirement Object.
 The objects are OR choices; all schemes inside one object are required together
-(AND). Generated operation options expose their stable IDs as an exact
-`securityRequirement` union. When an operation has more than one effective
-requirement, the property and the operation's options argument are required.
-An empty requirement uses the stable ID `"optional"` and must still be selected
-when another requirement is available:
+(AND). The SDK automatically selects a sole effective requirement. When an
+operation has multiple effective requirements, generated operation options
+expose their stable IDs as a required, exact `securityRequirement` union and
+the operation's options argument is required. An empty requirement uses the
+stable ID `"anonymous"` and must still be selected when another requirement is
+available:
 
 ```ts
 await api.$operations.updateCheckout({
@@ -147,29 +148,26 @@ await api.$operations.updateCheckout({
 });
 
 await api.$operations.startOAuth(input, {
-  securityRequirement: "optional",
+  securityRequirement: "anonymous",
 });
 ```
 
 Use `securityProvider` when the host must load credentials for a selected
-requirement. `requirements` contains the effective Security Requirement Objects
-for the operation. `selectedRequirement` identifies the caller's choice when
-the operation has multiple requirements. A provider may select only the sole
-effective requirement when the operation has exactly one and the caller omits
-the optional selector.
+requirement. The SDK passes that one requirement as `requirement`, whether it
+was selected automatically or by the caller. The provider returns only a map
+of credentials keyed by scheme name; it never selects or echoes a requirement.
 
 ```ts
 const api = createClient({
   baseURL: "https://api.example.test",
-  securityProvider: async ({ operation, requirements, selectedRequirement, origin }) => {
-    const requirement = selectedRequirement ?? requirements.serviceToken;
+  securityProvider: async ({ operation, requirement, origin }) => {
+    if (requirement.id !== "serviceToken") {
+      throw new Error(`Unsupported security requirement: ${requirement.id}`);
+    }
     return {
-      requirement,
-      credentials: {
-        serviceToken: {
-          kind: "http-bearer",
-          token: await getToken(operation, origin),
-        },
+      serviceToken: {
+        kind: "http-bearer",
+        token: await getToken(operation, origin),
       },
     };
   },
@@ -183,15 +181,32 @@ responsible for login, token refresh, and credential storage.
 Multiple effective requirements always require an explicit
 `securityRequirement`. Omission fails with `SECURITY_REQUIREMENT_REQUIRED`
 before `securityProvider` or Fetch. With exactly one effective requirement, the
-selector remains optional and the runtime may use the provider or infer the
-sole requirement when SDK-owned options already satisfy it. A matching
-`authorization` or `csrfToken` satisfies its scheme. A provider may omit that
-scheme or return the same value; a different value fails before Fetch. Raw
-`headers` never satisfy a security scheme.
+SDK selects it and does not expose a selector. An unsecured operation likewise
+does not expose one. Passing a selector to either state from stale JavaScript
+fails with `SECURITY_REQUIREMENT_INVALID` before the provider or Fetch.
 
-Regenerate clients after upgrading. Existing calls to operations with multiple
-requirements become TypeScript errors until they pass an explicit selector,
-including `"optional"` for anonymous access.
+An anonymous or already satisfied requirement skips the provider. A matching
+`authorization` or `csrfToken` satisfies its scheme. When some schemes remain,
+the provider may omit an already satisfied scheme or return the same value; a
+different value fails before Fetch. Raw `headers` never satisfy a security
+scheme.
+
+### Migrate security providers from v3 to v4
+
+Regenerate clients and run the consumer's TypeScript checks after upgrading.
+
+| v3 contract | v4 contract |
+|---|---|
+| Empty requirement ID `"optional"` | `"anonymous"` |
+| Optional selector on a sole requirement | No selector; the SDK selects it |
+| `RequestOptions.securityRequirement?: string` | Exact operation-specific selector for alternatives only |
+| Provider context `requirements` and `selectedRequirement` | Singular required `requirement` |
+| Provider result `{ requirement, credentials }` | Credential map returned directly |
+
+Calls with alternatives must retain an explicit selector, using `"anonymous"`
+for anonymous access. Remove redundant selectors from sole-requirement calls.
+Update every provider before deploying the regenerated runtime; a stale v3
+provider result fails with `SECURITY_CREDENTIALS_INVALID` before Fetch.
 
 For an OpenAPI cookie API-key security scheme, browser applications can use
 ambient cookies without reading their values:

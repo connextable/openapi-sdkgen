@@ -404,28 +404,30 @@ Public contract:
 const api = createClient({
   baseURL,
   credentials: "include",
-  securityProvider: async ({ operation, requirements, selectedRequirement, origin }) => ({
-    requirement: selectedRequirement ?? requirements.bearerAuth,
-    credentials: {
-      bearerAuth: { kind: "http-bearer", token: await tokenFor(operation, origin) },
-    },
-  }),
+  securityProvider: async ({ operation, requirement, origin }) => {
+    if (requirement.id !== "bearerAuth") throw new Error("unsupported security requirement");
+    return {
+      bearerAuth: {
+        kind: "http-bearer",
+        token: await tokenFor(operation, origin),
+      },
+    };
+  },
 });
 ```
 
 Generated operation options expose `securityRequirement` as an exact union of
-the operation's stable requirement IDs. The property and operation options
-argument are required when multiple effective requirements exist, including an
-empty anonymous requirement. Omission fails before `securityProvider` or Fetch.
-With exactly one effective requirement, selection remains optional and the
-runtime may use the provider or infer that sole requirement when it is already
-satisfied. The provider receives the final normalized origin, effective
-requirement definitions, and the explicit selection when one is required. Its
-`credentials` may contain only schemes from the selected requirement and may
-omit schemes already satisfied by `authorization`, `csrfToken`, ambient Fetch
+the operation's stable requirement IDs only when multiple effective
+requirements exist, including an empty requirement whose ID is `"anonymous"`.
+The property and operation options argument are required, and omission fails
+before `securityProvider` or Fetch. With exactly one effective requirement, the
+SDK selects it and exposes no selector. Unsecured operations expose none as
+well. The provider receives the final normalized origin and one selected
+requirement, then returns a scheme-keyed credential map directly. It may omit
+schemes already satisfied by `authorization`, `csrfToken`, ambient Fetch
 cookies, or selected mTLS capability. Matching dedicated and provider values
-are idempotent; conflicting, missing, malformed, or extra values fail before
-Fetch without exposing secrets.
+are idempotent; conflicting, missing, malformed, stale v3-shaped, or extra
+values fail before Fetch without exposing secrets.
 `ClientOptions.credentials` remains only the Fetch `RequestCredentials` mode.
 With mode `"include"`, cookie API-key security is ambient: the SDK neither
 requests its value nor synthesizes a `Cookie` header. Fetch and browser cookie

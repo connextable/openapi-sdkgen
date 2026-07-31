@@ -120,12 +120,12 @@ const todos = await api.$operations["listTodos"]({
 ## Security requirements
 
 When an operation declares OpenAPI Security Requirement Objects, its generated
-request options expose `securityRequirement` as a union of that operation's
-stable requirement IDs. The property and operation options argument are
-required when more than one effective requirement exists, including an empty
-`{}` requirement represented by `"optional"`. The property remains optional
-for exactly one requirement. Operations without effective security
-requirements do not expose it.
+request options expose `securityRequirement` only when more than one effective
+requirement exists. The property is a required exact union of that operation's
+stable requirement IDs, and the operation options argument is required. An
+empty `{}` requirement is represented by `"anonymous"`. The SDK automatically
+selects exactly one effective requirement. Operations with zero or one do not
+expose a selector.
 
 ```ts
 await api.$operations.updateCheckout({
@@ -136,8 +136,10 @@ await api.$operations.updateCheckout({
 
 `ClientOptions.credentials` and per-request `credentials` are Fetch
 `RequestCredentials`. Use `ClientOptions.securityProvider` for host-owned
-credential acquisition after request selection. An omitted ambiguous selection
-fails before the provider and Fetch. See
+credential acquisition after request selection. It receives one selected
+`requirement` and returns a scheme-keyed credential map. It cannot select a
+requirement. An omitted ambiguous selection fails before the provider and
+Fetch. See
 [Select a security requirement and provide credentials](../guide/transport.md#select-a-security-requirement-and-provide-credentials).
 
 ## Request headers

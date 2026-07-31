@@ -128,11 +128,11 @@ const api = createClient({
 
 OpenAPI는 `security` 배열의 각 객체를 Security Requirement Object라고
 부릅니다. 객체 사이는 OR이고, 한 객체 안의 scheme은 모두 함께 충족해야
-합니다(AND). 생성된 operation 옵션은 각 객체의 안정적인 ID를 정확한
-`securityRequirement` 유니언으로 제공합니다. 적용되는 requirement가 둘 이상이면
-이 속성과 operation의 options 인자가 필수입니다. 빈 requirement의 안정적인 ID는
-`"optional"`이며 다른 requirement가 함께 있으면 익명 요청도 명시적으로
-선택해야 합니다.
+합니다(AND). 적용되는 requirement가 정확히 하나이면 SDK가 자동으로 선택합니다.
+둘 이상이면 생성된 operation 옵션은 각 객체의 안정적인 ID를 필수
+`securityRequirement` 유니언으로 제공하고 operation의 options 인자도 필수가
+됩니다. 빈 requirement의 안정적인 ID는 `"anonymous"`이며 다른 requirement가
+함께 있으면 익명 요청도 명시적으로 선택해야 합니다.
 
 ```ts
 await api.$operations.updateCheckout({
@@ -141,29 +141,27 @@ await api.$operations.updateCheckout({
 });
 
 await api.$operations.startOAuth(input, {
-  securityRequirement: "optional",
+  securityRequirement: "anonymous",
 });
 ```
 
 선택된 requirement에 필요한 인증 정보를 호스트에서 가져오려면
-`securityProvider`를 사용합니다. `requirements`에는 operation에 적용되는
-Security Requirement Object가 들어 있습니다. requirement가 둘 이상이면 호출자가
-선택한 값이 `selectedRequirement`로 전달됩니다. 적용되는 requirement가 정확히
-하나이고 호출자가 선택을 생략한 경우에만 provider가 그 단일 requirement를
-선택할 수 있습니다.
+`securityProvider`를 사용합니다. SDK가 자동으로 선택했든 호출자가 선택했든
+선택된 하나의 requirement가 `requirement`로 전달됩니다. provider는 scheme 이름을
+키로 하는 인증 정보 맵만 반환하며 requirement를 선택하거나 다시 반환하지
+않습니다.
 
 ```ts
 const api = createClient({
   baseURL: "https://api.example.test",
-  securityProvider: async ({ operation, requirements, selectedRequirement, origin }) => {
-    const requirement = selectedRequirement ?? requirements.serviceToken;
+  securityProvider: async ({ operation, requirement, origin }) => {
+    if (requirement.id !== "serviceToken") {
+      throw new Error(`Unsupported security requirement: ${requirement.id}`);
+    }
     return {
-      requirement,
-      credentials: {
-        serviceToken: {
-          kind: "http-bearer",
-          token: await getToken(operation, origin),
-        },
+      serviceToken: {
+        kind: "http-bearer",
+        token: await getToken(operation, origin),
       },
     };
   },
@@ -176,15 +174,34 @@ API key, HTTP Basic/Bearer, OAuth2, OpenID Connect, mTLS 요구 사항을 지원
 적용되는 requirement가 둘 이상이면 `securityRequirement`를 반드시 명시해야
 합니다. 생략하면 `securityProvider`나 Fetch를 호출하기 전에
 `SECURITY_REQUIREMENT_REQUIRED`로 실패합니다. 적용되는 requirement가 정확히
-하나이면 selector는 선택 사항이며 provider를 사용하거나 SDK 소유 옵션이 단일
-requirement를 이미 충족할 때 자동 추론할 수 있습니다. 선택한 scheme과 일치하는
-`authorization` 또는 `csrfToken`은 인증 정보를 충족합니다. provider는 해당
+하나이면 SDK가 자동으로 선택하며 selector를 노출하지 않습니다. 인증이 없는
+operation도 selector를 노출하지 않습니다. 오래된 JavaScript가 두 경우에
+selector를 전달하면 provider나 Fetch를 호출하기 전에
+`SECURITY_REQUIREMENT_INVALID`로 실패합니다.
+
+익명 requirement이거나 SDK 소유 옵션이 이미 requirement를 충족하면 provider를
+호출하지 않습니다. 선택한 scheme과 일치하는 `authorization` 또는 `csrfToken`은
+인증 정보를 충족합니다. 일부 scheme이 남아 있으면 provider는 이미 충족된
 scheme을 생략하거나 같은 값을 반환할 수 있습니다. 다른 값을 반환하면 Fetch
 전에 실패합니다. 원시 `headers`는 security scheme을 충족하지 않습니다.
 
-업그레이드 후 client를 다시 생성해야 합니다. requirement가 둘 이상인 기존
-호출은 명시적인 selector를 전달할 때까지 TypeScript 오류가 됩니다. 익명 요청은
-`"optional"`을 전달합니다.
+### v3 security provider를 v4로 마이그레이션
+
+업그레이드 후 client를 다시 생성하고 소비자 프로젝트의 TypeScript 검사를
+실행합니다.
+
+| v3 계약 | v4 계약 |
+|---|---|
+| 빈 requirement ID `"optional"` | `"anonymous"` |
+| 단일 requirement의 선택적 selector | selector 없음, SDK가 자동 선택 |
+| `RequestOptions.securityRequirement?: string` | 대안이 있을 때만 operation별 정확한 selector |
+| provider context의 `requirements`, `selectedRequirement` | 필수 단일 `requirement` |
+| provider 반환값 `{ requirement, credentials }` | 인증 정보 맵 직접 반환 |
+
+대안이 있는 호출은 명시적 selector를 유지하고 익명 요청에는 `"anonymous"`를
+사용합니다. 단일 requirement 호출의 중복 selector는 제거합니다. 생성된 runtime을
+배포하기 전에 모든 provider를 변경해야 합니다. 오래된 v3 provider 반환값은 Fetch
+전에 `SECURITY_CREDENTIALS_INVALID`로 실패합니다.
 
 OpenAPI cookie API key security scheme은 브라우저의 ambient cookie로 충족할 수
 있습니다. JavaScript에서 쿠키 값을 읽을 필요가 없습니다.
