@@ -748,7 +748,7 @@ func emitOperationParameterJSDoc(output *bytes.Buffer, indent string, parameter 
 }
 
 func emitOperationOptions(output *bytes.Buffer, document *ir.Document, operationName string, operation ir.Operation) error {
-	parts := []string{`Omit<RequestOptions, "accept" | "securityRequirement">`}
+	parts := []string{`Omit<RequestOptions, "accept">`}
 	mediaTypes, err := operationResponseMediaTypes(document, operation)
 	if err != nil {
 		return err

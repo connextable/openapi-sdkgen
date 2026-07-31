@@ -26,9 +26,11 @@ OpenAPI requiredness. See
 ## Servers and authentication
 
 OpenAPI Server Objects, security schemes, and operation-specific security
-requirements are supported. Generated operation options expose stable Security
-Requirement Object IDs through `securityRequirement`; your application provides
-tokens and certificates directly or through `securityProvider`.
+requirements are supported. The SDK selects a sole effective requirement.
+Generated operation options expose stable Security Requirement Object IDs
+through a required `securityRequirement` union only when alternatives exist.
+Your application provides tokens and certificates directly or through a
+`securityProvider` that receives the selected requirement.
 
 See [transport, authentication, and streams](../guide/transport.md) for
 configuration examples.

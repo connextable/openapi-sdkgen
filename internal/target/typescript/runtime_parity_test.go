@@ -1978,6 +1978,14 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
 	if err != nil {
 		t.Fatal(err)
 	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSource := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept">`) || strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "securityRequirement">`) {
+		t.Fatal("generated operation options retain the removed RequestOptions security selector")
+	}
 	probe := `import { createClient, type RequestOptions, type Routes, type SecurityCredentialProvider, type SecurityCredentials } from "./index.js"
 declare const api: ReturnType<typeof createClient>
 declare const source: Routes["GET /public"]["rawResponse"]

@@ -26,9 +26,10 @@ Callback 계약은 OpenAPI의 원래 필수 여부를 유지합니다. 자세한
 ## 서버와 인증
 
 OpenAPI Server Object, security scheme, operation별 Security Requirement Object를
-지원합니다. 생성된 operation 옵션은 안정적인 ID를 `securityRequirement`로
-제공합니다. 토큰과 인증서는 애플리케이션에서 직접 제공하거나
-`securityProvider`로 가져옵니다.
+지원합니다. 적용되는 requirement가 하나이면 SDK가 자동으로 선택합니다. 대안이
+있을 때만 생성된 operation 옵션이 안정적인 ID를 필수 `securityRequirement`
+유니언으로 제공합니다. 토큰과 인증서는 애플리케이션에서 직접 제공하거나 선택된
+requirement를 받는 `securityProvider`로 가져옵니다.
 
 지원하는 인증 방식과 설정 방법은
 [전송, 인증, 스트림](../guide/transport.md)에서 확인하세요.
