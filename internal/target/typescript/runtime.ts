@@ -878,6 +878,25 @@ export function bindOperation<
   return Object.assign(call, { raw }) as OperationCall<Input, Output, Options, Raw>;
 }
 
+/** Binds generated streaming operation metadata with the same input and options dispatch as decoded calls. */
+export function bindStreamOperation<
+  Input,
+  Item,
+  Options extends RequestOptions = RequestOptions,
+>(
+  request: RequestFunction,
+  operation: OperationDefinition,
+  hasInput: boolean,
+  inputOptional = false,
+): (...args: readonly unknown[]) => AsyncIterable<Item> {
+  return (...args: readonly unknown[]) => {
+    if (!hasInput) return request.stream<Item>(operation, undefined, args[0] as Options | undefined);
+    if (!inputOptional) return request.stream<Item>(operation, args[0] as Input, args[1] as Options | undefined);
+    const [input, options] = splitOptionalOperationArguments<Input, Options>(args);
+    return request.stream<Item>(operation, input, options);
+  };
+}
+
 /**
  * Binds resource path parameters to an input operation.
  *

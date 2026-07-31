@@ -58,12 +58,13 @@ if (false) {
   typedClient.$operations.allEnvironmentHeaders();
   typedClient.$operations.allEnvironmentHeaders.raw();
   typedClient.$operations.allEnvironmentHeaders({ headerParams: explicitHeaders });
-  typedClient.$operations.allEnvironmentHeaders(undefined, { headers: { "X-Raw": "normal" } });
-  typedClient.$operations.allEnvironmentHeaders.raw(undefined, { headers: { "X-Raw": "raw" } });
+  typedClient.$operations.allEnvironmentHeaders({ headers: { "X-Raw": "normal" } });
+  typedClient.$operations.allEnvironmentHeaders.raw({ headers: { "X-Raw": "raw" } });
   typedClient.$operations.mixedHeaders(mixedInput);
   typedClient.$operations.overrideMethod(overrideInput);
   typedClient.$streams.streamEnvironmentHeaders();
-  typedClient.$streams.streamEnvironmentHeaders(undefined, { headers: { "X-Raw": "stream" } });
+  typedClient.$streams.streamEnvironmentHeaders({ headers: { "X-Raw": "stream" } });
+  typedClient.$streams.streamEnvironmentHeaders(undefined, { headers: { "X-Raw": "legacy-stream" } });
   typedClient.$operations.streamEnvironmentHeaders.stream();
   typedClient.$operations.streamEnvironmentHeaders.stream({
     headerParams: { Origin: "https://stream.example" },
@@ -97,7 +98,7 @@ describe("transport-native request headers", () => {
 
     await api.$operations.allEnvironmentHeaders();
     await api.$operations.allEnvironmentHeaders.raw();
-    await api.$operations.allEnvironmentHeaders.raw(undefined, {
+    await api.$operations.allEnvironmentHeaders.raw({
       headers: { "X-Raw": "raw-options" },
     });
     await api.$operations.allEnvironmentHeaders({ headerParams: explicitHeaders });
@@ -155,7 +156,7 @@ describe("transport-native request headers", () => {
 
     await consume(api.$streams.streamEnvironmentHeaders());
     await consume(
-      api.$streams.streamEnvironmentHeaders(undefined, {
+      api.$streams.streamEnvironmentHeaders({
         headers: { "X-Raw": "stream-options" },
       }),
     );
@@ -201,7 +202,7 @@ describe("transport-native request headers", () => {
     expect(seen[1]!.headers.get("Origin")).toBe("https://credential.example");
 
     await expect(
-      api.$operations.allEnvironmentHeaders(undefined, {
+      api.$operations.allEnvironmentHeaders({
         headers: { Origin: "https://wrong-channel.example" },
       }),
     ).rejects.toMatchObject({ code: "REQUEST_ENCODE_FAILED" });

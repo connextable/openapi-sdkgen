@@ -91,26 +91,11 @@ func emitStreamInterface(output *bytes.Buffer, document *ir.Document, streams []
 		if stream.Operation.OperationID == "" {
 			continue
 		}
-		inputs, err := operationInputTypes(document, stream.Operation)
+		functionType, err := streamFunctionType(document, stream)
 		if err != nil {
 			return err
 		}
-		inputRequired, err := operationInputRequired(document, stream.Operation, inputs, false)
-		if err != nil {
-			return err
-		}
-		inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
-		optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
-		optionMarker := "?"
-		if len(inputs) == 0 {
-			fmt.Fprintf(output, "    readonly %s: (options%s: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), optionMarker, optionsType, stream.ItemType)
-		} else {
-			inputMarker := ""
-			if !inputRequired {
-				inputMarker = "?"
-			}
-			fmt.Fprintf(output, "    readonly %s: (input%s: %s, options%s: %s) => AsyncIterable<%s>\n", quoteTS(stream.Operation.OperationID), inputMarker, inputType, optionMarker, optionsType, stream.ItemType)
-		}
+		fmt.Fprintf(output, "    readonly %s: %s\n", quoteTS(stream.Operation.OperationID), functionType)
 	}
 	output.WriteString("  }\n")
 	return nil
@@ -132,22 +117,14 @@ func emitStreamValues(output *bytes.Buffer, document *ir.Document, streams []gen
 		}
 		inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
 		optionsType := operationSlotType(operationRouteKey(stream.Operation), "options")
-		optionMarker := "?"
-		if operationRequiresOptions(stream.Operation) {
-			optionMarker = ""
-		}
 		variable := stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation))
-		if len(inputs) == 0 {
-			fmt.Fprintf(output, "  const %s = (options%s: %s): AsyncIterable<%s> => request.stream<%s>(%s, undefined, options)\n", variable, optionMarker, optionsType, stream.ItemType, stream.ItemType, definition)
-		} else {
-			inputMarker := ""
-			if !inputRequired && optionMarker == "?" {
-				inputMarker = "?"
-			} else if !inputRequired {
-				inputType += " | undefined"
-			}
-			fmt.Fprintf(output, "  const %s = (input%s: %s, options%s: %s): AsyncIterable<%s> => request.stream<%s>(%s, input, options)\n", variable, inputMarker, inputType, optionMarker, optionsType, stream.ItemType, stream.ItemType, definition)
+		functionType, err := streamFunctionType(document, stream)
+		if err != nil {
+			return err
 		}
+		hasInput := len(inputs) > 0
+		inputOptional := hasInput && !inputRequired
+		fmt.Fprintf(output, "  const %s = bindStreamOperation<%s, %s, %s>(request, %s, %t, %t) as %s\n", variable, inputType, stream.ItemType, optionsType, definition, hasInput, inputOptional, functionType)
 	}
 	return nil
 }
@@ -197,12 +174,18 @@ func streamFunctionType(document *ir.Document, stream generatedStream) (string, 
 		return "(options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
 	}
 	inputType := operationSlotType(operationRouteKey(stream.Operation), "input")
-	inputMarker := ""
-	if !inputRequired && optionMarker == "?" {
-		inputMarker = "?"
-	} else if !inputRequired {
-		inputType += " | undefined"
+	if !inputRequired {
+		optionsOnly := "(options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">"
+		inputMarker := ""
+		if optionMarker == "?" {
+			inputMarker = "?"
+		} else {
+			inputType += " | undefined"
+		}
+		inputCall := "(input" + inputMarker + ": " + inputType + ", options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">"
+		return "(" + optionsOnly + ") & (" + inputCall + ")", nil
 	}
+	inputMarker := ""
 	return "(input" + inputMarker + ": " + inputType + ", options" + optionMarker + ": " + optionsType + ") => AsyncIterable<" + stream.ItemType + ">", nil
 }
 

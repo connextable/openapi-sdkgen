@@ -24,6 +24,9 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	output.WriteString("import {\n")
 	output.WriteString("  assignCallableProperties,\n")
 	output.WriteString("  bindOperation,\n")
+	if len(streams) > 0 {
+		output.WriteString("  bindStreamOperation,\n")
+	}
 	if hasPathOperations {
 		output.WriteString("  bindPathOperation,\n")
 	}
