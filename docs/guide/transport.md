@@ -121,7 +121,7 @@ Use this pattern when header policy belongs at the transport boundary. It does
 not override restrictions imposed by the Fetch implementation that ultimately
 sends the request.
 
-## Provide credentials
+## Select a security requirement and provide credentials
 
 For a simple Bearer token, set `authorization` when creating the client.
 
@@ -132,18 +132,35 @@ const api = createClient({
 });
 ```
 
-Use a `credentials` function when the API offers multiple authentication
-alternatives or credentials must be loaded for each request.
+OpenAPI calls each object in the `security` array a Security Requirement Object.
+The objects are OR choices; all schemes inside one object are required together
+(AND). Generated operation options expose their stable IDs as an exact
+`securityRequirement` union:
+
+```ts
+await api.$operations.updateCheckout({
+  securityRequirement: "GuestCapability",
+  authorization: "Bearer example-token",
+});
+```
+
+Use `securityProvider` when the host must select a requirement or load
+credentials for each request. `requirements` contains the effective Security
+Requirement Objects for the operation. `selectedRequirement` is present when
+the request chose one but still needs provider credentials.
 
 ```ts
 const api = createClient({
   baseURL: "https://api.example.test",
-  credentials: async ({ alternatives }) => {
-    const alternative = alternatives.serviceToken;
+  securityProvider: async ({ operation, requirements, selectedRequirement, origin }) => {
+    const requirement = selectedRequirement ?? requirements.serviceToken;
     return {
-      alternative,
-      values: {
-        serviceToken: { kind: "http-bearer", token: await getToken() },
+      requirement,
+      credentials: {
+        serviceToken: {
+          kind: "http-bearer",
+          token: await getToken(operation, origin),
+        },
       },
     };
   },
@@ -153,6 +170,12 @@ const api = createClient({
 Generated clients support API keys, HTTP Basic and Bearer authentication,
 OAuth2, OpenID Connect, and mTLS requirements. Your application remains
 responsible for login, token refresh, and credential storage.
+
+Selection order is explicit `securityRequirement`, then `securityProvider`, then
+automatic inference when exactly one requirement is already satisfied by
+SDK-owned options. A matching `authorization` or `csrfToken` satisfies its
+scheme. A provider may omit that scheme or return the same value; a different
+value fails before Fetch. Raw `headers` never satisfy a security scheme.
 
 For an OpenAPI cookie API-key security scheme, browser applications can use
 ambient cookies without reading their values:
@@ -164,12 +187,28 @@ const api = createClient({
 });
 ```
 
-`"include"` satisfies cookie security through the active Fetch implementation.
-The SDK neither asks for the cookie value nor creates a `Cookie` header. Fetch
-and the browser cookie policy decide whether a cookie is sent. If an AND
-security alternative combines a cookie with another scheme, use a credential
-provider for the other schemes and pass `{ credentials: "include" }` as the
-request option; omit the ambient cookie scheme from the provider's `values`.
+`credentials` is only the Fetch `RequestCredentials` policy. It can be combined
+with `securityProvider`; ambient cookies do not bypass the provider's requirement
+selection. `"include"` satisfies cookie security through the active Fetch
+implementation. The SDK neither asks for the cookie value nor creates a
+`Cookie` header. Fetch and the browser cookie policy decide whether a cookie is
+sent.
+
+For a requirement that combines a session cookie and CSRF header, select the
+requirement and satisfy both schemes through dedicated request options:
+
+```ts
+await api.$operations.updateCheckout({
+  securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie",
+  credentials: "include",
+  csrfToken: csrf,
+});
+```
+
+Selection failures use `SECURITY_REQUIREMENT_REQUIRED` or
+`SECURITY_REQUIREMENT_INVALID`. Missing, malformed, extra, or conflicting
+credentials use `SECURITY_CREDENTIALS_REQUIRED` or
+`SECURITY_CREDENTIALS_INVALID`.
 
 Do not declare the same cookie as both an `in: cookie` Parameter Object and an
 applied cookie security scheme. Generation rejects that ambiguous ownership.

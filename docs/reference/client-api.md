@@ -95,6 +95,25 @@ const todos = await api.$operations["listTodos"]({
 });
 ```
 
+## Security requirements
+
+When an operation declares OpenAPI Security Requirement Objects, its generated
+request options expose `securityRequirement` as a union of that operation's
+stable requirement IDs. Operations without effective security requirements do
+not expose the option.
+
+```ts
+await api.$operations.updateCheckout({
+  securityRequirement: "GuestCapability",
+  authorization: "Bearer example-token",
+});
+```
+
+`ClientOptions.credentials` and per-request `credentials` are Fetch
+`RequestCredentials`. Use `ClientOptions.securityProvider` for host-owned
+requirement selection and credential acquisition. See
+[Select a security requirement and provide credentials](../guide/transport.md#select-a-security-requirement-and-provide-credentials).
+
 ## Request headers
 
 Every declared header appears under `headerParams`. Headers controlled by Fetch,
@@ -138,6 +157,10 @@ import {
 - `isErrorCode(error, code)`: checks an exact error code
 - `isErrorCategory(error, category)`: checks an error category
 - `TransportErrorCode`: lists errors raised while sending or receiving a request
+
+Security selection uses `SECURITY_REQUIREMENT_REQUIRED` and
+`SECURITY_REQUIREMENT_INVALID`. Credential acquisition and application use
+`SECURITY_CREDENTIALS_REQUIRED` and `SECURITY_CREDENTIALS_INVALID`.
 
 ## OpenAPI metadata
 

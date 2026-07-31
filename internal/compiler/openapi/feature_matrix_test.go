@@ -247,7 +247,7 @@ func TestCanonicalFeatureManifestHasEverySchemaKeywordAndExecutableEvidence(t *t
 		}
 	}
 	sort.Strings(manifestContracts)
-	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "9c879ff759c63f4b52fa6deb565ead3cbb053b10647b9f16881d5a210b62c12c" {
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(manifestContracts, "\n")))); got != "8d27658e91eb2eae35532ae8397a655d7eb7441f1d98b14748204469db6c4048" {
 		t.Errorf("manifest feature/evidence contract changed: %s", got)
 	}
 

@@ -95,6 +95,26 @@ const todos = await api.$operations["listTodos"]({
 });
 ```
 
+## Security Requirement
+
+operation에 OpenAPI Security Requirement Object가 선언되어 있으면 생성된 요청
+옵션의 `securityRequirement`가 해당 operation의 안정적인 requirement ID
+유니언으로 생성됩니다. 적용되는 security requirement가 없는 operation에는 이
+옵션이 생성되지 않습니다.
+
+```ts
+await api.$operations.updateCheckout({
+  securityRequirement: "GuestCapability",
+  authorization: "Bearer example-token",
+});
+```
+
+`ClientOptions.credentials`와 요청별 `credentials`는 Fetch의
+`RequestCredentials`입니다. 호스트가 requirement를 선택하고 인증 정보를
+가져오려면 `ClientOptions.securityProvider`를 사용합니다. 자세한 내용은
+[Security Requirement 선택과 인증 정보 제공](../guide/transport.md#security-requirement-선택과-인증-정보-제공)을
+참고하세요.
+
 ## 요청 헤더
 
 선언된 헤더는 모두 `headerParams`에 생성됩니다. `Origin`, `Host`, `Cookie`,
@@ -137,6 +157,10 @@ import {
 - `isErrorCode(error, code)`: 정확한 오류 코드 확인
 - `isErrorCategory(error, category)`: 오류 범주 확인
 - `TransportErrorCode`: 전송 과정에서 발생할 수 있는 오류 코드
+
+Security Requirement 선택 오류는 `SECURITY_REQUIREMENT_REQUIRED`와
+`SECURITY_REQUIREMENT_INVALID`를 사용합니다. 인증 정보 획득 및 적용 오류는
+`SECURITY_CREDENTIALS_REQUIRED`와 `SECURITY_CREDENTIALS_INVALID`를 사용합니다.
 
 ## OpenAPI 메타데이터
 

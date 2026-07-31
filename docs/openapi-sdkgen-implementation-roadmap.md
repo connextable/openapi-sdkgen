@@ -369,7 +369,7 @@ decoded headers, selected content type, decoded value, and the original
 `stream()` is the sole owner of the response body and returns the typed
 iterator; `raw()` returns the untouched `Response` without a decoded stream or
 value. A link inherits its client
-transport, codecs, and credential provider, but takes its own request options
+transport, codecs, and security provider, but takes its own request options
 and never reuses the originating operation's `AbortSignal`.
 
 Streaming request codecs are completed here with the common stream transport.
@@ -379,23 +379,22 @@ and abort both cancel the reader and release its lock.
 
 ### Phase 6: Outbound Security
 
-Implement security requirement planning for API key, HTTP, OAuth2, OpenID
-Connect, mutual TLS, alternatives, optional requirements, and operation
-overrides.
+Implement Security Requirement Object planning for API key, HTTP, OAuth2,
+OpenID Connect, mutual TLS, optional access, and operation overrides.
 
 Required result:
 
-- Generated code identifies declared requirement alternatives, asks the host
-  to select one alternative and provide the complete credential set for it,
-  then applies each credential at its declared header, query, or cookie
-  location.
+- Generated code identifies declared Security Requirement Objects, lets the
+  request or host select one requirement, and applies credentials not already
+  satisfied by SDK-owned request options at their declared header, query, or
+  cookie locations.
 - Credential acquisition remains host-owned. The SDK does not embed token
   storage, login UX, refresh logic, or secrets.
 - Generated security metadata preserves every declared OAuth2 flow URL and
   scope for 3.0/3.1/3.2, the 3.2 `deviceAuthorization` flow,
   `oauth2MetadataUrl`, OpenID Connect URL, and 3.2 security-scheme
   `deprecated` state. Discovery, device-code interaction, token acquisition,
-  and refresh remain host-owned; the credential provider receives the typed
+  and refresh remain host-owned; the security provider receives the typed
   declaration and selected scopes.
 
 Public contract:
@@ -403,41 +402,42 @@ Public contract:
 ```ts
 const api = createClient({
   baseURL,
-  credentials: async ({ operation, alternatives, origin }) => ({
-    alternative: alternatives.bearerAuth,
-    values: {
+  credentials: "include",
+  securityProvider: async ({ operation, requirements, selectedRequirement, origin }) => ({
+    requirement: selectedRequirement ?? requirements.bearerAuth,
+    credentials: {
       bearerAuth: { kind: "http-bearer", token: await tokenFor(operation, origin) },
     },
   }),
 });
 ```
 
-The generated credential type is a discriminated union keyed by the document's
-security-scheme names and alternatives. Dispatch fails before Fetch unless the
-selected alternative has every required credential. Credentials are requested
-for the final normalized origin; they are never reused for a Link or server
-override at another origin unless the host explicitly returns them for that
-origin. `values` permits exactly the schemes in the selected alternative that
-are not already satisfied by ambient Fetch cookies; missing or extra values
-fail before Fetch. Security-owned header/query/cookie locations cannot be
-supplied by ordinary call options; a collision fails rather than overwriting a
-credential. With Fetch credentials mode `"include"`, cookie API-key security is
-ambient: the SDK neither requests its value nor synthesizes a `Cookie` header.
-Fetch and browser cookie policy decide whether a cookie reaches the server.
-Without ambient credentials, explicit cookie credentials remain
-transport-capability gated and require a cookie-jar adapter. Declaring the same
-cookie as both an operation parameter and an applied security scheme is a
-generation error.
+Generated operation options expose `securityRequirement` as an exact union of
+the operation's stable requirement IDs. Selection order is explicit request
+selection, host `securityProvider`, then inference when exactly one requirement
+is already satisfied. The provider receives the final normalized origin and
+effective requirement definitions. Its `credentials` may contain only schemes
+from the selected requirement and may omit schemes already satisfied by
+`authorization`, `csrfToken`, ambient Fetch cookies, or selected mTLS
+capability. Matching dedicated and provider values are idempotent; conflicting,
+missing, malformed, or extra values fail before Fetch without exposing secrets.
+`ClientOptions.credentials` remains only the Fetch `RequestCredentials` mode.
+With mode `"include"`, cookie API-key security is ambient: the SDK neither
+requests its value nor synthesizes a `Cookie` header. Fetch and browser cookie
+policy decide whether a cookie reaches the server. Without ambient credentials,
+explicit cookie credentials remain transport-capability gated and require a
+cookie-jar adapter. Declaring the same cookie as both an operation parameter and
+an applied security scheme is a generation error.
 Mutual TLS requires a compatible host transport adapter. Its capability is
 checked before dispatch and an mTLS operation never falls back to default
 Fetch.
 
 Validation:
 
-- 3.0, 3.1, and 3.2 fixtures for every OAuth2 flow URL, scope, alternative,
+- 3.0, 3.1, and 3.2 fixtures for every OAuth2 flow URL, scope, requirement,
   and operation override; 3.2 fixtures additionally cover
   `deviceAuthorization`, `oauth2MetadataUrl`, and deprecated schemes.
-- Generated-provider typechecks, runtime alternative dispatch, metadata
+- Generated-provider typechecks, runtime requirement dispatch, metadata
   assertions, missing-credential failures, and transport-capability failures.
 
 ### Phase 7: Inbound Server Parity
@@ -449,12 +449,12 @@ Coverage:
 
 - Inbound path/query/header/cookie parameters.
 - Non-JSON bodies, multipart, XML, and streams.
-- Declared security schemes and requirement alternatives.
+- Declared security schemes and Security Requirement Objects.
 - The TypeScript `--with server` output.
 
 For an endpoint with non-empty effective security, router construction requires
 an authenticator or installs a default 401 rejection. The generated
-authentication context contains the declared alternatives and typed candidates
+authentication context contains the declared requirements and typed candidates
 for header, query, and cookie credentials; the host decides identity and
 authorization. Authentication runs after route selection but before body
 consumption and handler invocation. `security: []` explicitly disables inherited

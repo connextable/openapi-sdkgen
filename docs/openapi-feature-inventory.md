@@ -100,7 +100,7 @@ line.
 | callbacks | Callback Object, key expressions, callback Path Items; generated only by `typescript --with server` | all | error | `internal/target/typescript/server_test.go::TestGeneratedCallbackEndpointsAreHostBoundAndRoundTripJSON` |
 | webhooks | root Webhook Object; generated only by `typescript --with server` | 3.1+ | error | `internal/target/typescript/server_test.go::TestGeneratedWebhookRouterExecutesThroughFetch` |
 | examples | Example `summary`, `description`, `value`, `externalValue` | all | metadata | `internal/target/typescript/metadata_test.go::TestEmitMetadataPreservesDocumentationExamplesAndExtensions` |
-| security-requirements | root/operation requirements, alternatives, and explicit overrides | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesOpenAPISecurityAlternativesAndOperationOverride` |
+| security-requirements | root/operation Security Requirement Objects and explicit overrides | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesOpenAPISecurityRequirementsAndOperationOverride` |
 | security-schemes | API key, HTTP, OAuth2, OpenID Connect, and mTLS host providers with capability gates | all; mutual TLS 3.1+ | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeAppliesEveryHostManagedSecurityCredentialShape` |
 | fetch-managed-header-api-keys | Header API-key credentials for environment-controlled names and method-override values are forwarded to Fetch | all | generated | `internal/target/typescript/runtime_parity_test.go::TestRuntimeDelegatesEnvironmentControlledHeaderAPIKeysToFetch` |
 
