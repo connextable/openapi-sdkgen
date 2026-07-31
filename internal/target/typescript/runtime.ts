@@ -165,7 +165,7 @@ export interface ClientOptions {
    * `"include"` satisfies cookie API-key security through ambient Fetch cookies.
    */
   readonly credentials?: RequestCredentials;
-  /** Host-owned OpenAPI security requirement selection and credential acquisition hook. */
+  /** Host-owned credential acquisition hook for an already selected OpenAPI security requirement. */
   readonly securityProvider?: SecurityCredentialProvider;
   /** Default positive timeout in milliseconds. Individual requests may override it. */
   readonly timeoutMS?: number;
@@ -276,24 +276,19 @@ export interface MutualTLSCredential {
 /** All credential shapes understood by generated security lowering. */
 export type SecurityCredential = APIKeyCredential | HTTPBasicCredential | HTTPBearerCredential | HTTPCredential | OAuthCredential | MutualTLSCredential;
 
-/** Security requirement selection returned by a host credential provider. */
-export interface SecurityRequirementSelection {
-  readonly requirement: SecurityRequirementDefinition;
-  /** Credentials for selected schemes not already satisfied by ambient Fetch cookies. */
-  readonly credentials: Readonly<Record<string, SecurityCredential>>;
-}
+/** Credentials keyed by scheme name for one selected OpenAPI security requirement. */
+export type SecurityCredentials = Readonly<Record<string, SecurityCredential>>;
 
 /** Context supplied to a security credential provider after final server selection. */
 export interface SecurityCredentialContext {
   readonly operation: Pick<OperationDefinition, "route" | "operationID" | "method" | "path">;
-  readonly requirements: Readonly<Record<string, SecurityRequirementDefinition>>;
-  /** Explicit request selection when the caller needs the provider to complete its credentials. */
-  readonly selectedRequirement?: SecurityRequirementDefinition;
+  /** The sole SDK-selected requirement or the caller-selected alternative. */
+  readonly requirement: SecurityRequirementDefinition;
   readonly origin: string;
 }
 
-/** Host-owned security requirement selection and credential acquisition hook. */
-export type SecurityCredentialProvider = (context: SecurityCredentialContext) => SecurityRequirementSelection | Promise<SecurityRequirementSelection>;
+/** Host-owned credential acquisition hook for the selected requirement. */
+export type SecurityCredentialProvider = (context: SecurityCredentialContext) => SecurityCredentials | Promise<SecurityCredentials>;
 
 /** Options applied to one generated operation call. */
 export interface RequestOptions {
@@ -1608,52 +1603,41 @@ function applyOperationSecurity(
   }
   const requirements = Object.create(null) as Record<string, SecurityRequirementDefinition>;
   for (const requirement of declared) defineOwnDataProperty(requirements, requirement.id, requirement);
-  const requested = requestedID === undefined ? undefined : requirements[requestedID];
-  if (requestedID !== undefined && requested === undefined) {
-    throw securityRequirementInvalid(`Operation ${operationDiagnosticName(operation)} does not declare security requirement ${requestedID}`);
-  }
-  if (requested === undefined && declared.length > 1) {
-    throw transportError(
-      TransportErrorCode.SECURITY_REQUIREMENT_REQUIRED,
-      `Operation ${operationDiagnosticName(operation)} requires an explicit OpenAPI security requirement`,
-      undefined,
-    );
-  }
-  if (requested !== undefined && securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, requested, true)) {
-    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, requested, {}, false);
-  }
-  if (typeof options.securityProvider !== "function") {
-    if (requested !== undefined) {
-      return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, requested, {}, false);
+  let selected: SecurityRequirementDefinition;
+  if (declared.length === 1) {
+    if (requestedID !== undefined) {
+      throw securityRequirementInvalid(`Operation ${operationDiagnosticName(operation)} has one SDK-selected security requirement and does not accept an explicit selection`);
     }
-    const satisfied = declared.filter((requirement) => securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, requirement, false));
-    if (satisfied.length === 0) {
+    selected = declared[0]!;
+  } else {
+    if (requestedID === undefined) {
       throw transportError(
-        TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
-        `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
+        TransportErrorCode.SECURITY_REQUIREMENT_REQUIRED,
+        `Operation ${operationDiagnosticName(operation)} requires an explicit OpenAPI security requirement`,
         undefined,
       );
     }
-    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, satisfied[0]!, {}, false);
+    const requested = requirements[requestedID];
+    if (requested === undefined) {
+      throw securityRequirementInvalid(`Operation ${operationDiagnosticName(operation)} does not declare security requirement ${requestedID}`);
+    }
+    selected = requested;
+  }
+  if (securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, selected, true)) {
+    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, {}, false);
+  }
+  if (typeof options.securityProvider !== "function") {
+    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, {}, false);
   }
   const context: SecurityCredentialContext = {
     operation: { route: operation.route, operationID: operation.operationID, method: operation.method, path: operation.path },
-    requirements,
-    ...(requested === undefined ? {} : { selectedRequirement: requested }),
+    requirement: selected,
     origin: new URL(encoded.url).origin,
   };
-	const selection = options.securityProvider(context);
-  const apply = (resolved: SecurityRequirementSelection): EncodedRequest => {
-    const selected = requirements[resolved?.requirement?.id];
-    if (selected === undefined || selected !== resolved.requirement) {
-      throw securityRequirementInvalid("Security credential provider selected an unknown security requirement");
-    }
-    if (requested !== undefined && selected !== requested) {
-      throw securityRequirementInvalid("Security credential provider selected a different security requirement than the request");
-    }
-    return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, resolved?.credentials, true);
-  };
-  return isPromise(selection) ? selection.then(apply) : apply(selection);
+	const suppliedCredentials = options.securityProvider(context);
+  const apply = (resolved: SecurityCredentials): EncodedRequest =>
+    applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, resolved, true);
+  return isPromise(suppliedCredentials) ? suppliedCredentials.then(apply) : apply(suppliedCredentials);
 }
 
 type SDKSecuritySource =

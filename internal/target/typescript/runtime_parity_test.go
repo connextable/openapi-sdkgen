@@ -1978,11 +1978,25 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := `import { createClient, type RequestOptions, type Routes } from "./index.js"
+	probe := `import { createClient, type RequestOptions, type Routes, type SecurityCredentialProvider, type SecurityCredentials } from "./index.js"
 declare const api: ReturnType<typeof createClient>
 declare const source: Routes["GET /public"]["rawResponse"]
 const baseOptions: RequestOptions = {}
+const emptyCredentials: SecurityCredentials = {}
+const provider: SecurityCredentialProvider = ({ operation, requirement, origin }) => {
+  void operation
+  void requirement
+  void origin
+  return emptyCredentials
+}
 void baseOptions
+void provider
+// @ts-expect-error v3 provider contexts do not expose an alternatives map
+const oldContextProvider: SecurityCredentialProvider = ({ requirements }) => ({})
+void oldContextProvider
+// @ts-expect-error v3 provider selection results are not credential maps
+const oldResultProvider: SecurityCredentialProvider = ({ requirement }) => ({ requirement, credentials: {} })
+void oldResultProvider
 api.$operations.mutateCheckout({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
 api.$operations.mutateCheckout.raw({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie", credentials: "include", csrfToken: "csrf" })
 api.$routes["POST /checkout"]({ securityRequirement: "GuestCapability", authorization: "Bearer guest" })
@@ -2090,10 +2104,10 @@ let providerCalls = 0;
 const providerSelectedGuest = createClient({
   baseURL: "https://api.example.test",
   credentials: "include",
-  securityProvider: ({ requirements, selectedRequirement }) => {
+  securityProvider: ({ requirement }) => {
     providerCalls++;
-    if (selectedRequirement !== requirements.GuestCapability) throw new Error("explicit requirement missing from provider context");
-    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "provider" } } };
+    if (requirement.id !== "GuestCapability") throw new Error("selected requirement missing from provider context");
+    return { GuestCapability: { kind: "http-bearer", token: "provider" } };
   },
   fetch,
 });
@@ -2122,10 +2136,10 @@ let matchingProviderCalls = 0;
 const matchingProvider = createClient({
   baseURL: "https://api.example.test",
   authorization: "Bearer same",
-  securityProvider: ({ requirements, selectedRequirement }) => {
+  securityProvider: ({ requirement }) => {
     matchingProviderCalls++;
-    if (selectedRequirement !== requirements.GuestCapability__OperatorKey) throw new Error("matching provider did not receive explicit requirement");
-    return { requirement: requirements.GuestCapability__OperatorKey, credentials: { GuestCapability: { kind: "http-bearer", token: "same" }, OperatorKey: { kind: "api-key", value: "operator" } } };
+    if (requirement.id !== "GuestCapability__OperatorKey") throw new Error("matching provider did not receive selected requirement");
+    return { GuestCapability: { kind: "http-bearer", token: "same" }, OperatorKey: { kind: "api-key", value: "operator" } };
   },
   fetch,
 });
@@ -2133,7 +2147,19 @@ await matchingProvider.$operations.mutateCheckout({ securityRequirement: "GuestC
 if (matchingProviderCalls !== 1) throw new Error("provider did not complete explicit request selection");
 
 await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional({ securityRequirement: "anonymous" });
+await createClient({ baseURL: "https://api.example.test", securityProvider: () => { throw new Error("anonymous requirement called provider"); }, fetch }).$operations.getOptional({ securityRequirement: "anonymous" });
 await createClient({ baseURL: "https://api.example.test", authorization: "Bearer single", fetch }).$operations.getSingle();
+let soleProviderCalls = 0;
+await createClient({
+  baseURL: "https://api.example.test",
+  securityProvider: async ({ requirement }) => {
+    soleProviderCalls++;
+    if (requirement.id !== "GuestCapability") throw new Error("sole requirement was not SDK-selected");
+    return { GuestCapability: { kind: "http-bearer", token: "sole-provider" } };
+  },
+  fetch,
+}).$operations.getSingle();
+if (soleProviderCalls !== 1) throw new Error("sole requirement provider call mismatch");
 
 const noFetch = async () => { throw new Error("invalid security request reached fetch"); };
 const expectCode = async (promise, code) => promise.then(
@@ -2146,9 +2172,9 @@ let omittedFetchCalls = 0;
 await expectCode(
   createClient({
     baseURL: "https://api.example.test",
-    securityProvider: ({ requirements }) => {
+    securityProvider: () => {
       omittedProviderCalls++;
-      return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "unused" } } };
+      return { GuestCapability: { kind: "http-bearer", token: "unused" } };
     },
     fetch: async () => { omittedFetchCalls++; return new Response(null, { status: 204 }); },
   }).$operations.getOptional(),
@@ -2167,12 +2193,16 @@ await expectCode(
 await expectCode(
   createClient({
     baseURL: "https://api.example.test",
-    securityProvider: ({ requirements, selectedRequirement }) => {
-      if (selectedRequirement !== requirements.BuyerCSRFHeader__BuyerSessionCookie) throw new Error("explicit requirement missing from provider context");
-      return { requirement: requirements.GuestCapability, credentials: {} };
+    securityProvider: ({ requirement }) => {
+      if (requirement.id !== "BuyerCSRFHeader__BuyerSessionCookie") throw new Error("selected requirement missing from provider context");
+      return { requirement, credentials: {} };
     },
     fetch: noFetch,
   }).$operations.mutateCheckout({ securityRequirement: "BuyerCSRFHeader__BuyerSessionCookie" }),
+  "SECURITY_CREDENTIALS_INVALID",
+);
+await expectCode(
+  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.getSingle({ securityRequirement: "GuestCapability" }),
   "SECURITY_REQUIREMENT_INVALID",
 );
 await expectCode(
@@ -2191,7 +2221,7 @@ await expectCode(
   createClient({
     baseURL: "https://api.example.test",
     authorization: "Bearer dedicated",
-    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability__OperatorKey, credentials: { GuestCapability: { kind: "http-bearer", token: "different" }, OperatorKey: { kind: "api-key", value: "operator" } } }),
+    securityProvider: () => ({ GuestCapability: { kind: "http-bearer", token: "different" }, OperatorKey: { kind: "api-key", value: "operator" } }),
     fetch: noFetch,
   }).$operations.mutateCheckout({ securityRequirement: "GuestCapability__OperatorKey" }),
   "SECURITY_CREDENTIALS_INVALID",
@@ -2199,7 +2229,7 @@ await expectCode(
 await expectCode(
   createClient({
     baseURL: "https://api.example.test",
-    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability, credentials: {} }),
+    securityProvider: () => ({}),
     fetch: noFetch,
   }).$operations.mutateCheckout({ securityRequirement: "GuestCapability" }),
   "SECURITY_CREDENTIALS_INVALID",
@@ -2211,7 +2241,9 @@ if (JSON.stringify(calls) !== JSON.stringify([
   { path: "/checkout", authorization: null, csrf: "csrf", credentials: "include" },
   { path: "/checkout", authorization: "Bearer same", csrf: null },
   { path: "/optional", authorization: null, csrf: null },
+  { path: "/optional", authorization: null, csrf: null },
   { path: "/single", authorization: "Bearer single", csrf: null },
+  { path: "/single", authorization: "Bearer sole-provider", csrf: null },
 ])) throw new Error("security dispatch mismatch: " + JSON.stringify(calls));
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -2230,11 +2262,11 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let calls = 0;
 let credentialCalls = 0;
-const securityProvider = ({ requirements, selectedRequirement, origin }) => {
+const securityProvider = ({ requirement, origin }) => {
   credentialCalls++;
   if (origin !== "https://api.example.test") throw new Error("credential origin mismatch");
-  if (selectedRequirement !== requirements.ApiKey) throw new Error("root requirement selection missing from provider context");
-  return { requirement: requirements.ApiKey, credentials: { ApiKey: { kind: "api-key", value: "secret" } } };
+  if (requirement.id !== "ApiKey") throw new Error("root requirement selection missing from provider context");
+  return { ApiKey: { kind: "api-key", value: "secret" } };
 };
 const api = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
   calls++;
@@ -2243,12 +2275,16 @@ const api = createClient({ baseURL: "https://api.example.test", securityProvider
 } });
 await api.$operations.readSecure({ securityRequirement: "ApiKey" });
 if (credentialCalls !== 1 || calls !== 1) throw new Error("protected request selection mismatch");
+let publicCalls = 0;
 const publicAPI = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
+  publicCalls++;
   if (new Headers(init.headers).has("x-api-key")) throw new Error("operation security override was ignored");
   return new Response(null, { status: 204 });
 } });
 await publicAPI.$operations.getPublic();
 if (credentialCalls !== 1) throw new Error("public operation requested credentials");
+await publicAPI.$operations.getPublic({ securityRequirement: "ApiKey" }).then(() => { throw new Error("unsecured operation accepted explicit selection"); }, (error) => { if (error.code !== "SECURITY_REQUIREMENT_INVALID") throw error; });
+if (publicCalls !== 1) throw new Error("invalid unsecured selection reached fetch");
 await createClient({ baseURL: "https://api.example.test", securityProvider, headers: { "x-api-key": "caller" }, fetch: async () => { throw new Error("fetch must not run after credential collision"); } }).$operations.readSecure({ securityRequirement: "ApiKey" }).then(() => { throw new Error("credential collision was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -2280,14 +2316,13 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let override = 123;
 let calls = 0;
-const securityProvider = ({ requirements, operation }) => {
-  const requirement = Object.values(requirements)[0];
+const securityProvider = ({ requirement, operation }) => {
   const values = {
     getOrigin: "https://caller.example",
     getOverride: override,
     getAgent: "openapi-sdkgen-test",
   };
-  return { requirement, credentials: { [requirement.schemes[0].name]: { kind: "api-key", value: values[operation.operationID] } } };
+  return { [requirement.schemes[0].name]: { kind: "api-key", value: values[operation.operationID] } };
 };
 const api = createClient({
   baseURL: "https://api.example.test",
@@ -2344,13 +2379,9 @@ const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 const expectedNames = ["__proto__", "api-key", "api_key", "constructor"];
 const api = createClient({
   baseURL: "https://api.example.test",
-  securityProvider: ({ requirements }) => {
-    const requirement = Object.values(requirements)[0];
+  securityProvider: ({ requirement }) => {
     if (JSON.stringify(requirement.schemes.map(({ name }) => name).sort()) !== JSON.stringify(expectedNames)) throw new Error("security scheme identities changed");
-    return {
-      requirement,
-      credentials: Object.fromEntries(expectedNames.map((name, index) => [name, { kind: "api-key", value: String(index + 1) }])),
-    };
+    return Object.fromEntries(expectedNames.map((name, index) => [name, { kind: "api-key", value: String(index + 1) }]));
   },
   fetch: async (_input, init) => {
     const headers = new Headers(init.headers);
@@ -2411,10 +2442,10 @@ for await (const item of requestAmbient.$operations.streamCookie.stream({ creden
 let providerCalls = 0;
 const mixed = createClient({
   baseURL: "https://api.example.test",
-  securityProvider: ({ requirements }) => {
+  securityProvider: ({ requirement }) => {
     providerCalls++;
-    const requirement = Object.values(requirements)[0];
-    return { requirement, credentials: { Bearer: { kind: "http-bearer", token: "token" } } };
+    if (requirement.id !== "Bearer__Cookie") throw new Error("mixed requirement selection mismatch");
+    return { Bearer: { kind: "http-bearer", token: "token" } };
   },
   fetch,
 });
@@ -2449,8 +2480,7 @@ func TestRuntimeAppliesEveryHostManagedSecurityCredentialShape(t *testing.T) {
 	script := `
 import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
-const securityProvider = ({ requirements }) => {
-  const requirement = Object.values(requirements)[0];
+const securityProvider = ({ requirement }) => {
   const scheme = requirement.schemes[0];
   if (scheme.name === "Bearer" && scheme.bearerFormat !== "JWT") throw new Error("bearer format metadata missing");
   if (scheme.name === "OAuth" && (scheme.oauth2MetadataUrl !== "https://auth.example.test/metadata" || scheme.flows.authorizationCode.refreshUrl !== "https://auth.example.test/refresh" || scheme.flows.deviceAuthorization.deviceAuthorizationUrl !== "https://auth.example.test/device" || scheme.scopes[0] !== "widgets:read")) throw new Error("OAuth metadata missing");
@@ -2466,7 +2496,7 @@ const securityProvider = ({ requirements }) => {
     OpenID: { kind: "openIdConnect", token: "openid-token" },
     Mutual: { kind: "mutual-tls" },
   };
-  return { requirement, credentials: { [scheme.name]: values[scheme.name] } };
+  return { [scheme.name]: values[scheme.name] };
 };
 const expected = {
   "/basic": "Basic YTpi",
@@ -2499,7 +2529,7 @@ const capable = createClient({ baseURL: "https://api.example.test", securityProv
 } } });
 await capable.$operations.getCookie();
 await capable.$operations.getMTLS();
-const invalid = createClient({ baseURL: "https://api.example.test", securityProvider: ({ requirements }) => ({ requirement: requirements.Bearer, credentials: { Basic: { kind: "http-basic", username: "a", password: "b" } } }), fetch: async () => { throw new Error("invalid credentials reached fetch"); } });
+const invalid = createClient({ baseURL: "https://api.example.test", securityProvider: () => ({ Basic: { kind: "http-basic", username: "a", password: "b" } }), fetch: async () => { throw new Error("invalid credentials reached fetch"); } });
 await invalid.$operations.getBearer().then(() => { throw new Error("invalid credential set was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {

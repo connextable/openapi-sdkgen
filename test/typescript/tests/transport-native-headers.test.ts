@@ -179,10 +179,10 @@ describe("transport-native request headers", () => {
     const seen: Array<{ path: string; headers: Headers }> = [];
     const api = createClient({
       baseURL: "https://api.example.test",
-      securityProvider: ({ requirements }) => ({
-        requirement: requirements.OriginKey!,
-        credentials: { OriginKey: { kind: "api-key", value: "https://credential.example" } },
-      }),
+      securityProvider: ({ requirement }) => {
+        expect(requirement.id).toBe("OriginKey");
+        return { OriginKey: { kind: "api-key", value: "https://credential.example" } };
+      },
       fetch: async (input, init) => {
         seen.push({ path: new URL(String(input)).pathname, headers: new Headers(init?.headers) });
         return new Response(null, { status: 204 });
