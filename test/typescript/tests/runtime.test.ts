@@ -573,12 +573,16 @@ describe("generated runtime", () => {
     await optional(undefined, { credentials: "omit" });
     await optional.raw({ credentials: "same-origin" });
 
-    const full = bindOperation<{ path: { accountID: string }; query?: { force?: boolean } }, { id: string }>(
-      request,
-      operation({ path: "/accounts/{accountID}/phone" }),
+    const full = bindOperation<
+      { path: { accountID: string }; query?: { force?: boolean } },
+      { id: string }
+    >(request, operation({ path: "/accounts/{accountID}/phone" }), true);
+    const resource = bindPathOperation(
+      full,
+      { accountID: "account-1" },
       true,
-    );
-    const resource = bindPathOperation(full, { accountID: "account-1" }, true, true) as unknown as OptionalCall;
+      true,
+    ) as unknown as OptionalCall;
     await resource({ credentials: "include" });
     await resource({ query: { force: true } }, { credentials: "omit" });
 

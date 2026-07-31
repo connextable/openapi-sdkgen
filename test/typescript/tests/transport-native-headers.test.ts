@@ -64,7 +64,9 @@ if (false) {
   typedClient.$operations.overrideMethod(overrideInput);
   typedClient.$streams.streamEnvironmentHeaders();
   typedClient.$streams.streamEnvironmentHeaders({ headers: { "X-Raw": "stream" } });
-  typedClient.$streams.streamEnvironmentHeaders(undefined, { headers: { "X-Raw": "legacy-stream" } });
+  typedClient.$streams.streamEnvironmentHeaders(undefined, {
+    headers: { "X-Raw": "legacy-stream" },
+  });
   typedClient.$operations.streamEnvironmentHeaders.stream();
   typedClient.$operations.streamEnvironmentHeaders.stream({
     headerParams: { Origin: "https://stream.example" },
