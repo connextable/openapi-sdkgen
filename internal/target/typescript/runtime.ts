@@ -10,7 +10,7 @@ export const TransportErrorCode = {
   REQUEST_TIMEOUT: "REQUEST_TIMEOUT",
   /** The HTTP response body could not be decoded as its declared media type. */
   RESPONSE_DECODE_FAILED: "RESPONSE_DECODE_FAILED",
-  /** The operation has multiple already-satisfied security requirements and needs an explicit selection. */
+  /** The operation has multiple effective security requirements and needs an explicit selection. */
   SECURITY_REQUIREMENT_REQUIRED: "SECURITY_REQUIREMENT_REQUIRED",
   /** The requested or provider-selected security requirement is not valid for the operation. */
   SECURITY_REQUIREMENT_INVALID: "SECURITY_REQUIREMENT_INVALID",
@@ -1609,6 +1609,13 @@ function applyOperationSecurity(
   if (requestedID !== undefined && requested === undefined) {
     throw securityRequirementInvalid(`Operation ${operationDiagnosticName(operation)} does not declare security requirement ${requestedID}`);
   }
+  if (requested === undefined && declared.length > 1) {
+    throw transportError(
+      TransportErrorCode.SECURITY_REQUIREMENT_REQUIRED,
+      `Operation ${operationDiagnosticName(operation)} requires an explicit OpenAPI security requirement`,
+      undefined,
+    );
+  }
   if (requested !== undefined && securityRequirementIsSatisfied(options, requestOptions, encoded, credentials, requested, true)) {
     return applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, requested, {}, false);
   }
@@ -1621,13 +1628,6 @@ function applyOperationSecurity(
       throw transportError(
         TransportErrorCode.SECURITY_CREDENTIALS_REQUIRED,
         `Operation ${operationDiagnosticName(operation)} requires OpenAPI security credentials`,
-        undefined,
-      );
-    }
-    if (satisfied.length > 1) {
-      throw transportError(
-        TransportErrorCode.SECURITY_REQUIREMENT_REQUIRED,
-        `Operation ${operationDiagnosticName(operation)} requires an explicit OpenAPI security requirement`,
         undefined,
       );
     }

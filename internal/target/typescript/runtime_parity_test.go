@@ -2047,11 +2047,13 @@ func TestRuntimeSelectsAndSatisfiesOpenAPISecurityRequirementsConsistently(t *te
   "components":{"securitySchemes":{
     "GuestCapability":{"type":"http","scheme":"bearer"},
     "BuyerSessionCookie":{"type":"apiKey","in":"cookie","name":"buyer_session"},
-    "BuyerCSRFHeader":{"type":"apiKey","in":"header","name":"X-CSRF-Token"}
+    "BuyerCSRFHeader":{"type":"apiKey","in":"header","name":"X-CSRF-Token"},
+    "OperatorKey":{"type":"apiKey","in":"query","name":"operator_key"}
   }},
   "paths":{
-    "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/checkout":{"post":{"operationId":"mutateCheckout","security":[{"BuyerSessionCookie":[],"BuyerCSRFHeader":[]},{"GuestCapability":[]},{"GuestCapability":[],"OperatorKey":[]}],"responses":{"204":{"description":"OK"}}}},
     "/optional":{"get":{"operationId":"getOptional","security":[{}, {"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
+    "/single":{"get":{"operationId":"getSingle","security":[{"GuestCapability":[]}],"responses":{"204":{"description":"OK"}}}},
     "/events":{"get":{"operationId":"watchEvents","security":[{"GuestCapability":[]}],"responses":{"200":{"description":"OK","content":{"application/x-ndjson":{"itemSchema":{"type":"string"}}}}}}}
   }
 }`))
@@ -2075,12 +2077,12 @@ const providerSelectedGuest = createClient({
   credentials: "include",
   securityProvider: ({ requirements, selectedRequirement }) => {
     providerCalls++;
-    if (selectedRequirement !== undefined) throw new Error("unexpected explicit requirement");
+    if (selectedRequirement !== requirements.GuestCapability) throw new Error("explicit requirement missing from provider context");
     return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "provider" } } };
   },
   fetch,
 });
-await providerSelectedGuest.$operations.mutateCheckout();
+await providerSelectedGuest.$operations.mutateCheckout({ securityRequirement: "GuestCapability" });
 if (providerCalls !== 1) throw new Error("ambient cookies bypassed the security provider");
 
 const explicitGuest = createClient({
@@ -2105,32 +2107,39 @@ let matchingProviderCalls = 0;
 const matchingProvider = createClient({
   baseURL: "https://api.example.test",
   authorization: "Bearer same",
-  securityProvider: ({ requirements }) => {
+  securityProvider: ({ requirements, selectedRequirement }) => {
     matchingProviderCalls++;
-    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "same" } } };
+    if (selectedRequirement !== requirements.GuestCapability__OperatorKey) throw new Error("matching provider did not receive explicit requirement");
+    return { requirement: requirements.GuestCapability__OperatorKey, credentials: { GuestCapability: { kind: "http-bearer", token: "same" }, OperatorKey: { kind: "api-key", value: "operator" } } };
   },
   fetch,
 });
-await matchingProvider.$operations.mutateCheckout();
-if (matchingProviderCalls !== 1) throw new Error("provider was not authoritative without an explicit request selection");
+await matchingProvider.$operations.mutateCheckout({ securityRequirement: "GuestCapability__OperatorKey" });
+if (matchingProviderCalls !== 1) throw new Error("provider did not complete explicit request selection");
 
-await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional();
-let optionalProviderCalls = 0;
-await createClient({
-  baseURL: "https://api.example.test",
-  securityProvider: ({ requirements }) => {
-    optionalProviderCalls++;
-    return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "optional-provider" } } };
-  },
-  fetch,
-}).$operations.getOptional();
-if (optionalProviderCalls !== 1) throw new Error("anonymous access bypassed the security provider");
+await createClient({ baseURL: "https://api.example.test", fetch }).$operations.getOptional({ securityRequirement: "optional" });
+await createClient({ baseURL: "https://api.example.test", authorization: "Bearer single", fetch }).$operations.getSingle();
 
 const noFetch = async () => { throw new Error("invalid security request reached fetch"); };
 const expectCode = async (promise, code) => promise.then(
   () => { throw new Error("expected " + code); },
   (error) => { if (error.code !== code) throw error; },
 );
+
+let omittedProviderCalls = 0;
+let omittedFetchCalls = 0;
+await expectCode(
+  createClient({
+    baseURL: "https://api.example.test",
+    securityProvider: ({ requirements }) => {
+      omittedProviderCalls++;
+      return { requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "unused" } } };
+    },
+    fetch: async () => { omittedFetchCalls++; return new Response(null, { status: 204 }); },
+  }).$operations.getOptional(),
+  "SECURITY_REQUIREMENT_REQUIRED",
+);
+if (omittedProviderCalls !== 0 || omittedFetchCalls !== 0) throw new Error("omitted ambiguous selection reached provider or fetch");
 
 await expectCode(
   createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.mutateCheckout({ securityRequirement: "Unknown" }),
@@ -2160,16 +2169,16 @@ await expectCode(
   "SECURITY_REQUIREMENT_REQUIRED",
 );
 await expectCode(
-  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.mutateCheckout(),
+  createClient({ baseURL: "https://api.example.test", fetch: noFetch }).$operations.mutateCheckout({ securityRequirement: "GuestCapability" }),
   "SECURITY_CREDENTIALS_REQUIRED",
 );
 await expectCode(
   createClient({
     baseURL: "https://api.example.test",
     authorization: "Bearer dedicated",
-    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability, credentials: { GuestCapability: { kind: "http-bearer", token: "different" } } }),
+    securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability__OperatorKey, credentials: { GuestCapability: { kind: "http-bearer", token: "different" }, OperatorKey: { kind: "api-key", value: "operator" } } }),
     fetch: noFetch,
-  }).$operations.mutateCheckout(),
+  }).$operations.mutateCheckout({ securityRequirement: "GuestCapability__OperatorKey" }),
   "SECURITY_CREDENTIALS_INVALID",
 );
 await expectCode(
@@ -2177,7 +2186,7 @@ await expectCode(
     baseURL: "https://api.example.test",
     securityProvider: ({ requirements }) => ({ requirement: requirements.GuestCapability, credentials: {} }),
     fetch: noFetch,
-  }).$operations.mutateCheckout(),
+  }).$operations.mutateCheckout({ securityRequirement: "GuestCapability" }),
   "SECURITY_CREDENTIALS_INVALID",
 );
 
@@ -2187,7 +2196,7 @@ if (JSON.stringify(calls) !== JSON.stringify([
   { path: "/checkout", authorization: null, csrf: "csrf", credentials: "include" },
   { path: "/checkout", authorization: "Bearer same", csrf: null },
   { path: "/optional", authorization: null, csrf: null },
-  { path: "/optional", authorization: "Bearer optional-provider", csrf: null },
+  { path: "/single", authorization: "Bearer single", csrf: null },
 ])) throw new Error("security dispatch mismatch: " + JSON.stringify(calls));
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
@@ -2206,9 +2215,10 @@ import { pathToFileURL } from "node:url";
 const { createClient } = await import(pathToFileURL(process.argv[1]).href);
 let calls = 0;
 let credentialCalls = 0;
-const securityProvider = ({ requirements, origin }) => {
+const securityProvider = ({ requirements, selectedRequirement, origin }) => {
   credentialCalls++;
   if (origin !== "https://api.example.test") throw new Error("credential origin mismatch");
+  if (selectedRequirement !== requirements.ApiKey) throw new Error("root requirement selection missing from provider context");
   return { requirement: requirements.ApiKey, credentials: { ApiKey: { kind: "api-key", value: "secret" } } };
 };
 const api = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
@@ -2216,7 +2226,7 @@ const api = createClient({ baseURL: "https://api.example.test", securityProvider
   if (new Headers(init.headers).get("x-api-key") !== "secret") throw new Error("API key not applied");
   return new Response(null, { status: 204 });
 } });
-await api.$operations.readSecure();
+await api.$operations.readSecure({ securityRequirement: "ApiKey" });
 if (credentialCalls !== 1 || calls !== 1) throw new Error("protected request selection mismatch");
 const publicAPI = createClient({ baseURL: "https://api.example.test", securityProvider, fetch: async (_url, init) => {
   if (new Headers(init.headers).has("x-api-key")) throw new Error("operation security override was ignored");
@@ -2224,7 +2234,7 @@ const publicAPI = createClient({ baseURL: "https://api.example.test", securityPr
 } });
 await publicAPI.$operations.getPublic();
 if (credentialCalls !== 1) throw new Error("public operation requested credentials");
-await createClient({ baseURL: "https://api.example.test", securityProvider, headers: { "x-api-key": "caller" }, fetch: async () => { throw new Error("fetch must not run after credential collision"); } }).$operations.readSecure().then(() => { throw new Error("credential collision was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
+await createClient({ baseURL: "https://api.example.test", securityProvider, headers: { "x-api-key": "caller" }, fetch: async () => { throw new Error("fetch must not run after credential collision"); } }).$operations.readSecure({ securityRequirement: "ApiKey" }).then(() => { throw new Error("credential collision was accepted"); }, (error) => { if (error.code !== "SECURITY_CREDENTIALS_INVALID") throw error; });
 `
 	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "index.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript security runtime test: %v\n%s", err, output)
