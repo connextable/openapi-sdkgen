@@ -14,4 +14,4 @@ The package contains precompiled executables for macOS, Linux, and Windows on
 arm64 and x64. Go is not required by consumers.
 
 For command reference and generated SDK usage, see the
-[project documentation](https://connextable.github.io/openapi-sdkgen/).
+[project documentation](https://jinyongp.github.io/openapi-sdkgen/).

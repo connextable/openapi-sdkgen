@@ -24,7 +24,7 @@ You can also use the GitHub Release binary directly.
 On macOS or Linux, Homebrew installs the CLI without a separate Go setup:
 
 ```sh
-brew install connextable/tap/openapi-sdkgen
+brew install jinyongp/tap/openapi-sdkgen
 ```
 
 ## 2. Generate into application source

@@ -18,7 +18,7 @@ pnpm dlx openapi-sdkgen generate \
 macOS와 Linux에서는 Homebrew로 설치할 수도 있습니다.
 
 ```sh
-brew install connextable/tap/openapi-sdkgen
+brew install jinyongp/tap/openapi-sdkgen
 ```
 
 GitHub Releases에서도 운영체제별 실행 파일을 내려받을 수 있습니다.

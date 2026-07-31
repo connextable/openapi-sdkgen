@@ -53,11 +53,11 @@ pnpm dlx openapi-sdkgen generate --help
 Homebrew:
 
 ```sh
-brew install connextable/tap/openapi-sdkgen
+brew install jinyongp/tap/openapi-sdkgen
 ```
 
 Precompiled binaries are also available from
-[GitHub Releases](https://github.com/connextable/openapi-sdkgen/releases).
+[GitHub Releases](https://github.com/jinyongp/openapi-sdkgen/releases).
 
 ## Input sources
 
@@ -96,7 +96,7 @@ The server add-on creates separate `server/webhooks.ts` and
 ## Documentation
 
 Full guides and reference documentation:
-[connextable.github.io/openapi-sdkgen](https://connextable.github.io/openapi-sdkgen/).
+[jinyongp.github.io/openapi-sdkgen](https://jinyongp.github.io/openapi-sdkgen/).
 
 - [Getting started](docs/guide/getting-started.md)
 - [Generating an SDK](docs/guide/generate.md)

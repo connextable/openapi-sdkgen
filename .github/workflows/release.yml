@@ -105,7 +105,7 @@ jobs:
     needs: validate-release
     runs-on: macos-latest
     concurrency:
-      group: connextable-homebrew-tap
+      group: jinyongp-homebrew-tap
       cancel-in-progress: false
     permissions:
       contents: read
@@ -120,7 +120,7 @@ jobs:
           fi
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: connextable/homebrew-tap
+          repository: jinyongp/homebrew-tap
           ref: main
           ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: tap
@@ -168,8 +168,8 @@ jobs:
           git -C "$validation_tap" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C "$validation_tap" add -A
           git -C "$validation_tap" commit -m "test: validate $FORMULA" >/dev/null
-          brew tap connextable/validation "$validation_tap"
-          qualified_formula="connextable/validation/$FORMULA"
+          brew tap jinyongp/validation "$validation_tap"
+          qualified_formula="jinyongp/validation/$FORMULA"
           brew audit --strict --formula "$qualified_formula"
           HOMEBREW_NO_INSTALL_FROM_API=1 brew install --build-from-source "$qualified_formula"
           brew test "$qualified_formula"

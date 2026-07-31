@@ -35,11 +35,11 @@ const englishTheme = {
   search: { provider: "local" },
   outline: { level: [2, 3], label: "On this page" },
   editLink: {
-    pattern: "https://github.com/connextable/openapi-sdkgen/edit/main/docs/:path",
+    pattern: "https://github.com/jinyongp/openapi-sdkgen/edit/main/docs/:path",
     text: "Edit this page on GitHub",
   },
   footer: {
-    message: "MIT License · © Connextable",
+    message: "Apache License 2.0 · © Jinyong Park",
   },
 };
 
@@ -103,11 +103,11 @@ const koreanTheme = {
   },
   outline: { level: [2, 3], label: "이 페이지에서" },
   editLink: {
-    pattern: "https://github.com/connextable/openapi-sdkgen/edit/main/docs/:path",
+    pattern: "https://github.com/jinyongp/openapi-sdkgen/edit/main/docs/:path",
     text: "GitHub에서 이 페이지 수정",
   },
   footer: {
-    message: "MIT License · © Connextable",
+    message: "Apache License 2.0 · © Jinyong Park",
   },
 };
 

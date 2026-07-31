@@ -16,12 +16,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/connextable/openapi-sdkgen.git"
+    "url": "git+https://github.com/jinyongp/openapi-sdkgen.git"
   },
   "bugs": {
-    "url": "https://github.com/connextable/openapi-sdkgen/issues"
+    "url": "https://github.com/jinyongp/openapi-sdkgen/issues"
   },
-  "homepage": "https://connextable.github.io/openapi-sdkgen/",
+  "homepage": "https://jinyongp.github.io/openapi-sdkgen/",
   "publishConfig": {
     "access": "public"
   }
