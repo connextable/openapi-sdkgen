@@ -75,13 +75,9 @@ const todos = await api.$operations["listTodos"]({
 
 ## Security Requirement
 
-operation에 OpenAPI Security Requirement Object가 선언되어 있으면 생성된 요청
-옵션은 적용되는 requirement가 둘 이상일 때만 `securityRequirement`를
-노출합니다. 이 속성은 해당 operation의 안정적인 requirement ID로 구성된 필수
-유니언이며 operation options 인자도 필수입니다. 빈 `{}` requirement는
-`"anonymous"`로 표현됩니다. 적용되는 requirement가 정확히 하나이면 SDK가
-자동으로 선택합니다. requirement가 없거나 하나인 operation은 selector를
-노출하지 않습니다.
+Operation에 OpenAPI security 대안이 여러 개라면 `securityRequirement`로 하나를
+선택합니다. Requirement가 하나이면 자동으로 선택되며 빈 requirement의 이름은
+`"anonymous"`입니다.
 
 ```ts
 await api.$operations.updateCheckout({
@@ -90,34 +86,14 @@ await api.$operations.updateCheckout({
 });
 ```
 
-`ClientOptions.credentials`와 요청별 `credentials`는 Fetch의
-`RequestCredentials`입니다. 요청에서 선택한 requirement의 인증 정보를
-가져오려면 `ClientOptions.securityProvider`를 사용합니다. provider는 선택된
-단일 `requirement`를 받고 scheme별 인증 정보 맵을 반환하며 requirement를
-선택할 수 없습니다. 모호한 선택을 생략하면 provider와 Fetch를 호출하기 전에
-실패합니다. 자세한 내용은
-[Security Requirement 선택과 인증 정보 제공](../guide/transport.md#security-requirement-선택과-인증-정보-제공)을
-참고하세요.
+선택된 requirement의 인증 정보를 가져오려면 `securityProvider`를 사용합니다.
+예시는 [인증](../guide/transport.md#인증)에서 확인할 수 있습니다.
 
 ## 요청 헤더
 
-선언된 헤더는 모두 `headerParams`에 생성됩니다. `Origin`, `Host`, `Cookie`,
-`Sec-*`처럼 Fetch가 제어하는 헤더는 OpenAPI에서 필수로 선언해도 호출자
-입력에서는 선택 사항입니다. 명시적인 타입 입력, 선언되지 않은 원시 헤더,
-헤더 기반 API key 인증 정보는 실행 중인 Fetch 구현으로 전달합니다. 선언 및
-예약 헤더와 원시 헤더 사이의 소유권 충돌은 계속 오류입니다.
-
-Method override 헤더는 OpenAPI의 필수 여부를 유지하며 SDK의 값 필터 없이
-Fetch로 전달됩니다. Link는 명시적으로 전달한 `invocation.sourceInput`에서
-요청 헤더 소스를 읽습니다. 소스 호출 입력은 자동 보관되지 않습니다. 대상
-값은 같은 경로로 전달합니다.
-
-원본 필수 여부는 `openapi.document`에 남습니다. 생성된 Webhook과 Callback
-서버 애드온 입력 타입 및 런타임 검사는 전체 인바운드 계약을 유지합니다.
-
-최종 Fetch 동작과 사용자 정의 전송 경계는
-[호출 입력과 실행 환경 제어 헤더](../guide/transport.md#호출-입력과-실행-환경-제어-헤더)에서
-확인하세요.
+선언된 헤더는 모두 `headerParams`에 생성됩니다. Fetch가 제어하는 헤더는 호출자
+입력에서 선택 사항이며 실제 전송 여부는 실행 중인 Fetch가 결정합니다. 자세한
+사용법은 [요청 헤더](../guide/transport.md#요청-헤더)에서 확인할 수 있습니다.
 
 ## Link와 스트림
 

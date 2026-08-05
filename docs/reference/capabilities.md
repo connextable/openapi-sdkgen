@@ -15,13 +15,8 @@ The TypeScript target generates types and client code for:
 Call an API through a resource method, its exact HTTP route, or its
 `operationId`.
 
-For request headers, generated clients distinguish caller requiredness from
-wire requiredness. Names controlled by Fetch remain explicitly settable but are
-optional caller inputs. Typed values, undeclared raw headers, header API keys,
-and method-override values are forwarded to Fetch without SDK policy blocking.
-Metadata and generated Webhook and Callback contracts preserve the original
-OpenAPI requiredness. See
-[Caller inputs and environment-controlled headers](../guide/transport.md#caller-inputs-and-environment-controlled-headers).
+Headers declared in OpenAPI are available through `headerParams`. See
+[Request headers](../guide/transport.md#request-headers).
 
 ## Servers and authentication
 
@@ -51,5 +46,4 @@ When the selected target cannot generate an OpenAPI feature, generation stops
 with an error that identifies the relevant location. Unsupported features are
 not silently skipped.
 
-OpenAPI information that does not map to the client API remains available from
-`metadata.js`.
+The source OpenAPI document is available through the generated metadata entry point.

@@ -13,27 +13,8 @@ openapi-sdkgen generate \
 - `--target`: 생성할 SDK 종류
 - `--output`: 생성된 코드를 저장할 빈 디렉터리
 
-TypeScript를 선택하면 클라이언트, 타입, 실행에 필요한 코드, OpenAPI
-메타데이터가 생성됩니다. OpenAPI 파일이 바뀌면 같은 명령을 다시 실행하고 변경된
-생성 코드를 함께 커밋하세요.
-
-## 생성 코드와 포매터
-
-생성된 파일에는 포매터와 린터가 코드를 바꾸지 않도록 표시가 들어 있습니다.
-Prettier 3.6.0 이상에서는 다음 설정으로 해당 표시를 인식할 수 있습니다.
-
-```json
-{
-  "checkIgnorePragma": true
-}
-```
-
-이전 버전의 Prettier를 사용한다면 `.prettierignore`에 생성 디렉터리를
-추가하세요.
-
-```text
-src/generated/**
-```
+TypeScript를 선택하면 클라이언트, 타입, 실행 코드, OpenAPI 메타데이터가
+생성됩니다. OpenAPI 파일이 바뀌면 같은 명령을 다시 실행합니다.
 
 ## Webhook과 Callback 코드 생성
 

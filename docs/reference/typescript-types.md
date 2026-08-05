@@ -1,31 +1,22 @@
 # Generated TypeScript types
 
-The generated SDK exposes component-, route-, and operation-based types from its
-main entry point. Feature code can derive request and response types from the same
-generated methods it calls at runtime instead of declaring those shapes again.
+The generated SDK exports request, response, component, and enum types from its main
+entry point.
 
-See [Generated client API](./client-api.md) for runtime calls, authentication,
-errors, Links, and streams.
+See [Generated client API](./client-api.md) for calling the generated client.
 
 ## Choose a type source
 
-Choose the source that matches the identity already available to the consumer.
+| Source | Helper |
+| --- | --- |
+| generated client method | `Operation*<typeof method>` |
+| OpenAPI `operationId` | `Operation*<"operationId">` |
+| `"METHOD /path"` route | `Route*<"METHOD /path">` |
+| `components.schemas` name | `ComponentInput<Name>` / `ComponentOutput<Name>` |
 
-| Available identity | Helper family | Typical use |
-| --- | --- | --- |
-| generated exact or resource method | `Operation*<typeof method>` | Feature code coupled to a generated client method |
-| exact OpenAPI `operationId` | `Operation*<"operationId">` | Shared types keyed by a stable operation ID |
-| exact `"METHOD /path"` | `Route*<"METHOD /path">` | Routes without an `operationId`, or route-oriented infrastructure |
-| component schema name | `ComponentInput<Name>` / `ComponentOutput<Name>` | Domain types shared by several operations |
-| complete generated catalogs | `Components`, `Routes`, `Operations` | Generic tooling that needs every contract slot |
+## Extract from a generated method
 
-The focused helpers are normally easier to read than manually indexing a catalog and
-normalizing optional fields with TypeScript utility types.
-
-## Extract types from generated methods
-
-Use `typeof` on a generated method and pass that method type to an `Operation*`
-helper. The helper accepts methods from all three generated client surfaces.
+Pass the type of a generated method to an `Operation*` helper.
 
 ```ts
 import {
@@ -42,224 +33,96 @@ const api = createClient({
 const listTodos = api.$operations.listTodos;
 type TodoFilters = OperationQuery<typeof listTodos>;
 
-const exactUpdate = api.$routes["PATCH /todos/{todoID}"];
-type UpdateInput = OperationInput<typeof exactUpdate>;
-
 const updateTodo = api.todos("todo-1").update;
+type UpdateInput = OperationInput<typeof updateTodo>;
 type UpdateBody = OperationBody<typeof updateTodo>;
 ```
 
-This is compile-time extraction only. It adds no wrapper or runtime metadata to the
-method.
-
-### Exact and bound methods
-
-`$operations` and `$routes` expose exact methods. A resource-tree leaf may already
-have path parameters bound by parent selectors.
-
-| Method value | `OperationInput` result |
-| --- | --- |
-| `api.$operations.updateTodo` | full input, including `path` and `body` |
-| `api.$routes["PATCH /todos/{todoID}"]` | full input, including `path` and `body` |
-| `api.todos("todo-1").update` | bound input containing `body`, without `path` |
-
-The selected surface also applies to `OperationContract<Source>`. Its `input` and
-`call` slots describe the exact method or the bound resource method supplied as
-`Source`.
-
-```ts
-import type { OperationContract } from "./generated/api";
-
-type ExactContract = OperationContract<typeof exactUpdate>;
-type BoundContract = OperationContract<typeof updateTodo>;
-```
-
-`OperationPath<typeof updateTodo>` is rejected because the resource method has no
-path input left. Raw, pagination, Link, and stream functions are capabilities rather
-than standalone operation sources; use their route-keyed call types instead.
-
-### Use extracted types in feature code
-
-Extracted types can annotate state, function parameters, or `satisfies` expressions
-without repeating the OpenAPI shape.
+`OperationInput` is the complete argument accepted by the method. `OperationBody` is
+its request body. A resource-tree method includes only the arguments that remain after
+its selectors have been applied.
 
 ```ts
 const filters = { completed: false } satisfies TodoFilters;
 
-async function update(body: OperationBody<typeof updateTodo>) {
+async function update(body: UpdateBody) {
   return updateTodo({ body });
 }
 ```
 
-When only the `Client` type is available, the corresponding method type can be indexed
-without creating a client value:
+## Extract by operation ID or route
 
-```ts
-import type { Client, OperationInput } from "./generated/api";
-
-type UpdateInput = OperationInput<Client["$operations"]["updateTodo"]>;
-```
-
-## Extract types by operation ID
-
-Every non-hidden operation with an explicit `operationId` can be used directly as an
-`Operation*` string source.
+Use an OpenAPI `operationId` with `Operation*` helpers, or a `"METHOD /path"` string
+with `Route*` helpers.
 
 ```ts
 import type {
   OperationBody,
-  OperationContract,
   OperationInput,
   OperationOutput,
-  OperationParameter,
   OperationQuery,
-  Operations,
-} from "./generated/api";
-
-type ListContract = OperationContract<"listTodos">;
-type ListInput = OperationInput<"listTodos">;
-type ListOutput = OperationOutput<"listTodos">;
-type ListQuery = OperationQuery<"listTodos">;
-type Limit = OperationParameter<"listTodos", "query", "limit">;
-type CreateBody = OperationBody<"createTodo">;
-type CatalogInput = Operations["listTodos"]["input"];
-```
-
-The string must be an exact operation ID. A route string is not an operation ID and is
-therefore not accepted by `Operation*`; use a `Route*` helper for it.
-
-## Extract types by route
-
-Route helpers use the exact `"METHOD /openapi/path"` string as their identity. They
-cover generated routes whether or not OpenAPI declares an `operationId`.
-
-```ts
-import type {
   RouteBody,
-  RouteContract,
   RouteInput,
   RouteOutput,
   RouteParameter,
-  Routes,
 } from "./generated/api";
 
-type UpdateContract = RouteContract<"PATCH /todos/{todoID}">;
+type ListInput = OperationInput<"listTodos">;
+type ListOutput = OperationOutput<"listTodos">;
+type ListQuery = OperationQuery<"listTodos">;
+type CreateBody = OperationBody<"createTodo">;
+
 type UpdateInput = RouteInput<"PATCH /todos/{todoID}">;
 type UpdateOutput = RouteOutput<"PATCH /todos/{todoID}">;
 type UpdateBody = RouteBody<"PATCH /todos/{todoID}">;
-type TodoID = RouteParameter<"PATCH /todos/{todoID}", "path", "todoID">;
-
-type HealthOutput = Routes["GET /health"]["output"];
+type TodoID = RouteParameter<
+  "PATCH /todos/{todoID}",
+  "path",
+  "todoID"
+>;
 ```
 
-### Route contract slots
+## Request and response helpers
 
-`RouteContract<Route>` keeps the complete route contract behind public type names.
-
-| Slot | Meaning | Focused helper |
+| Value | Operation helper | Route helper |
 | --- | --- | --- |
-| `input` | complete exact-call input | `RouteInput<Route>` |
-| `resourceInput` | input after resource path binding | `RouteResourceInput<Route>` |
-| `options` | per-request transport options | `RouteOptions<Route>` |
-| `output` | decoded successful output | `RouteOutput<Route>` |
-| `error` | generated error response union | `RouteContract<Route>["error"]` |
-| `rawResponse` | successful raw response union | `RouteRawResponse<Route>` |
-| `call` | exact operation method | `OperationMethod<Route>` |
-| `resourceCall` | resource-oriented method | `ResourceCall<Route>` |
-| `pagination` | pagination iterator when available | `PaginateCall<Route>` |
-| `links` | response-link calls when available | `LinkCalls<Route>` |
-| `stream` | streaming call when available | `StreamCall<Route>` |
+| complete call input | `OperationInput` | `RouteInput` |
+| successful output | `OperationOutput` | `RouteOutput` |
+| request body | `OperationBody` | `RouteBody` |
+| path parameters | `OperationPath` | `RoutePath` |
+| query parameters | `OperationQuery` | `RouteQuery` |
+| query-string parameters | `OperationQuerystring` | `RouteQuerystring` |
+| headers | `OperationHeaders` | `RouteHeaders` |
+| cookies | `OperationCookies` | `RouteCookies` |
+| one parameter | `OperationParameter` | `RouteParameter` |
+| complete contract | `OperationContract` | `RouteContract` |
 
-Use the full contract when several slots must stay tied to the same route. Use a
-focused helper when only one slot is needed. Capability slots resolve to `never` when
-the route does not declare that capability.
-
-## Request sections and parameters
-
-Section helpers return the complete caller-facing section. Parameter helpers select
-one value from a path, query, query-string, header, or cookie section.
-
-| Input section | Operation helper | Route helper | Parameter location |
-| --- | --- | --- | --- |
-| request body | `OperationBody` | `RouteBody` | not applicable |
-| path parameters | `OperationPath` | `RoutePath` | `"path"` |
-| query parameters | `OperationQuery` | `RouteQuery` | `"query"` |
-| query-string parameters | `OperationQuerystring` | `RouteQuerystring` | `"querystring"` |
-| header parameters | `OperationHeaders` | `RouteHeaders` | `"header"` |
-| cookie parameters | `OperationCookies` | `RouteCookies` | `"cookie"` |
+Parameter helpers take a location and parameter name:
 
 ```ts
-import type {
-  OperationBody,
-  OperationParameter,
-  OperationQuery,
-  RouteParameter,
-  RouteQuery,
-} from "./generated/api";
-
-type Filters = OperationQuery<typeof listTodos>;
-type Limit = OperationParameter<typeof listTodos, "query", "limit">;
-type CreateBody = OperationBody<"createTodo">;
-type RouteFilters = RouteQuery<"GET /todos">;
-type RouteLimit = RouteParameter<"GET /todos", "query", "limit">;
+type Limit = OperationParameter<"listTodos", "query", "limit">;
 ```
 
-The generic constraints reject a source without the requested section, an invalid
-location, or an unknown parameter name. Body fields are schema properties rather than
-OpenAPI Parameter Objects, so `"body"` is not a parameter location.
+Optional properties and schema-declared `null` values are preserved. Use
+`OperationInput` or `RouteInput` to check whether a complete call can omit a request
+section.
 
-### Optional and nullable values
+## Component types
 
-A section helper removes only the outer `undefined` caused by an optional aggregate
-input field. Optional properties inside the section remain optional.
-
-An individual parameter helper removes omission `undefined` while preserving
-schema-declared `null`:
+Use component helpers for schemas declared in `components.schemas`.
 
 ```ts
-type Query = OperationQuery<"listTodos">;
-// Query["search"] is string | null | undefined when the property is optional.
-
-type Search = OperationParameter<"listTodos", "query", "search">;
-// Search is string | null.
-```
-
-`OperationInput` or `RouteInput` remains authoritative for whether the complete call
-may omit a section.
-
-## Component input and output types
-
-Component helpers use exact names from `components.schemas` and expose separate input
-and output projections.
-
-```ts
-import type {
-  ComponentInput,
-  ComponentOutput,
-  Components,
-} from "./generated/api";
+import type { ComponentInput, ComponentOutput } from "./generated/api";
 
 type TodoInput = ComponentInput<"Todo">;
 type TodoOutput = ComponentOutput<"Todo">;
-
-type TodoContract = Components["Todo"];
-type EquivalentInput = TodoContract["input"];
-type EquivalentOutput = TodoContract["output"];
 ```
 
-`readOnly` fields are omitted from input projections. `writeOnly` fields are omitted
-from output projections. Required, optional, nullable, literal, union, array, and
-object shapes continue to follow the OpenAPI schema.
-
-Inline operation schemas do not create a `Components` entry. Extract them through the
-corresponding operation or route input, output, body, or section helper.
+Input types omit `readOnly` fields. Output types omit `writeOnly` fields.
 
 ## Enum values and types
 
-A generated component schema whose top-level schema declares `enum` gets both a type
-and a runtime iterable catalog.
-
-Given this OpenAPI component:
+A component enum provides a TypeScript type and runtime values.
 
 ```yaml
 components:
@@ -269,132 +132,48 @@ components:
       enum: [TODO, DONE]
 ```
 
-the SDK can use exact values at both compile time and runtime:
-
 ```ts
-import {
-  Enums,
-  isEnumValue,
-  type ComponentOutput,
-  type EnumValue,
-} from "./generated/api";
+import { Enums, isEnumValue, type EnumValue } from "./generated/api";
 
 type TodoStatus = EnumValue<"TodoStatus">;
 // "TODO" | "DONE"
 
-type TodoStatusOutput = ComponentOutput<"TodoStatus">;
-// The same "TODO" | "DONE" union
-
 const defaultStatus: TodoStatus = Enums.TodoStatus.TODO;
 const completedStatus = Enums.TodoStatus.DONE;
 
-const options = Array.from(Enums.TodoStatus, (value) => ({
-  label: value,
-  value,
-}));
-```
-
-`Enums.TodoStatus` is an iterable record, not an array. Every string value becomes an
-exact named member: the value `DONE` is available as `Enums.TodoStatus.DONE`. Values
-are not uppercased, camel-cased, or otherwise normalized. If a component or exact
-value contains dashes, use bracket notation:
-
-```ts
-const dashed = Enums["todo-status"]["IN-PROGRESS"];
-```
-
-The catalog has no positional index, array methods, or generated `members`/`values`
-fallback. Iterate it directly, or materialize an array only where array methods are
-needed:
-
-```ts
 for (const status of Enums.TodoStatus) {
   console.log(status);
 }
 
-const values = [...Enums.TodoStatus];
-const visible = Array.from(Enums.TodoStatus).filter((status) => status !== "DONE");
-```
+const options = Array.from(Enums.TodoStatus);
 
-Use `isEnumValue` when validating an unknown runtime value. It compares structured
-JSON enum values by value and narrows the input to the selected catalog's union:
-
-```ts
 declare const input: unknown;
 
 if (isEnumValue(Enums.TodoStatus, input)) {
-  input satisfies EnumValue<"TodoStatus">;
+  input satisfies TodoStatus;
 }
 ```
 
-The runtime catalog supports strings, numbers, booleans, `null`, arrays, and objects.
-Only strings receive named members. Every value remains available through iteration,
-and `EnumValue<Name>` preserves literal values, readonly object properties, and array
-order. An exact numeric-looking string such as `"0"` is a named property available as
-`catalog["0"]`; it is not a positional index.
+`Enums` contains enums declared as component schemas. Inline and nested enums remain
+available through their generated request, response, or component types.
 
-### Migrating from enum arrays
+## Additional exported types
 
-| Former tuple API | Iterable catalog API |
+The generated entry point also exports types for raw calls, resource-tree calls,
+pagination, Links, and streams.
+
+| Type | Use |
 | --- | --- |
-| `Enums.TodoStatus[0]` | `Enums.TodoStatus.TODO`, or `[...Enums.TodoStatus][0]` when source order is intentional |
-| `Enums.TodoStatus.map(fn)` | `Array.from(Enums.TodoStatus, fn)` |
-| `Enums.TodoStatus.includes(value)` | `isEnumValue(Enums.TodoStatus, value)` |
-| `(typeof Enums.TodoStatus)[number]` | `EnumValue<"TodoStatus">` |
+| `OperationMethod<Route>` | generated operation call |
+| `OperationRawCall<Route>` | raw operation call |
+| `ResourceCall<Route>` | resource-tree call |
+| `RawCall<Route>` | raw resource-tree call |
+| `PaginateCall<Route>` | pagination call |
+| `LinkCalls<Route>` | OpenAPI Link calls |
+| `StreamCall<Route>` | streaming call |
+| `CursorPaginationInput` | cursor pagination input |
+| `OffsetPaginationInput` | offset pagination input |
+| `BothPaginationInput` | cursor or offset pagination input |
+| `SortDirection` | `"asc" | "desc"` and runtime constants |
 
-Only a component schema with `enum` on the component's top-level schema receives an
-`Enums` entry. A nested-property or inline enum is still emitted as a literal union in
-its containing input/output type, but it does not receive a separate runtime catalog
-entry. Promote such an enum to a component schema when feature code needs reusable
-runtime values.
-
-## Capability and utility types
-
-```ts
-import {
-  SortDirection,
-  type BothPaginationInput,
-  type CursorPaginationInput,
-  type LinkCalls,
-  type OffsetPaginationInput,
-  type OperationMethod,
-  type OperationRawCall,
-  type PaginateCall,
-  type RawCall,
-  type ResourceCall,
-  type StreamCall,
-} from "./generated/api";
-```
-
-| Type or value | Purpose |
-| --- | --- |
-| `OperationMethod<Route>` | exact generated method type used by `$operations` and `$routes` |
-| `OperationRawCall<Route>` | exact raw-call method |
-| `ResourceCall<Route>` | resource-tree method after applicable path binding |
-| `RawCall<Route>` | resource-oriented raw call |
-| `PaginateCall<Route>` | pagination iterator call |
-| `LinkCalls<Route>` | response-link calls |
-| `StreamCall<Route>` | streaming response call |
-| `CursorPaginationInput` | cursor and limit controls |
-| `OffsetPaginationInput` | offset and limit controls |
-| `BothPaginationInput` | cursor or offset controls without mixing modes |
-| `SortDirection` | `"asc" | "desc"` type and matching runtime constants |
-
-```ts
-type UpdateCall = ResourceCall<"PATCH /todos/{todoID}">;
-type UpdateRaw = RawCall<"PATCH /todos/{todoID}">;
-type ListPages = PaginateCall<"GET /todos">;
-
-const direction: SortDirection = SortDirection.DESC;
-```
-
-## Naming and editor output
-
-Generated operation IDs, routes, component names, and parameter names preserve their
-OpenAPI spelling and case. Use bracket notation for names that are not valid
-TypeScript identifiers.
-
-The public helpers deliberately keep generated implementation aliases and method
-identity brands behind public type names. VS Code hover and signature help should show
-types such as `OperationInput`, `RouteBody`, and `ResourceCall`, not internal
-`__sdkgen_*` declarations.
+`Components`, `Operations`, and `Routes` provide complete generated type maps.

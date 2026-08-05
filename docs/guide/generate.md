@@ -9,19 +9,8 @@ openapi-sdkgen generate \
   --output ./src/generated/api
 ```
 
-The TypeScript target generates a client, types, supporting runtime code, and
-OpenAPI metadata. Generated files include markers that prevent formatters and
-linters from rewriting them. With Prettier 3.6.0 or later, enable
-`checkIgnorePragma` to respect the `@noprettier` marker:
-
-```json
-{
-  "checkIgnorePragma": true
-}
-```
-
-For older Prettier versions, ignore the output directory instead, for example
-`src/generated/**` in `.prettierignore`.
+The TypeScript target generates the client, types, runtime code, and OpenAPI metadata.
+Rerun the command whenever the OpenAPI file changes.
 
 ## Generate Webhook and Callback code
 

@@ -141,14 +141,4 @@ x-error-category: validation
 When the schema already declares a required `category`, that value takes
 precedence. Conflicting declarations produce an error.
 
-## Update older configurations
-
-When moving from an older configuration:
-
-- remove `x-envelope: none` and `x-sdk-visibility: public`
-- replace `x-concurrency` and `x-idempotency` with `If-Match` and
-  `Idempotency-Key` header parameters
-- use `Routes` and `$routes` for every API; `Operations` and `$operations`
-  exist only when an `operationId` is declared
-
 See [Generate an SDK](../guide/generate.md) for generation errors and CI use.

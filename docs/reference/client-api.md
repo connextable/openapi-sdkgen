@@ -76,13 +76,9 @@ const todos = await api.$operations["listTodos"]({
 
 ## Security requirements
 
-When an operation declares OpenAPI Security Requirement Objects, its generated
-request options expose `securityRequirement` only when more than one effective
-requirement exists. The property is a required exact union of that operation's
-stable requirement IDs, and the operation options argument is required. An
-empty `{}` requirement is represented by `"anonymous"`. The SDK automatically
-selects exactly one effective requirement. Operations with zero or one do not
-expose a selector.
+When an operation has several OpenAPI security alternatives, select one with
+`securityRequirement`. A sole requirement is selected automatically, and an empty
+requirement is named `"anonymous"`.
 
 ```ts
 await api.$operations.updateCheckout({
@@ -91,34 +87,14 @@ await api.$operations.updateCheckout({
 });
 ```
 
-`ClientOptions.credentials` and per-request `credentials` are Fetch
-`RequestCredentials`. Use `ClientOptions.securityProvider` for host-owned
-credential acquisition after request selection. It receives one selected
-`requirement` and returns a scheme-keyed credential map. It cannot select a
-requirement. An omitted ambiguous selection fails before the provider and
-Fetch. See
-[Select a security requirement and provide credentials](../guide/transport.md#select-a-security-requirement-and-provide-credentials).
+Use `securityProvider` to load credentials for the selected requirement. See
+[Authentication](../guide/transport.md#authentication) for examples.
 
 ## Request headers
 
-Every declared header appears under `headerParams`. Headers controlled by Fetch,
-such as `Origin`, `Host`, `Cookie`, and `Sec-*`, are optional caller inputs even
-when OpenAPI marks them as required. Explicit typed values, undeclared raw
-headers, and header API-key credentials are forwarded to the active Fetch
-implementation. Declared/reserved raw-header collisions remain errors.
-
-Method-override headers retain their OpenAPI requiredness and reach Fetch
-without SDK-side value filtering. Links read request-header sources from
-`invocation.sourceInput`, which must be passed explicitly when following the
-Link; source calls do not retain their input automatically. Target values are
-forwarded through the same path.
-
-The original requiredness remains available through `openapi.document`.
-Generated Webhook and Callback server-add-on input types and runtime validation
-preserve the full inbound contract.
-
-See [Caller inputs and environment-controlled headers](../guide/transport.md#caller-inputs-and-environment-controlled-headers)
-for final Fetch behavior and custom transport boundaries.
+Every declared header appears under `headerParams`. Headers controlled by Fetch are
+optional caller inputs, and the active Fetch implementation decides whether they are
+sent. See [Request headers](../guide/transport.md#request-headers).
 
 ## Links and streams
 

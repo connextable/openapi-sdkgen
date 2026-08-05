@@ -147,14 +147,4 @@ x-error-category: validation
 스키마에 이미 필수 `category`가 선언되어 있다면 그 값이 우선합니다. 서로 다른
 값을 중복으로 선언하면 오류가 발생합니다.
 
-## 이전 설정 정리
-
-이전 버전의 설정을 사용하고 있다면 다음 항목을 확인하세요.
-
-- `x-envelope: none`, `x-sdk-visibility: public`은 제거합니다.
-- `x-concurrency`, `x-idempotency` 대신 `If-Match`,
-  `Idempotency-Key` header 매개변수를 선언합니다.
-- 모든 API는 `Routes`와 `$routes`에 생성됩니다. `operationId`가 있는
-  경우에만 `Operations`와 `$operations`에도 생성됩니다.
-
 생성 오류와 CI 사용법은 [SDK 생성](../guide/generate.md)을 참고하세요.
