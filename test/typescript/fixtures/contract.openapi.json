@@ -5,10 +5,10 @@
     "version": "1.2.3"
   },
   "paths": {
-    "/after-sales-requests": {
+    "/tasks": {
       "get": {
-        "operationId": "listAfterSalesRequests",
-        "summary": "List after-sales requests.",
+        "operationId": "listTasks",
+        "summary": "List tasks.",
         "parameters": [
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           {
@@ -135,13 +135,13 @@
         }
       }
     },
-    "/orders/{orderID}/after-sales-requests": {
+    "/projects/{projectID}/tasks": {
       "post": {
-        "operationId": "createAfterSalesRequest",
-        "summary": "Create an after-sales request.",
+        "operationId": "createTask",
+        "summary": "Create a task.",
         "parameters": [
           {
-            "name": "orderID",
+            "name": "projectID",
             "in": "path",
             "required": true,
             "schema": { "type": "string" }
@@ -153,10 +153,10 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["reason", "type"],
+                "required": ["title", "priority"],
                 "properties": {
-                  "reason": { "type": "string" },
-                  "type": { "type": "string", "enum": ["CANCELLATION", "RETURN"] }
+                  "title": { "type": "string" },
+                  "priority": { "type": "string", "enum": ["LOW", "HIGH"] }
                 }
               }
             }
@@ -169,12 +169,12 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "orderID", "reason", "type"],
+                  "required": ["id", "projectID", "title", "priority"],
                   "properties": {
                     "id": { "type": "string" },
-                    "orderID": { "type": "string" },
-                    "reason": { "type": "string" },
-                    "type": { "type": "string", "enum": ["CANCELLATION", "RETURN"] }
+                    "projectID": { "type": "string" },
+                    "title": { "type": "string" },
+                    "priority": { "type": "string", "enum": ["LOW", "HIGH"] }
                   }
                 }
               }

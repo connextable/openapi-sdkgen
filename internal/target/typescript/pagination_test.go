@@ -13,8 +13,8 @@ import (
 	"openapi-sdkgen/internal/diagnostic"
 )
 
-func TestHermeticAfterSalesPaginationFixtureGenerates(t *testing.T) {
-	source, err := os.ReadFile("testdata/after-sales.openapi.json")
+func TestHermeticItemPaginationFixtureGenerates(t *testing.T) {
+	source, err := os.ReadFile("testdata/items.openapi.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,13 +28,13 @@ func TestHermeticAfterSalesPaginationFixtureGenerates(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{
-		`readonly "GET /after-sales-requests":`,
+		`readonly "GET /items":`,
 		`readonly paginate:`,
-		`AsyncIterable<Contract.ComponentOutput<"AfterSalesAdminListItem">>`,
+		`AsyncIterable<Contract.ComponentOutput<"Item">>`,
 		`["response", Object.fromEntries([["items", ["data"]], ["nextCursor", ["meta","pagination","nextCursor"]]])]`,
 	} {
 		if !strings.Contains(client, expected) {
-			t.Fatalf("after-sales pagination output missing %q:\n%s", expected, client)
+			t.Fatalf("item pagination output missing %q:\n%s", expected, client)
 		}
 	}
 }

@@ -42,65 +42,52 @@ type Equal<Left, Right> =
 type RootHidesMetadata = Expect<
   "openapi" extends keyof typeof import("../fixtures/generated/client/index.js") ? false : true
 >;
-type CreateAfterSale = RouteContract<"POST /orders/{orderID}/after-sales-requests">;
-type CreateAfterSaleSlots = [
-  CreateAfterSale["input"],
-  CreateAfterSale["resourceInput"],
-  CreateAfterSale["options"],
-  CreateAfterSale["output"],
-  CreateAfterSale["error"],
-  CreateAfterSale["rawResponse"],
-  CreateAfterSale["call"],
-  CreateAfterSale["resourceCall"],
-  CreateAfterSale["pagination"],
-  CreateAfterSale["links"],
-  CreateAfterSale["stream"],
+type CreateTask = RouteContract<"POST /projects/{projectID}/tasks">;
+type CreateTaskSlots = [
+  CreateTask["input"],
+  CreateTask["resourceInput"],
+  CreateTask["options"],
+  CreateTask["output"],
+  CreateTask["error"],
+  CreateTask["rawResponse"],
+  CreateTask["call"],
+  CreateTask["resourceCall"],
+  CreateTask["pagination"],
+  CreateTask["links"],
+  CreateTask["stream"],
 ];
-type CreateAfterSaleCall = ResourceCall<"POST /orders/{orderID}/after-sales-requests">;
-type CreateAfterSaleRawCall = RawCall<"POST /orders/{orderID}/after-sales-requests">;
-type AfterSalePagination = PaginateCall<"GET /after-sales-requests">;
-type NoStream = StreamCall<"POST /orders/{orderID}/after-sales-requests">;
-type NoLinks = LinkCalls<"POST /orders/{orderID}/after-sales-requests">;
-type CreateAfterSaleExactMethod = Client["$operations"]["createAfterSalesRequest"];
-type CreateAfterSaleRouteMethod = Client["$routes"]["POST /orders/{orderID}/after-sales-requests"];
-type CreateAfterSaleResourceMethod = ReturnType<Client["orders"]>["afterSalesRequests"]["create"];
-type CreateAfterSaleInputByID = OperationInput<"createAfterSalesRequest">;
-type CreateAfterSaleInputByMethod = OperationInput<CreateAfterSaleExactMethod>;
-type CreateAfterSaleInputByRouteMethod = OperationInput<CreateAfterSaleRouteMethod>;
-type CreateAfterSaleResourceInput = OperationInput<CreateAfterSaleResourceMethod>;
-type CreateAfterSaleBody = OperationBody<"createAfterSalesRequest">;
-type ListAfterSalesQuery = OperationQuery<"listAfterSalesRequests">;
-type ListAfterSalesState = OperationParameter<"listAfterSalesRequests", "query", "state">;
+type CreateTaskCall = ResourceCall<"POST /projects/{projectID}/tasks">;
+type CreateTaskRawCall = RawCall<"POST /projects/{projectID}/tasks">;
+type TaskPagination = PaginateCall<"GET /tasks">;
+type NoStream = StreamCall<"POST /projects/{projectID}/tasks">;
+type NoLinks = LinkCalls<"POST /projects/{projectID}/tasks">;
+type CreateTaskExactMethod = Client["$operations"]["createTask"];
+type CreateTaskRouteMethod = Client["$routes"]["POST /projects/{projectID}/tasks"];
+type CreateTaskResourceMethod = ReturnType<Client["projects"]>["tasks"]["create"];
+type CreateTaskInputByID = OperationInput<"createTask">;
+type CreateTaskInputByMethod = OperationInput<CreateTaskExactMethod>;
+type CreateTaskInputByRouteMethod = OperationInput<CreateTaskRouteMethod>;
+type CreateTaskResourceInput = OperationInput<CreateTaskResourceMethod>;
+type CreateTaskBody = OperationBody<"createTask">;
+type ListTasksQuery = OperationQuery<"listTasks">;
+type ListTasksState = OperationParameter<"listTasks", "query", "state">;
 type CreateWidgetHeaders = OperationHeaders<Client["widgets"]["create"]>;
 type CreateWidgetTraceID = OperationParameter<Client["widgets"]["create"], "header", "X-Trace-Id">;
 type HealthOutput = OperationOutput<Client["$routes"]["GET /health"]>;
 type OperationHelperAssertions = [
-  Expect<
-    Equal<
-      OperationContract<"createAfterSalesRequest">,
-      OperationContract<CreateAfterSaleExactMethod>
-    >
-  >,
-  Expect<Equal<CreateAfterSaleInputByID, CreateAfterSale["input"]>>,
-  Expect<Equal<CreateAfterSaleInputByMethod, CreateAfterSale["input"]>>,
-  Expect<Equal<CreateAfterSaleInputByRouteMethod, CreateAfterSale["input"]>>,
-  Expect<Equal<CreateAfterSaleResourceInput, CreateAfterSale["resourceInput"]>>,
-  Expect<Equal<CreateAfterSaleBody, RouteBody<"POST /orders/{orderID}/after-sales-requests">>>,
-  Expect<Equal<OperationOutput<CreateAfterSaleResourceMethod>, CreateAfterSale["output"]>>,
-  Expect<
-    Equal<RouteInput<"POST /orders/{orderID}/after-sales-requests">, CreateAfterSale["input"]>
-  >,
-  Expect<
-    Equal<RouteOutput<"POST /orders/{orderID}/after-sales-requests">, CreateAfterSale["output"]>
-  >,
-  Expect<
-    Equal<RoutePath<"POST /orders/{orderID}/after-sales-requests">, { readonly orderID: string }>
-  >,
-  Expect<
-    Equal<RouteParameter<"POST /orders/{orderID}/after-sales-requests", "path", "orderID">, string>
-  >,
-  Expect<Equal<ListAfterSalesState, string | null>>,
-  Expect<Equal<ListAfterSalesQuery["state"], string | null | undefined>>,
+  Expect<Equal<OperationContract<"createTask">, OperationContract<CreateTaskExactMethod>>>,
+  Expect<Equal<CreateTaskInputByID, CreateTask["input"]>>,
+  Expect<Equal<CreateTaskInputByMethod, CreateTask["input"]>>,
+  Expect<Equal<CreateTaskInputByRouteMethod, CreateTask["input"]>>,
+  Expect<Equal<CreateTaskResourceInput, CreateTask["resourceInput"]>>,
+  Expect<Equal<CreateTaskBody, RouteBody<"POST /projects/{projectID}/tasks">>>,
+  Expect<Equal<OperationOutput<CreateTaskResourceMethod>, CreateTask["output"]>>,
+  Expect<Equal<RouteInput<"POST /projects/{projectID}/tasks">, CreateTask["input"]>>,
+  Expect<Equal<RouteOutput<"POST /projects/{projectID}/tasks">, CreateTask["output"]>>,
+  Expect<Equal<RoutePath<"POST /projects/{projectID}/tasks">, { readonly projectID: string }>>,
+  Expect<Equal<RouteParameter<"POST /projects/{projectID}/tasks", "path", "projectID">, string>>,
+  Expect<Equal<ListTasksState, string | null>>,
+  Expect<Equal<ListTasksQuery["state"], string | null | undefined>>,
   Expect<Equal<CreateWidgetHeaders, RouteHeaders<"POST /widgets">>>,
   Expect<Equal<CreateWidgetTraceID, string>>,
   Expect<Equal<HealthOutput, void>>,
@@ -110,36 +97,36 @@ type UnknownRoute = RouteContract<"GET /missing">;
 // @ts-expect-error Unknown operation IDs are rejected.
 type UnknownOperation = OperationInput<"missingOperation">;
 // @ts-expect-error Route strings use Route* helpers rather than Operation* helpers.
-type RouteStringAsOperation = OperationInput<"POST /orders/{orderID}/after-sales-requests">;
+type RouteStringAsOperation = OperationInput<"POST /projects/{projectID}/tasks">;
 // @ts-expect-error Arbitrary functions are not generated operation sources.
 type ArbitraryFunctionOperation = OperationInput<(input: unknown) => Promise<unknown>>;
 // @ts-expect-error Resource-tree parent nodes are not operation methods.
-type ResourceParentOperation = OperationInput<ReturnType<Client["orders"]>["afterSalesRequests"]>;
+type ResourceParentOperation = OperationInput<ReturnType<Client["projects"]>["tasks"]>;
 // @ts-expect-error Raw methods are not standalone operation sources.
-type RawMethodOperation = OperationInput<CreateAfterSaleExactMethod["raw"]>;
+type RawMethodOperation = OperationInput<CreateTaskExactMethod["raw"]>;
 // @ts-expect-error Pagination methods are not standalone operation sources.
-type PaginationMethodOperation = OperationInput<Client["afterSalesRequests"]["paginate"]>;
+type PaginationMethodOperation = OperationInput<Client["tasks"]["paginate"]>;
 // @ts-expect-error Bound resource methods do not retain a path input section.
-type BoundResourcePath = OperationPath<CreateAfterSaleResourceMethod>;
+type BoundResourcePath = OperationPath<CreateTaskResourceMethod>;
 // @ts-expect-error Query-only operations have no request body section.
-type MissingBody = OperationBody<"listAfterSalesRequests">;
+type MissingBody = OperationBody<"listTasks">;
 // @ts-expect-error Body-only operations have no query section.
-type MissingQuery = OperationQuery<"createAfterSalesRequest">;
+type MissingQuery = OperationQuery<"createTask">;
 // @ts-expect-error Body is not an OpenAPI parameter location.
-type BodyParameter = OperationParameter<"createAfterSalesRequest", "body", "reason">;
+type BodyParameter = OperationParameter<"createTask", "body", "title">;
 // @ts-expect-error Unknown parameter names are rejected.
-type UnknownParameter = OperationParameter<"listAfterSalesRequests", "query", "missing">;
+type UnknownParameter = OperationParameter<"listTasks", "query", "missing">;
 // @ts-expect-error Individual optional parameter helpers exclude omission undefined.
-const undefinedState: ListAfterSalesState = undefined;
-const nullableState: ListAfterSalesState = null;
+const undefinedState: ListTasksState = undefined;
+const nullableState: ListTasksState = null;
 
 const rootHidesMetadata: RootHidesMetadata = true;
 void [
   rootHidesMetadata,
-  null as unknown as CreateAfterSaleSlots,
-  null as unknown as CreateAfterSaleCall,
-  null as unknown as CreateAfterSaleRawCall,
-  null as unknown as AfterSalePagination,
+  null as unknown as CreateTaskSlots,
+  null as unknown as CreateTaskCall,
+  null as unknown as CreateTaskRawCall,
+  null as unknown as TaskPagination,
   null as unknown as NoStream,
   null as unknown as NoLinks,
   null as unknown as OperationHelperAssertions,
@@ -221,14 +208,14 @@ describe("generated TypeScript source", () => {
       baseURL: "https://api.example.test/api",
       fetch: async (input, init) => {
         expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
-          "POST /api/orders/order%2F1/after-sales-requests",
+          "POST /api/projects/project%2F1/tasks",
         );
         return Response.json(
           {
-            id: "request-1",
-            orderID: "order/1",
-            reason: "Changed my mind",
-            type: "CANCELLATION",
+            id: "task-1",
+            projectID: "project/1",
+            title: "Write documentation",
+            priority: "HIGH",
           },
           { status: 201 },
         );
@@ -236,10 +223,10 @@ describe("generated TypeScript source", () => {
     });
 
     await expect(
-      api.orders("order/1").afterSalesRequests.create({
-        body: { reason: "Changed my mind", type: "CANCELLATION" },
+      api.projects("project/1").tasks.create({
+        body: { title: "Write documentation", priority: "HIGH" },
       }),
-    ).resolves.toMatchObject({ id: "request-1", orderID: "order/1" });
+    ).resolves.toMatchObject({ id: "task-1", projectID: "project/1" });
   });
 
   it("exposes raw responses through the generated operation call", async () => {

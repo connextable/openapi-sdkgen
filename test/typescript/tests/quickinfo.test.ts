@@ -26,22 +26,22 @@ import { createClient as createOpenAPI32Client } from "./fixtures/generated/base
 declare const contract: ReturnType<typeof createContractClient>
 declare const openAPI31: ReturnType<typeof createOpenAPI31Client>
 declare const openAPI32: ReturnType<typeof createOpenAPI32Client>
-declare const extractedInput: OperationInput<"createAfterSalesRequest">
-declare const extractedBody: OperationBody<"createAfterSalesRequest">
-declare const extractedQuery: OperationQuery<"listAfterSalesRequests">
-declare const extractedCursor: OperationParameter<"listAfterSalesRequests", "query", "cursor">
-declare const extractedContract: OperationContract<"createAfterSalesRequest">
-declare const extractedRouteContract: RouteContract<"POST /orders/{orderID}/after-sales-requests">
-declare const extractedRouteInput: RouteInput<"POST /orders/{orderID}/after-sales-requests">
-declare const extractedRouteBody: RouteBody<"POST /orders/{orderID}/after-sales-requests">
+declare const extractedInput: OperationInput<"createTask">
+declare const extractedBody: OperationBody<"createTask">
+declare const extractedQuery: OperationQuery<"listTasks">
+declare const extractedCursor: OperationParameter<"listTasks", "query", "cursor">
+declare const extractedContract: OperationContract<"createTask">
+declare const extractedRouteContract: RouteContract<"POST /projects/{projectID}/tasks">
+declare const extractedRouteInput: RouteInput<"POST /projects/{projectID}/tasks">
+declare const extractedRouteBody: RouteBody<"POST /projects/{projectID}/tasks">
 
-contract.orders("order-1").afterSalesRequests.create
-contract.$operations.createAfterSalesRequest
-contract.$routes["POST /orders/{orderID}/after-sales-requests"]
-contract.$operations.createAfterSalesRequest({ path: { orderID: "order-1" }, body: { reason: "changed", type: "RETURN" } })
-contract.orders("order-1").afterSalesRequests.create({ body: { reason: "changed", type: "RETURN" } })
-contract.orders("order-1").afterSalesRequests.create.raw
-contract.afterSalesRequests.paginate
+contract.projects("project-1").tasks.create
+contract.$operations.createTask
+contract.$routes["POST /projects/{projectID}/tasks"]
+contract.$operations.createTask({ path: { projectID: "project-1" }, body: { title: "Write docs", priority: "HIGH" } })
+contract.projects("project-1").tasks.create({ body: { title: "Write docs", priority: "HIGH" } })
+contract.projects("project-1").tasks.create.raw
+contract.tasks.paginate
 contract.customers
 openAPI31.source.get.links
 openAPI32.events.get.stream
@@ -243,25 +243,22 @@ async function signatureInfo(expression: string) {
 
 describe("generated client QuickInfo", () => {
   it("keeps resource operation properties concise and public", async () => {
-    const info = await quickInfo('contract.orders("order-1").afterSalesRequests.create');
+    const info = await quickInfo('contract.projects("project-1").tasks.create');
 
-    expect(info.display).toContain('ResourceCall<"POST /orders/{orderID}/after-sales-requests">');
-    expect(info.display.match(/POST \/orders\/\{orderID\}\/after-sales-requests/g)).toHaveLength(1);
+    expect(info.display).toContain('ResourceCall<"POST /projects/{projectID}/tasks">');
+    expect(info.display.match(/POST \/projects\/\{projectID\}\/tasks/g)).toHaveLength(1);
     expect(info.text).not.toContain("__sdkgen_");
-    expect(info.text).toContain("Create an after-sales request.");
-    expect(info.text).toContain("Operation ID: `createAfterSalesRequest`.");
-    expect(info.text).toContain("await api.orders(orderID).afterSalesRequests.create");
+    expect(info.text).toContain("Create a task.");
+    expect(info.text).toContain("Operation ID: `createTask`.");
+    expect(info.text).toContain("await api.projects(projectID).tasks.create");
     expect(info.text).not.toContain("HTTP:");
   });
 
   it.each([
+    ["contract.$operations.createTask", 'OperationMethod<"POST /projects/{projectID}/tasks">'],
     [
-      "contract.$operations.createAfterSalesRequest",
-      'OperationMethod<"POST /orders/{orderID}/after-sales-requests">',
-    ],
-    [
-      'contract.$routes["POST /orders/{orderID}/after-sales-requests"]',
-      'OperationMethod<"POST /orders/{orderID}/after-sales-requests">',
+      'contract.$routes["POST /projects/{projectID}/tasks"]',
+      'OperationMethod<"POST /projects/{projectID}/tasks">',
     ],
   ])("keeps exact method %s concise and public", async (expression, expected) => {
     const info = await quickInfo(expression);
@@ -292,8 +289,8 @@ describe("generated client QuickInfo", () => {
   });
 
   it.each([
-    ["contract.$operations.createAfterSalesRequest(", "RouteInput<"],
-    ['contract.orders("order-1").afterSalesRequests.create(', "RouteResourceInput<"],
+    ["contract.$operations.createTask(", "RouteInput<"],
+    ['contract.projects("project-1").tasks.create(', "RouteResourceInput<"],
   ])("keeps %s signature help public", async (expression, expected) => {
     const info = await signatureInfo(expression);
 
@@ -310,10 +307,10 @@ describe("generated client QuickInfo", () => {
 
   it.each([
     [
-      'contract.orders("order-1").afterSalesRequests.create.raw',
-      'RawCall<"POST /orders/{orderID}/after-sales-requests">',
+      'contract.projects("project-1").tasks.create.raw',
+      'RawCall<"POST /projects/{projectID}/tasks">',
     ],
-    ["contract.afterSalesRequests.paginate", 'PaginateCall<"GET /after-sales-requests">'],
+    ["contract.tasks.paginate", 'PaginateCall<"GET /tasks">'],
     ["openAPI31.source.get.links", 'LinkCalls<"GET /source">'],
     ["openAPI32.events.get.stream", 'StreamCall<"GET /events">'],
   ])("keeps %s capability concise", async (expression, expected) => {
