@@ -268,7 +268,10 @@ func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 	source, err := emitTypes(&ir.Document{
 		ComponentSchemas: map[string]map[string]any{
-			"Status": {"type": "string", "enum": []any{"foo-bar", "foo_bar"}},
+			"Status": {"enum": []any{
+				"foo-bar", "foo_bar", "__proto__", "constructor", "map", "length", "0",
+				2.0, true, nil, map[string]any{"__proto__": true}, []any{"x", "y"}, "foo-bar",
+			}},
 		},
 		Operations: []ir.Operation{{Raw: map[string]any{
 			"responses": map[string]any{
@@ -285,14 +288,31 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(source), `"foo-bar" | "foo_bar"`) {
+	generated := string(source)
+	if !strings.Contains(generated, `"foo-bar" | "foo_bar" | "__proto__" | "constructor" | "map" | "length" | "0" | 2 | true | null | { readonly "__proto__": true } | readonly ["x", "y"]`) {
 		t.Fatalf("enum values missing:\n%s", source)
 	}
-	if !strings.Contains(string(source), `["Status", __sdkgen_status_`) ||
-		!strings.Contains(string(source), `readonly "Status": typeof __sdkgen_status_`) {
+	for _, expected := range []string{
+		`function __sdkgen_createEnumCatalog(values: readonly unknown[]): object`,
+		`const catalog = Object.create(null)`,
+		`Object.defineProperty(catalog, Symbol.iterator`,
+		`["Status", __sdkgen_status_`,
+		`readonly "foo-bar": "foo-bar"`,
+		`readonly "__proto__": "__proto__"`,
+		`readonly "map": "map"`,
+		`readonly "0": "0"`,
+		`[Symbol.iterator](): IterableIterator<`,
+		`export type EnumValue<Name extends keyof typeof Enums>`,
+		`export function isEnumValue<Catalog extends (typeof Enums)[keyof typeof Enums]>`,
+	} {
+		if !strings.Contains(generated, expected) {
+			t.Fatalf("enum catalog missing %q:\n%s", expected, source)
+		}
+	}
+	if strings.Contains(generated, `readonly "Status": typeof __sdkgen_`) {
 		t.Fatalf("exact enum catalog entry missing:\n%s", source)
 	}
-	if strings.Contains(string(source), "FOO_BAR:") {
+	if strings.Contains(generated, "FOO_BAR:") || strings.Contains(generated, `readonly "values": readonly`) {
 		t.Fatalf("normalized enum member leaked:\n%s", source)
 	}
 }

@@ -72,6 +72,37 @@ func TestReadonlyJSONTypePreservesNestedExactValues(t *testing.T) {
 	}
 }
 
+func TestEnumValueTypeAndStringMembersPreserveExactValues(t *testing.T) {
+	values := []any{
+		"ready",
+		2.0,
+		nil,
+		[]any{"x"},
+		map[string]any{"__proto__": true},
+		"ready",
+		"map",
+	}
+	valueType, err := enumValueType(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"ready" | 2 | null | readonly ["x"] | { readonly "__proto__": true } | "map"`; valueType != want {
+		t.Fatalf("enum value type = %q, want %q", valueType, want)
+	}
+	if got, want := strings.Join(enumStringMembers(values), "\x00"), "ready\x00map"; got != want {
+		t.Fatalf("enum string members = %q, want %q", got, want)
+	}
+}
+
+func TestEnumValueTypeHandlesEmptyAndRejectsNonJSONValues(t *testing.T) {
+	if got, err := enumValueType(nil); err != nil || got != "never" {
+		t.Fatalf("empty enum value type = %q, %v", got, err)
+	}
+	if _, err := enumValueType([]any{make(chan int)}); err == nil {
+		t.Fatal("non-JSON enum value unexpectedly rendered")
+	}
+}
+
 func TestRuntimeJSONExpressionIsDeterministicAndPrototypeSafe(t *testing.T) {
 	left := map[string]any{
 		"z": 1,
