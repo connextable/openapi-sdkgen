@@ -1,0 +1,79 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "Bundle Isolation API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/bundle-isolation-sentinel": {
+      "get": {
+        "operationId": "readBundleIsolationRecord",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IsolationRecord" }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IsolationRejectedError" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "IsolationMode": {
+        "enum": [
+          "bundle-enum-sentinel-01",
+          "bundle-enum-sentinel-02",
+          "bundle-enum-sentinel-03",
+          "bundle-enum-sentinel-04",
+          "bundle-enum-sentinel-05",
+          "bundle-enum-sentinel-06",
+          "bundle-enum-sentinel-07",
+          "bundle-enum-sentinel-08",
+          "bundle-enum-sentinel-09",
+          "bundle-enum-sentinel-10",
+          "bundle-enum-sentinel-11",
+          "bundle-enum-sentinel-12",
+          "bundle-enum-sentinel-13",
+          "bundle-enum-sentinel-14",
+          "bundle-enum-sentinel-15",
+          "bundle-enum-sentinel-16"
+        ]
+      },
+      "IsolationRecord": {
+        "type": "object",
+        "required": ["id", "mode"],
+        "properties": {
+          "id": { "type": "string" },
+          "mode": { "$ref": "#/components/schemas/IsolationMode" }
+        }
+      },
+      "IsolationRejectedError": {
+        "type": "object",
+        "x-error-category": "bundle-error-category-sentinel",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "const": "bundle_request_rejected_sentinel" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

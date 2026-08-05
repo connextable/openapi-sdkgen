@@ -81,7 +81,7 @@ function __sdkgen_enumValueEquals(left: unknown, right: unknown, seen = new Weak
 	bindings := make([]runtimeProperty, 0, len(catalogs))
 	for _, catalog := range catalogs {
 		fmt.Fprintf(&output, "const %s = %s as unknown as %s\n", catalog.valuesBinding, catalog.renderedValues, catalog.tupleType)
-		fmt.Fprintf(&output, "const %s = __sdkgen_createEnumCatalog(%s)\n", catalog.catalogBinding, catalog.valuesBinding)
+		fmt.Fprintf(&output, "const %s = /* @__PURE__ */ __sdkgen_createEnumCatalog(%s)\n", catalog.catalogBinding, catalog.valuesBinding)
 		bindings = append(bindings, runtimeProperty{key: catalog.name, value: catalog.catalogBinding})
 	}
 	output.WriteString("/** Runtime enum values keyed by exact OpenAPI component schema names. */\n")

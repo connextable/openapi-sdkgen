@@ -290,8 +290,8 @@ func TestGeneratedCallbacksSupportIDLessSourceThroughRouteCatalog(t *testing.T) 
 	for _, expected := range []string{
 		`export interface RouteCallbacks`,
 		`readonly "POST /jobs"`,
-		`routeCallbacks: Object.fromEntries([["POST /jobs"`,
-		`callbacks: Object.fromEntries([])`,
+		`routeCallbacks: /* @__PURE__ */ Object.fromEntries([["POST /jobs"`,
+		`callbacks: /* @__PURE__ */ Object.fromEntries([])`,
 	} {
 		if !strings.Contains(callbacks, expected) {
 			t.Fatalf("ID-less callback route surface missing %q:\n%s", expected, callbacks)
@@ -571,7 +571,7 @@ func TestServerPublicCatalogsPreserveExactAndPrototypeSensitiveKeys(t *testing.T
 		}
 	}
 	for _, key := range []string{"api-key", "api_key", "__proto__", "constructor"} {
-		if !strings.Contains(webhooks, `[`+quoteTS(key)+`, Object.fromEntries(`) {
+		if !strings.Contains(webhooks, `[`+quoteTS(key)+`, /* @__PURE__ */ Object.fromEntries(`) {
 			t.Fatalf("exact security scheme %q missing from safe runtime map:\n%s", key, webhooks)
 		}
 	}

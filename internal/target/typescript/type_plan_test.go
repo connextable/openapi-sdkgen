@@ -132,7 +132,7 @@ func TestRuntimeJSONExpressionIsDeterministicAndPrototypeSafe(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`Object.fromEntries([["__proto__", "root"]`,
-		`["constructor", ["first", Object.fromEntries([["__proto__", true]])]]`,
+		`["constructor", ["first", /* @__PURE__ */ Object.fromEntries([["__proto__", true]])]]`,
 	} {
 		if !strings.Contains(first, expected) {
 			t.Fatalf("runtime JSON expression missing %q:\n%s", expected, first)

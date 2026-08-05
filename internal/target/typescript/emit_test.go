@@ -272,6 +272,36 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeSource})
 }
 
+func TestRootReachableRuntimeInitializersAreOptimizerVisible(t *testing.T) {
+	document, err := sdkgen.Compile([]byte(emitterFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := SourceArtifacts(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"generated/client.ts",
+		"generated/enums.ts",
+		"generated/errors.ts",
+		"generated/runtime.ts",
+	} {
+		source := string(artifactByPath(t, artifacts, path))
+		for lineNumber, line := range strings.Split(source, "\n") {
+			if !strings.HasPrefix(line, "const ") && !strings.HasPrefix(line, "export const ") {
+				continue
+			}
+			for _, initializer := range []string{"Object.fromEntries(", "__sdkgen_createEnum", "new Set("} {
+				if strings.Contains(line, initializer) && !strings.Contains(line, "/* @__PURE__ */ "+initializer) {
+					t.Fatalf("%s:%d has an unclassified top-level initializer %q:\n%s", path, lineNumber+1, initializer, line)
+				}
+			}
+		}
+	}
+}
+
 func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.1.1",
@@ -586,8 +616,8 @@ func TestSourceArtifactsGenerateRouteCatalogWithoutOperationID(t *testing.T) {
 		`readonly "GET /health": {`,
 		`readonly "GET /": Routes["GET /"]["call"]`,
 		`readonly "getHealth": Routes["GET /health"]`,
-		`$routes: Object.fromEntries([["GET /",`,
-		`$operations: Object.fromEntries([["getHealth",`,
+		`$routes: /* @__PURE__ */ Object.fromEntries([["GET /",`,
+		`$operations: /* @__PURE__ */ Object.fromEntries([["getHealth",`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("route catalog missing %q:\n%s", expected, client)
@@ -634,7 +664,7 @@ func TestRouteCatalogCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 		`readonly links: { readonly "follow":`,
 		`readonly "GET /source": Routes["GET /source"]["call"]`,
 		`["stream", __sdkgen_`,
-		`["links", Object.fromEntries`,
+		`["links", /* @__PURE__ */ Object.fromEntries`,
 		`as unknown as Routes["GET /source"]["call"]`,
 	} {
 		if !strings.Contains(client, expected) {

@@ -1087,7 +1087,7 @@ export function createPaginator<
   });
 }
 
-const reservedHeaders = new Set([
+const reservedHeaders = /* @__PURE__ */ new Set([
   "accept",
   "authorization",
   "content-type",

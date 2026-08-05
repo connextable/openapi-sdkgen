@@ -31,7 +31,7 @@ func TestHermeticItemPaginationFixtureGenerates(t *testing.T) {
 		`readonly "GET /items":`,
 		`readonly paginate:`,
 		`AsyncIterable<Contract.ComponentOutput<"Item">>`,
-		`["response", Object.fromEntries([["items", ["data"]], ["nextCursor", ["meta","pagination","nextCursor"]]])]`,
+		`["response", /* @__PURE__ */ Object.fromEntries([["items", ["data"]], ["nextCursor", ["meta","pagination","nextCursor"]]])]`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("item pagination output missing %q:\n%s", expected, client)

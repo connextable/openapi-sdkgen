@@ -17,6 +17,13 @@ agent_run "generate TypeScript collision fixture" "$ROOT/.tmp/bin/openapi-sdkgen
   --with server \
   --output "$collision_fixture"
 
+bundle_fixture="$TYPESCRIPT_ROOT/fixtures/generated/bundle-isolation"
+rm -rf "$bundle_fixture"
+agent_run "generate TypeScript bundle isolation fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \
+  --input "$TYPESCRIPT_ROOT/fixtures/bundle-isolation.openapi.json" \
+  --target typescript \
+  --output "$bundle_fixture"
+
 transport_headers_fixture="$TYPESCRIPT_ROOT/fixtures/generated/transport-native-headers"
 rm -rf "$transport_headers_fixture"
 agent_run "generate transport-native header fixture" "$ROOT/.tmp/bin/openapi-sdkgen" generate \

@@ -98,7 +98,9 @@ type runtimeProperty struct {
 
 // runtimeObjectExpression constructs externally keyed records through
 // Object.fromEntries. Unlike a plain object literal, "__proto__" is installed
-// as an ordinary enumerable own data property.
+// as an ordinary enumerable own data property. The generated call is marked
+// pure so bundlers can discard unused runtime concerns, including recursively
+// rendered records passed as arguments.
 func runtimeObjectExpression(properties []runtimeProperty) string {
 	sorted := append([]runtimeProperty(nil), properties...)
 	sort.SliceStable(sorted, func(left, right int) bool {
@@ -108,7 +110,7 @@ func runtimeObjectExpression(properties []runtimeProperty) string {
 	for _, property := range sorted {
 		entries = append(entries, "["+quoteTS(property.key)+", "+property.value+"]")
 	}
-	return "Object.fromEntries([" + strings.Join(entries, ", ") + "])"
+	return "/* @__PURE__ */ Object.fromEntries([" + strings.Join(entries, ", ") + "])"
 }
 
 // runtimeJSONExpression renders JSON data as deterministic JavaScript source.

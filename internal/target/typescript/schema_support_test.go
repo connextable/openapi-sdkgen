@@ -381,9 +381,9 @@ func TestWireSchemaDescriptorPreservesBooleanSubschemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		`patternProperties: Object.fromEntries([["^x", { boolean: false }]])`,
+		`patternProperties: /* @__PURE__ */ Object.fromEntries([["^x", { boolean: false }]])`,
 		`propertyNames: { boolean: false }`,
-		`dependentSchemas: Object.fromEntries([["enabled", { boolean: false }]])`,
+		`dependentSchemas: /* @__PURE__ */ Object.fromEntries([["enabled", { boolean: false }]])`,
 		`contains: { boolean: false }`,
 	} {
 		if !strings.Contains(descriptor, expected) {
