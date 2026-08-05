@@ -39,13 +39,29 @@ configuration.
 ```ts
 import {
   Enums,
+  type Client,
+  type ComponentInput,
+  type ComponentOutput,
   type Components,
   type LinkCalls,
+  type OperationBody,
+  type OperationContract,
+  type OperationHeaders,
+  type OperationInput,
+  type OperationOutput,
+  type OperationParameter,
+  type OperationPath,
+  type OperationQuery,
   type Operations,
   type PaginateCall,
   type RawCall,
   type ResourceCall,
+  type RouteBody,
   type RouteContract,
+  type RouteInput,
+  type RouteOutput,
+  type RouteParameter,
+  type RouteQuery,
   type Routes,
   type StreamCall,
 } from "./generated/api";
@@ -56,6 +72,17 @@ import {
 - `Routes`: types for every API, keyed by HTTP method and OpenAPI path
 - `Operations`: types for APIs that declare an `operationId`
 - `RouteContract<Route>`: the complete contract for one exact route
+- `OperationContract<Source>`: the contract selected by operation ID or a
+  generated method type
+- `OperationInput<Source>` and `OperationOutput<Source>`: the input accepted by
+  that callable surface and its decoded output
+- `OperationBody`, `OperationQuery`, `OperationPath`, `OperationHeaders`,
+  `OperationCookies`, and `OperationQuerystring`: reusable request sections
+- `OperationParameter<Source, Location, Name>`: one path, query, query-string,
+  header, or cookie parameter value
+- `RouteInput`, `RouteOutput`, `RouteBody`, `RouteQuery`, `RoutePath`,
+  `RouteHeaders`, `RouteCookies`, `RouteQuerystring`, and `RouteParameter`: the
+  corresponding helpers keyed by exact route strings
 - `ResourceCall<Route>`: the callable type used by a resource method
 - `RawCall<Route>`, `PaginateCall<Route>`, `LinkCalls<Route>`, and
   `StreamCall<Route>`: route-keyed capability call types
@@ -63,22 +90,85 @@ import {
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
+type CanonicalMoneyInput = ComponentInput<"Money">;
+type CanonicalMoneyOutput = ComponentOutput<"Money">;
 type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
 type CreateOrder = RouteContract<"POST /orders">;
-type CreateOrderInput = CreateOrder["input"];
-type CreateOrderOutput = CreateOrder["output"];
+type CreateOrderInput = RouteInput<"POST /orders">;
+type CreateOrderOutput = RouteOutput<"POST /orders">;
 type CreateOrderCall = ResourceCall<"POST /orders">;
 type CreateOrderRawCall = RawCall<"POST /orders">;
 const firstCurrency = Enums["Currency"][0];
 ```
 
-Prefer `RouteContract<Route>` and its named slots when extracting several
-types for one route. This keeps input, output, options, errors, raw responses,
-and optional capabilities under one route identity instead of adding separate
-helpers such as `RouteInput<Route>` and `RouteOutput<Route>`. Capability slots
-and their matching helper types resolve to `never` when the route does not
-declare that capability.
+Use `RouteContract<Route>` when several contract slots must stay grouped. Use
+the focused `Route*` helpers when only input, output, a request section, or one
+parameter value is needed. Capability slots and their matching helper types
+resolve to `never` when the route does not declare that capability.
+
+### Extract operation request types
+
+Every `Operation*<Source>` helper accepts these source forms:
+
+| Source | Selected input |
+| --- | --- |
+| exact `operationId` string | complete input, including path parameters |
+| generated `$operations` method | complete input, including path parameters |
+| generated `$routes` method | complete input, including path parameters; no `operationId` required |
+| nested resource-tree leaf method | callable input after bound path parameters are removed |
+
+```ts
+type ByID = OperationInput<"createAfterSalesRequest">;
+type ByOperationMethod = OperationInput<
+  Client["$operations"]["createAfterSalesRequest"]
+>;
+type ByRouteMethod = OperationInput<
+  Client["$routes"]["POST /orders/{orderID}/after-sales-requests"]
+>;
+
+declare const createFromTree:
+  ReturnType<Client["orders"]>["afterSalesRequests"]["create"];
+
+type BoundInput = OperationInput<typeof createFromTree>;
+type Created = OperationOutput<typeof createFromTree>;
+type Body = OperationBody<typeof createFromTree>;
+```
+
+`ByID`, `ByOperationMethod`, and `ByRouteMethod` contain `path` and `body`.
+`BoundInput` contains `body` but not `path`, because the resource tree already
+accepted `orderID`. Use `RouteInput<"METHOD /path">` when the exact route string
+itself is the desired type identity. Route strings are not operation IDs and
+are not accepted as `Operation*` string sources. For the same reason,
+`OperationPath<typeof createFromTree>` is rejected: the callable has no path
+input left.
+
+Request-section and individual-parameter helpers avoid consumer-side
+`NonNullable` boilerplate:
+
+```ts
+type Filters = OperationQuery<"listAfterSalesRequests">;
+type State = OperationParameter<
+  "listAfterSalesRequests",
+  "query",
+  "state"
+>;
+type ApprovalBody = OperationBody<"approveAfterSalesRequest">;
+type ApprovalHeaders = OperationHeaders<"approveAfterSalesRequest">;
+
+type RouteFilters = RouteQuery<"GET /after-sales-requests">;
+type RouteState = RouteParameter<
+  "GET /after-sales-requests",
+  "query",
+  "state"
+>;
+```
+
+A section helper removes only the outer `undefined` caused by an optional
+aggregate input field; optional properties inside the section remain optional.
+An individual parameter helper removes omission `undefined` while preserving
+schema-declared `null`. `OperationInput` or `RouteInput` remains authoritative
+for whether the complete call may omit the section.
 
 Generated names preserve the spelling and case from OpenAPI. Use bracket
 notation when a name contains characters that are not valid in a TypeScript

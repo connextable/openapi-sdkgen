@@ -38,13 +38,29 @@ const api = createClient({
 ```ts
 import {
   Enums,
+  type Client,
+  type ComponentInput,
+  type ComponentOutput,
   type Components,
   type LinkCalls,
+  type OperationBody,
+  type OperationContract,
+  type OperationHeaders,
+  type OperationInput,
+  type OperationOutput,
+  type OperationParameter,
+  type OperationPath,
+  type OperationQuery,
   type Operations,
   type PaginateCall,
   type RawCall,
   type ResourceCall,
+  type RouteBody,
   type RouteContract,
+  type RouteInput,
+  type RouteOutput,
+  type RouteParameter,
+  type RouteQuery,
   type Routes,
   type StreamCall,
 } from "./generated/api";
@@ -55,6 +71,16 @@ import {
 - `Routes`: HTTP 메서드와 OpenAPI 경로로 찾는 모든 API 타입
 - `Operations`: `operationId`로 찾는 API 타입
 - `RouteContract<Route>`: 정확한 route 하나의 전체 계약
+- `OperationContract<Source>`: operation ID나 생성된 메서드 타입으로 선택한 계약
+- `OperationInput<Source>`, `OperationOutput<Source>`: 해당 호출 표면이 받는 입력과
+  디코딩된 출력
+- `OperationBody`, `OperationQuery`, `OperationPath`, `OperationHeaders`,
+  `OperationCookies`, `OperationQuerystring`: 재사용할 수 있는 요청 영역
+- `OperationParameter<Source, Location, Name>`: path, query, query-string, header,
+  cookie 중 하나의 파라미터 값
+- `RouteInput`, `RouteOutput`, `RouteBody`, `RouteQuery`, `RoutePath`,
+  `RouteHeaders`, `RouteCookies`, `RouteQuerystring`, `RouteParameter`: 정확한 route
+  문자열로 찾는 대응 helper
 - `ResourceCall<Route>`: 리소스 메서드에 사용되는 호출 타입
 - `RawCall<Route>`, `PaginateCall<Route>`, `LinkCalls<Route>`,
   `StreamCall<Route>`: route별 기능 호출 타입
@@ -62,21 +88,85 @@ import {
 ```ts
 type MoneyInput = Components["Money"]["input"];
 type MoneyOutput = Components["Money"]["output"];
+type CanonicalMoneyInput = ComponentInput<"Money">;
+type CanonicalMoneyOutput = ComponentOutput<"Money">;
 type ListPetsInput = Routes["GET /pets"]["input"];
 type GetPetInput = Operations["get-pet"]["input"];
 type CreateOrder = RouteContract<"POST /orders">;
-type CreateOrderInput = CreateOrder["input"];
-type CreateOrderOutput = CreateOrder["output"];
+type CreateOrderInput = RouteInput<"POST /orders">;
+type CreateOrderOutput = RouteOutput<"POST /orders">;
 type CreateOrderCall = ResourceCall<"POST /orders">;
 type CreateOrderRawCall = RawCall<"POST /orders">;
 const firstCurrency = Enums["Currency"][0];
 ```
 
-한 route에서 여러 타입을 꺼낼 때는 `RouteContract<Route>`의 이름 있는 슬롯을
-사용하는 편이 좋습니다. 입력, 출력, 옵션, 오류, raw 응답, 선택 기능을 하나의
-route 식별자 아래에서 찾을 수 있어 `RouteInput<Route>`, `RouteOutput<Route>` 같은
-개별 helper를 계속 늘리지 않아도 됩니다. route가 해당 기능을 지원하지 않으면
-기능 슬롯과 대응 helper 타입은 `never`가 됩니다.
+한 route의 여러 계약 슬롯을 함께 다룬다면 `RouteContract<Route>`를 사용합니다.
+입력, 출력, 요청 영역, 파라미터 값 하나만 필요하다면 대응하는 `Route*` helper를
+사용합니다. route가 해당 기능을 지원하지 않으면 기능 슬롯과 대응 helper 타입은
+`never`가 됩니다.
+
+### Operation 요청 타입 추출
+
+모든 `Operation*<Source>` helper는 다음 source 형식을 받습니다.
+
+| Source | 선택되는 입력 |
+| --- | --- |
+| 정확한 `operationId` 문자열 | path 파라미터를 포함한 전체 입력 |
+| 생성된 `$operations` 메서드 | path 파라미터를 포함한 전체 입력 |
+| 생성된 `$routes` 메서드 | path 파라미터를 포함한 전체 입력. `operationId` 불필요 |
+| 중첩된 리소스 트리의 leaf 메서드 | 이미 바인딩된 path 파라미터를 제거한 호출 입력 |
+
+```ts
+type ByID = OperationInput<"createAfterSalesRequest">;
+type ByOperationMethod = OperationInput<
+  Client["$operations"]["createAfterSalesRequest"]
+>;
+type ByRouteMethod = OperationInput<
+  Client["$routes"]["POST /orders/{orderID}/after-sales-requests"]
+>;
+
+declare const createFromTree:
+  ReturnType<Client["orders"]>["afterSalesRequests"]["create"];
+
+type BoundInput = OperationInput<typeof createFromTree>;
+type Created = OperationOutput<typeof createFromTree>;
+type Body = OperationBody<typeof createFromTree>;
+```
+
+`ByID`, `ByOperationMethod`, `ByRouteMethod`에는 `path`와 `body`가 들어 있습니다.
+`BoundInput`에는 `body`만 있고 `path`는 없습니다. 리소스 트리가 이미 `orderID`를
+받았기 때문입니다. 정확한 route 문자열 자체를 타입 식별자로 사용하려면
+`RouteInput<"METHOD /path">`를 사용합니다. route 문자열은 operation ID가 아니므로
+`Operation*`의 문자열 source로 사용할 수 없습니다. 같은 이유로
+`OperationPath<typeof createFromTree>`도 거부됩니다. 해당 호출에는 남은 path
+입력이 없습니다.
+
+요청 영역과 개별 파라미터 helper를 사용하면 소비자 코드에 `NonNullable`을
+반복해서 작성할 필요가 없습니다.
+
+```ts
+type Filters = OperationQuery<"listAfterSalesRequests">;
+type State = OperationParameter<
+  "listAfterSalesRequests",
+  "query",
+  "state"
+>;
+type ApprovalBody = OperationBody<"approveAfterSalesRequest">;
+type ApprovalHeaders = OperationHeaders<"approveAfterSalesRequest">;
+
+type RouteFilters = RouteQuery<"GET /after-sales-requests">;
+type RouteState = RouteParameter<
+  "GET /after-sales-requests",
+  "query",
+  "state"
+>;
+```
+
+영역 helper는 aggregate 입력 필드가 선택 사항이어서 생긴 바깥쪽 `undefined`만
+제거합니다. 영역 내부의 선택 속성은 그대로 선택 사항입니다. 개별 파라미터
+helper는 생략을 뜻하는 `undefined`만 제거하고 스키마에 선언된 `null`은
+보존합니다. 전체 호출에서 해당 영역을 생략할 수 있는지는 `OperationInput`이나
+`RouteInput`을 기준으로 판단합니다.
 
 OpenAPI에 선언된 이름은 철자와 대소문자를 그대로 사용합니다. 하이픈처럼
 TypeScript 속성 이름으로 바로 쓸 수 없는 문자가 있다면 대괄호 표기법을
