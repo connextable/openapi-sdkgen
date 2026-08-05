@@ -9,3 +9,4 @@ coverage
 .openapi-sdkgen-cache
 .DS_Store
 **/.vitepress/cache
+/docs/public/playground/

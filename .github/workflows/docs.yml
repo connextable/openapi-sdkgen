@@ -7,10 +7,16 @@ on:
       - main
     paths:
       - "docs/**"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "docs/**"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -33,6 +39,10 @@ jobs:
         with:
           node-version: "24.18.0"
           package-manager-cache: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Install documentation dependencies
         env:
           CI: "true"

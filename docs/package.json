@@ -7,11 +7,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "docs:dev": "vitepress dev .",
-    "docs:build": "vitepress build .",
+    "playground:build": "node ./scripts/build-playground.mjs",
+    "docs:dev": "node ./scripts/build-playground.mjs && vitepress dev .",
+    "docs:build": "node ./scripts/build-playground.mjs && vitepress build .",
     "docs:preview": "vitepress preview ."
   },
   "devDependencies": {
+    "@shikijs/langs": "^4.4.2",
+    "@shikijs/themes": "^4.4.2",
+    "shiki": "^4.4.2",
     "vitepress": "^1.6.4"
   }
 }

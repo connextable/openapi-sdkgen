@@ -1,11 +1,11 @@
 import { defineConfig } from "vitepress";
 
 const englishTheme = {
-  logo: "/mark.svg",
   nav: [
     { text: "Start", link: "/guide/getting-started" },
     { text: "Guides", link: "/guide/client" },
     { text: "Reference", link: "/reference/cli" },
+    { text: "Playground", link: "/playground" },
   ],
   sidebar: {
     "/guide/": [
@@ -45,11 +45,11 @@ const englishTheme = {
 };
 
 const koreanTheme = {
-  logo: "/mark.svg",
   nav: [
     { text: "시작하기", link: "/ko/guide/getting-started" },
     { text: "사용 가이드", link: "/ko/guide/client" },
     { text: "레퍼런스", link: "/ko/reference/cli" },
+    { text: "플레이그라운드", link: "/ko/playground" },
   ],
   sidebar: {
     "/ko/guide/": [
@@ -118,6 +118,11 @@ export default defineConfig({
   title: "openapi-sdkgen",
   description: "Generate application SDK source from OpenAPI 3.x documents.",
   base: "/openapi-sdkgen/",
+  vite: {
+    server: {
+      host: "0.0.0.0",
+    },
+  },
   srcExclude: [
     "openapi-feature-inventory.md",
     "openapi-feature-matrix.md",
