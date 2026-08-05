@@ -26,6 +26,7 @@ const englishTheme = {
         items: [
           { text: "CLI", link: "/reference/cli" },
           { text: "Generated client API", link: "/reference/client-api" },
+          { text: "TypeScript types", link: "/reference/typescript-types" },
           { text: "OpenAPI support", link: "/reference/capabilities" },
           { text: "SDK extensions", link: "/reference/extensions" },
         ],
@@ -69,6 +70,7 @@ const koreanTheme = {
         items: [
           { text: "CLI", link: "/ko/reference/cli" },
           { text: "생성된 클라이언트 API", link: "/ko/reference/client-api" },
+          { text: "TypeScript 타입", link: "/ko/reference/typescript-types" },
           { text: "OpenAPI 지원 범위", link: "/ko/reference/capabilities" },
           { text: "SDK 확장 기능", link: "/ko/reference/extensions" },
         ],
