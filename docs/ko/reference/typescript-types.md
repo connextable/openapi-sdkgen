@@ -256,8 +256,8 @@ Inline operation 스키마는 `Components` 항목을 만들지 않습니다. 대
 
 ## Enum 값과 타입
 
-최상위 스키마에 `enum`을 선언한 생성 component 스키마는 타입과 런타임 값 목록을
-함께 제공합니다.
+최상위 스키마에 `enum`을 선언한 생성 component 스키마는 타입과 런타임 iterable
+catalog를 함께 제공합니다.
 
 다음 OpenAPI component가 있다면:
 
@@ -272,35 +272,74 @@ components:
 컴파일 타임과 런타임에서 정확한 값을 사용할 수 있습니다.
 
 ```ts
-import { Enums, type ComponentOutput } from "./generated/api";
+import {
+  Enums,
+  isEnumValue,
+  type ComponentOutput,
+  type EnumValue,
+} from "./generated/api";
 
-type TodoStatus = ComponentOutput<"TodoStatus">;
+type TodoStatus = EnumValue<"TodoStatus">;
 // "TODO" | "DONE"
 
-type TodoStatusFromValues = (typeof Enums.TodoStatus)[number];
-// "TODO" | "DONE"
+type TodoStatusOutput = ComponentOutput<"TodoStatus">;
+// 동일한 "TODO" | "DONE" union
 
-const defaultStatus: TodoStatus = Enums.TodoStatus[0];
-const options = Enums.TodoStatus.map((value) => ({
+const defaultStatus: TodoStatus = Enums.TodoStatus.TODO;
+const completedStatus = Enums.TodoStatus.DONE;
+
+const options = Array.from(Enums.TodoStatus, (value) => ({
   label: value,
   value,
 }));
 ```
 
-`Enums.TodoStatus`는 readonly tuple 타입을 가진 런타임 배열입니다. 값의 OpenAPI
-순서와 정확한 JSON literal을 보존합니다. TypeScript enum 멤버 이름으로
-정규화하지 않으므로 `Enums.TodoStatus.DONE`이 아니라 값 자체를 사용합니다.
-
-Component 이름도 그대로 보존합니다. 필요한 경우 대괄호 표기법을 사용합니다.
+`Enums.TodoStatus`는 배열이 아닌 iterable record입니다. 모든 문자열 값은 정확한
+이름의 멤버가 됩니다. 따라서 `DONE` 값은 `Enums.TodoStatus.DONE`으로 접근합니다.
+값을 대문자, camelCase 등으로 정규화하지 않습니다. Component나 정확한 값에
+하이픈이 있다면 대괄호 표기법을 사용합니다.
 
 ```ts
-type DashedTodoStatus = ComponentOutput<"todo-status">;
-type DashedTodoStatusValue = (typeof Enums["todo-status"])[number];
+const dashed = Enums["todo-status"]["IN-PROGRESS"];
 ```
 
-런타임 catalog는 문자열, 숫자, boolean, `null`, 배열, 객체를 포함한 JSON enum
-값을 지원합니다. 생성된 tuple 타입은 literal 값, 객체 속성, 배열 순서를
-보존합니다.
+Catalog에는 위치 인덱스, 배열 메서드, 자동 생성 `members`/`values` fallback이
+없습니다. 직접 순회하거나 배열 메서드가 필요한 지점에서만 배열로 만듭니다.
+
+```ts
+for (const status of Enums.TodoStatus) {
+  console.log(status);
+}
+
+const values = [...Enums.TodoStatus];
+const visible = Array.from(Enums.TodoStatus).filter((status) => status !== "DONE");
+```
+
+알 수 없는 런타임 값을 검사할 때는 `isEnumValue`를 사용합니다. 구조화된 JSON
+enum 값도 값 자체로 비교하며, 입력을 선택한 catalog의 union으로 좁힙니다.
+
+```ts
+declare const input: unknown;
+
+if (isEnumValue(Enums.TodoStatus, input)) {
+  input satisfies EnumValue<"TodoStatus">;
+}
+```
+
+런타임 catalog는 문자열, 숫자, boolean, `null`, 배열, 객체를 지원합니다. 이름이
+있는 멤버는 문자열 값에만 생성됩니다. 모든 값은 순회를 통해 사용할 수 있고,
+`EnumValue<Name>`은 literal 값, readonly 객체 속성, 배열 순서를 보존합니다.
+`"0"`처럼 숫자로 보이는 문자열도 `catalog["0"]`으로 접근하는 정확한 이름의
+속성이며 위치 인덱스가 아닙니다.
+
+### Enum 배열에서 마이그레이션
+
+| 기존 tuple API | Iterable catalog API |
+| --- | --- |
+| `Enums.TodoStatus[0]` | `Enums.TodoStatus.TODO`, 또는 선언 순서가 의도라면 `[...Enums.TodoStatus][0]` |
+| `Enums.TodoStatus.map(fn)` | `Array.from(Enums.TodoStatus, fn)` |
+| `Enums.TodoStatus.includes(value)` | `isEnumValue(Enums.TodoStatus, value)` |
+| `(typeof Enums.TodoStatus)[number]` | `EnumValue<"TodoStatus">` |
 
 Component 최상위 스키마에 `enum`이 있는 경우에만 `Enums` 항목이 생성됩니다.
 중첩 속성이나 inline enum도 포함 타입에서는 literal union으로 생성되지만 별도의

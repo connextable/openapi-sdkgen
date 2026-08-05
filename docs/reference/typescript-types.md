@@ -257,7 +257,7 @@ corresponding operation or route input, output, body, or section helper.
 ## Enum values and types
 
 A generated component schema whose top-level schema declares `enum` gets both a type
-and a runtime value list.
+and a runtime iterable catalog.
 
 Given this OpenAPI component:
 
@@ -269,44 +269,84 @@ components:
       enum: [TODO, DONE]
 ```
 
-the SDK can use the exact values at both compile time and runtime:
+the SDK can use exact values at both compile time and runtime:
 
 ```ts
-import { Enums, type ComponentOutput } from "./generated/api";
+import {
+  Enums,
+  isEnumValue,
+  type ComponentOutput,
+  type EnumValue,
+} from "./generated/api";
 
-type TodoStatus = ComponentOutput<"TodoStatus">;
+type TodoStatus = EnumValue<"TodoStatus">;
 // "TODO" | "DONE"
 
-type TodoStatusFromValues = (typeof Enums.TodoStatus)[number];
-// "TODO" | "DONE"
+type TodoStatusOutput = ComponentOutput<"TodoStatus">;
+// The same "TODO" | "DONE" union
 
-const defaultStatus: TodoStatus = Enums.TodoStatus[0];
-const options = Enums.TodoStatus.map((value) => ({
+const defaultStatus: TodoStatus = Enums.TodoStatus.TODO;
+const completedStatus = Enums.TodoStatus.DONE;
+
+const options = Array.from(Enums.TodoStatus, (value) => ({
   label: value,
   value,
 }));
 ```
 
-`Enums.TodoStatus` is a runtime array typed as a readonly tuple. Values retain their
-OpenAPI order and exact JSON literals. They are not normalized into TypeScript enum
-member names, so use the values themselves rather than `Enums.TodoStatus.DONE`.
-
-Component names also remain exact. Use bracket notation when necessary:
+`Enums.TodoStatus` is an iterable record, not an array. Every string value becomes an
+exact named member: the value `DONE` is available as `Enums.TodoStatus.DONE`. Values
+are not uppercased, camel-cased, or otherwise normalized. If a component or exact
+value contains dashes, use bracket notation:
 
 ```ts
-type DashedTodoStatus = ComponentOutput<"todo-status">;
-type DashedTodoStatusValue = (typeof Enums["todo-status"])[number];
+const dashed = Enums["todo-status"]["IN-PROGRESS"];
 ```
 
-The runtime catalog supports JSON enum values, including strings, numbers, booleans,
-`null`, arrays, and objects. Their generated tuple types preserve literal values,
-object properties, and array order.
+The catalog has no positional index, array methods, or generated `members`/`values`
+fallback. Iterate it directly, or materialize an array only where array methods are
+needed:
+
+```ts
+for (const status of Enums.TodoStatus) {
+  console.log(status);
+}
+
+const values = [...Enums.TodoStatus];
+const visible = Array.from(Enums.TodoStatus).filter((status) => status !== "DONE");
+```
+
+Use `isEnumValue` when validating an unknown runtime value. It compares structured
+JSON enum values by value and narrows the input to the selected catalog's union:
+
+```ts
+declare const input: unknown;
+
+if (isEnumValue(Enums.TodoStatus, input)) {
+  input satisfies EnumValue<"TodoStatus">;
+}
+```
+
+The runtime catalog supports strings, numbers, booleans, `null`, arrays, and objects.
+Only strings receive named members. Every value remains available through iteration,
+and `EnumValue<Name>` preserves literal values, readonly object properties, and array
+order. An exact numeric-looking string such as `"0"` is a named property available as
+`catalog["0"]`; it is not a positional index.
+
+### Migrating from enum arrays
+
+| Former tuple API | Iterable catalog API |
+| --- | --- |
+| `Enums.TodoStatus[0]` | `Enums.TodoStatus.TODO`, or `[...Enums.TodoStatus][0]` when source order is intentional |
+| `Enums.TodoStatus.map(fn)` | `Array.from(Enums.TodoStatus, fn)` |
+| `Enums.TodoStatus.includes(value)` | `isEnumValue(Enums.TodoStatus, value)` |
+| `(typeof Enums.TodoStatus)[number]` | `EnumValue<"TodoStatus">` |
 
 Only a component schema with `enum` on the component's top-level schema receives an
 `Enums` entry. A nested-property or inline enum is still emitted as a literal union in
 its containing input/output type, but it does not receive a separate runtime catalog
 entry. Promote such an enum to a component schema when feature code needs reusable
-runtime options.
+runtime values.
 
 ## Capability and utility types
 
