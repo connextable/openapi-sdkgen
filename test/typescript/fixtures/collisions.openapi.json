@@ -226,8 +226,24 @@
       },
       "foo-bar": { "type": "string" },
       "foo_bar": { "type": "number" },
+      "TodoStatus": { "type": "string", "enum": ["TODO", "DONE"] },
       "Status": {
-        "enum": ["foo-bar", "foo_bar", { "__proto__": true }, ["x", "y"], null]
+        "enum": [
+          "foo-bar",
+          "foo_bar",
+          "__proto__",
+          "constructor",
+          "map",
+          "length",
+          "values",
+          "members",
+          "0",
+          2,
+          true,
+          null,
+          { "__proto__": true, "nested": { "value": 1 } },
+          ["x", "y"]
+        ]
       },
       "CollisionRecord": {
         "type": "object",
@@ -265,7 +281,8 @@
           "moneyOutput": { "$ref": "#/components/schemas/MoneyOutput" },
           "normalizedOne": { "$ref": "#/components/schemas/foo-bar" },
           "normalizedTwo": { "$ref": "#/components/schemas/foo_bar" },
-          "status": { "$ref": "#/components/schemas/Status" }
+          "status": { "$ref": "#/components/schemas/Status" },
+          "todoStatus": { "$ref": "#/components/schemas/TodoStatus" }
         }
       },
       "AuthDetailsOne": {

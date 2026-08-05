@@ -22,6 +22,8 @@ import type {
 } from "./fixtures/generated/client/index.js"
 import { createClient as createOpenAPI31Client } from "./fixtures/generated/baseline-oas31/index.js"
 import { createClient as createOpenAPI32Client } from "./fixtures/generated/baseline-oas32/index.js"
+import { Enums as collisionEnums, isEnumValue as isCollisionEnumValue } from "./fixtures/generated/collisions/index.js"
+import type { EnumValue as CollisionEnumValue } from "./fixtures/generated/collisions/index.js"
 
 declare const contract: ReturnType<typeof createContractClient>
 declare const openAPI31: ReturnType<typeof createOpenAPI31Client>
@@ -34,6 +36,7 @@ declare const extractedContract: OperationContract<"createTask">
 declare const extractedRouteContract: RouteContract<"POST /projects/{projectID}/tasks">
 declare const extractedRouteInput: RouteInput<"POST /projects/{projectID}/tasks">
 declare const extractedRouteBody: RouteBody<"POST /projects/{projectID}/tasks">
+declare const extractedTodoStatus: CollisionEnumValue<"TodoStatus">
 
 contract.projects("project-1").tasks.create
 contract.$operations.createTask
@@ -53,6 +56,10 @@ extractedContract
 extractedRouteContract
 extractedRouteInput
 extractedRouteBody
+collisionEnums.TodoStatus
+collisionEnums.TodoStatus.DONE
+extractedTodoStatus
+isCollisionEnumValue(
 `;
 
 type PendingRequest = {
@@ -286,6 +293,29 @@ describe("generated client QuickInfo", () => {
     expect(info.text).not.toContain("OperationRoutes");
     expect(info.text).not.toContain("OperationTypeIdentity");
     expect(info.text).not.toContain("operationTypeBrand");
+  });
+
+  it.each([
+    ["collisionEnums.TodoStatus", "TodoStatus"],
+    ["collisionEnums.TodoStatus.DONE", '"DONE"'],
+    ["extractedTodoStatus", '"DONE" | "TODO"'],
+  ])("keeps enum surface %s exact and public", async (expression, expected) => {
+    const info = await quickInfo(expression);
+
+    expect(info.display).toContain(expected);
+    expect(info.text).not.toContain("__sdkgen_");
+    expect(info.text).not.toContain("createEnumCatalog");
+    expect(info.text).not.toContain("enumValueEquals");
+  });
+
+  it("keeps enum guard signature public", async () => {
+    const info = await signatureInfo("isCollisionEnumValue(");
+
+    expect(info).toContain("isCollisionEnumValue");
+    expect(info).toContain("value: unknown");
+    expect(info).toContain("value is");
+    expect(info).not.toContain("__sdkgen_");
+    expect(info).not.toContain("enumValueEquals");
   });
 
   it.each([

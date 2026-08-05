@@ -4,8 +4,10 @@ import {
   Enums,
   createClient,
   isErrorCategory,
+  isEnumValue,
   type Client,
   type Components,
+  type EnumValue,
   type OperationInput,
   type OperationParameter,
   type Operations,
@@ -29,6 +31,8 @@ type SuffixInputProjection = Components["ProjectionInput"]["input"];
 type SuffixOutputProjection = Components["ProjectionInput"]["output"];
 type ModernOperation = Operations["get-pet"];
 type LegacyOperation = Operations["get_pet"];
+type TodoStatus = EnumValue<"TodoStatus">;
+type StatusValue = EnumValue<"Status">;
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
     ? true
@@ -41,6 +45,30 @@ type OperationIdentityAssertions = [
   Expect<Equal<OperationInput<Client["$operations"]["get_pet"]>, LegacyOperation["input"]>>,
   Expect<Equal<OperationParameter<"get-pet", "query", "foo-bar">, string>>,
   Expect<Equal<OperationParameter<"get-pet", "query", "foo_bar">, string>>,
+];
+type EnumAssertions = [
+  Expect<Equal<typeof Enums.TodoStatus.TODO, "TODO">>,
+  Expect<Equal<typeof Enums.TodoStatus.DONE, "DONE">>,
+  Expect<Equal<TodoStatus, "TODO" | "DONE">>,
+  Expect<
+    Equal<
+      StatusValue,
+      | "foo-bar"
+      | "foo_bar"
+      | "__proto__"
+      | "constructor"
+      | "map"
+      | "length"
+      | "values"
+      | "members"
+      | "0"
+      | 2
+      | true
+      | null
+      | { readonly __proto__: true; readonly nested: { readonly value: 1 } }
+      | readonly ["x", "y"]
+    >
+  >,
 ];
 // @ts-expect-error Normalized parameter spellings are not accepted in place of exact names.
 type NormalizedParameterName = OperationParameter<"get-pet", "query", "fooBar">;
@@ -104,15 +132,38 @@ const modernInput: ModernOperation["input"] = {
 const legacyInput: LegacyOperation["input"] = { query: { "legacy-id": "legacy" } };
 // @ts-expect-error normalization-equivalent operation IDs keep distinct required inputs
 const invalidLegacyInput: LegacyOperation["input"] = modernInput;
-const enumString: (typeof Enums.Status)[0] = "foo-bar";
-const enumObject: (typeof Enums.Status)[2] = { ["__proto__"]: true };
-const enumArray: (typeof Enums.Status)[3] = ["x", "y"];
-// @ts-expect-error enum tuple members retain exact string literals
-const invalidEnumString: (typeof Enums.Status)[0] = "foo_bar";
-// @ts-expect-error nested enum object values remain exact
-const invalidEnumObject: (typeof Enums.Status)[2] = { ["__proto__"]: false };
+const enumString: (typeof Enums.Status)["foo-bar"] = "foo-bar";
+const enumObject: Extract<StatusValue, { readonly __proto__: true }> = {
+  ["__proto__"]: true,
+  nested: { value: 1 },
+};
+const enumArray: Extract<StatusValue, readonly ["x", "y"]> = ["x", "y"];
+// @ts-expect-error exact enum members retain their own literal values
+const invalidEnumString: (typeof Enums.Status)["foo-bar"] = "foo_bar";
+const invalidEnumObject: Extract<StatusValue, { readonly __proto__: true }> = {
+  // @ts-expect-error nested enum object values remain exact
+  ["__proto__"]: false,
+  nested: { value: 1 },
+};
 // @ts-expect-error enum arrays retain order
-const invalidEnumArray: (typeof Enums.Status)[3] = ["y", "x"];
+const invalidEnumArray: Extract<StatusValue, readonly ["x", "y"]> = ["y", "x"];
+// @ts-expect-error unknown enum component names are rejected
+type UnknownEnum = EnumValue<"MissingStatus">;
+function assertEnumArrayAPIsAreAbsent(): void {
+  // @ts-expect-error enum catalogs have no positional index contract
+  Enums.TodoStatus[0];
+  // @ts-expect-error enum catalogs do not expose Array.prototype.map
+  Enums.TodoStatus.map((value: TodoStatus) => value);
+  // @ts-expect-error enum catalogs do not expose Array.prototype.includes
+  Enums.TodoStatus.includes("TODO");
+  // @ts-expect-error enum catalogs are not tuple-indexed types
+  type TupleIndexedEnum = (typeof Enums.TodoStatus)[number];
+  void (null as unknown as TupleIndexedEnum);
+}
+function narrowTodoStatus(value: unknown): TodoStatus | undefined {
+  if (isEnumValue(Enums.TodoStatus, value)) return value;
+  return undefined;
+}
 void [
   moneyInput,
   moneyOutput,
@@ -124,6 +175,7 @@ void [
   invalidSuffixOutput,
   operationTypes,
   null as unknown as OperationIdentityAssertions,
+  null as unknown as EnumAssertions,
   null as unknown as NormalizedParameterName,
   modernInput,
   legacyInput,
@@ -134,6 +186,9 @@ void [
   invalidEnumString,
   invalidEnumObject,
   invalidEnumArray,
+  null as unknown as UnknownEnum,
+  assertEnumArrayAPIsAreAbsent,
+  narrowTodoStatus,
   null as unknown as ReusedCallbackA,
   null as unknown as ReusedCallbackB,
   null as unknown as MultiExpressionCallback,
@@ -239,16 +294,122 @@ describe("exact identity collision fixture", () => {
     expect(streamed[0]?.constructor).toBe("constructor");
     await api.$operations["root-index"]();
 
-    expect(Enums.Status).toEqual([
+    expect(fetch).toHaveBeenCalledTimes(8);
+  });
+
+  it("exposes exact enum members through iterable non-array catalogs", () => {
+    expect(Enums.TodoStatus.TODO).toBe("TODO");
+    expect(Enums.TodoStatus.DONE).toBe("DONE");
+    expect(Array.isArray(Enums.TodoStatus)).toBe(false);
+    expect([...Enums.TodoStatus]).toEqual(["TODO", "DONE"]);
+    expect(Array.from(Enums.TodoStatus)).toEqual(["TODO", "DONE"]);
+    expect(Object.getPrototypeOf(Enums.Status)).toBe(null);
+    expect(Object.keys(Enums.Status).sort()).toEqual(
+      [
+        "foo-bar",
+        "foo_bar",
+        "__proto__",
+        "constructor",
+        "map",
+        "length",
+        "values",
+        "members",
+        "0",
+      ].sort(),
+    );
+    expect(Object.getOwnPropertyDescriptor(Enums.Status, Symbol.iterator)?.enumerable).toBe(false);
+    for (const member of [
+      "__proto__",
+      "constructor",
+      "map",
+      "length",
+      "values",
+      "members",
+    ] as const) {
+      expect(Object.prototype.hasOwnProperty.call(Enums.Status, member)).toBe(true);
+      expect(Enums.Status[member]).toBe(member);
+    }
+
+    const values = [...Enums.Status];
+    expect(values).toEqual([
       "foo-bar",
       "foo_bar",
-      Object.fromEntries([["__proto__", true]]),
-      ["x", "y"],
+      "__proto__",
+      "constructor",
+      "map",
+      "length",
+      "values",
+      "members",
+      "0",
+      2,
+      true,
       null,
+      Object.fromEntries([
+        ["__proto__", true],
+        ["nested", { value: 1 }],
+      ]),
+      ["x", "y"],
     ]);
-    expect(Object.prototype.hasOwnProperty.call(Enums.Status[2], "__proto__")).toBe(true);
-    expect(Object.getPrototypeOf(Enums.Status[2])).toBe(Object.prototype);
-    expect(fetch).toHaveBeenCalledTimes(8);
+    const objectValue = values.at(-2);
+    expect(
+      typeof objectValue === "object" && objectValue !== null && !Array.isArray(objectValue),
+    ).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(objectValue, "__proto__")).toBe(true);
+  });
+
+  it("narrows primitive and structured JSON enum values", () => {
+    expect(isEnumValue(Enums.TodoStatus, "TODO")).toBe(true);
+    expect(isEnumValue(Enums.TodoStatus, "todo")).toBe(false);
+    expect(isEnumValue(Enums.Status, 2)).toBe(true);
+    expect(isEnumValue(Enums.Status, null)).toBe(true);
+    expect(isEnumValue(Enums.Status, ["x", "y"])).toBe(true);
+    expect(isEnumValue(Enums.Status, ["y", "x"])).toBe(false);
+    expect(
+      isEnumValue(
+        Enums.Status,
+        Object.fromEntries([
+          ["nested", { value: 1 }],
+          ["__proto__", true],
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      isEnumValue(
+        Enums.Status,
+        Object.fromEntries([
+          ["nested", { value: 2 }],
+          ["__proto__", true],
+        ]),
+      ),
+    ).toBe(false);
+
+    const sparse = ["x"];
+    sparse.length = 2;
+    expect(isEnumValue(Enums.Status, sparse)).toBe(false);
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    expect(isEnumValue(Enums.Status, cyclic)).toBe(false);
+    let getterRead = false;
+    const accessor = Object.fromEntries([["nested", { value: 1 }]]);
+    Object.defineProperty(accessor, "__proto__", {
+      enumerable: true,
+      get() {
+        getterRead = true;
+        return true;
+      },
+    });
+    expect(isEnumValue(Enums.Status, accessor)).toBe(false);
+    expect(getterRead).toBe(false);
+    expect(
+      isEnumValue(
+        Enums.Status,
+        new Proxy(Object.create(null), {
+          ownKeys() {
+            throw new Error("unreadable");
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("keeps webhook and callback catalogs exact and prototype-safe", async () => {
