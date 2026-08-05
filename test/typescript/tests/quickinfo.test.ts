@@ -10,7 +10,16 @@ const probeFile = path.join(typescriptRoot, "quickinfo-probe.ts");
 const probeURI = pathToFileURL(probeFile).href;
 const probeSource = `
 import { createClient as createContractClient } from "./fixtures/generated/client/index.js"
-import type { OperationBody, OperationInput, OperationParameter, OperationQuery } from "./fixtures/generated/client/index.js"
+import type {
+  OperationBody,
+  OperationContract,
+  OperationInput,
+  OperationParameter,
+  OperationQuery,
+  RouteBody,
+  RouteContract,
+  RouteInput,
+} from "./fixtures/generated/client/index.js"
 import { createClient as createOpenAPI31Client } from "./fixtures/generated/baseline-oas31/index.js"
 import { createClient as createOpenAPI32Client } from "./fixtures/generated/baseline-oas32/index.js"
 
@@ -21,6 +30,10 @@ declare const extractedInput: OperationInput<"createAfterSalesRequest">
 declare const extractedBody: OperationBody<"createAfterSalesRequest">
 declare const extractedQuery: OperationQuery<"listAfterSalesRequests">
 declare const extractedCursor: OperationParameter<"listAfterSalesRequests", "query", "cursor">
+declare const extractedContract: OperationContract<"createAfterSalesRequest">
+declare const extractedRouteContract: RouteContract<"POST /orders/{orderID}/after-sales-requests">
+declare const extractedRouteInput: RouteInput<"POST /orders/{orderID}/after-sales-requests">
+declare const extractedRouteBody: RouteBody<"POST /orders/{orderID}/after-sales-requests">
 
 contract.orders("order-1").afterSalesRequests.create
 contract.$operations.createAfterSalesRequest
@@ -36,6 +49,10 @@ extractedInput
 extractedBody
 extractedQuery
 extractedCursor
+extractedContract
+extractedRouteContract
+extractedRouteInput
+extractedRouteBody
 `;
 
 type PendingRequest = {
@@ -255,18 +272,24 @@ describe("generated client QuickInfo", () => {
     expect(info.text).not.toContain("operationTypeBrand");
   });
 
-  it.each(["extractedInput", "extractedBody", "extractedQuery", "extractedCursor"])(
-    "keeps extracted helper %s free of implementation names",
-    async (expression) => {
-      const info = await quickInfo(expression);
+  it.each([
+    "extractedInput",
+    "extractedBody",
+    "extractedQuery",
+    "extractedCursor",
+    "extractedContract",
+    "extractedRouteContract",
+    "extractedRouteInput",
+    "extractedRouteBody",
+  ])("keeps extracted helper %s free of implementation names", async (expression) => {
+    const info = await quickInfo(expression);
 
-      expect(info.text).not.toContain("__sdkgen_");
-      expect(info.text).not.toContain("RouteRequestSections");
-      expect(info.text).not.toContain("OperationRoutes");
-      expect(info.text).not.toContain("OperationTypeIdentity");
-      expect(info.text).not.toContain("operationTypeBrand");
-    },
-  );
+    expect(info.text).not.toContain("__sdkgen_");
+    expect(info.text).not.toContain("RouteRequestSections");
+    expect(info.text).not.toContain("OperationRoutes");
+    expect(info.text).not.toContain("OperationTypeIdentity");
+    expect(info.text).not.toContain("operationTypeBrand");
+  });
 
   it.each([
     ["contract.$operations.createAfterSalesRequest(", "RouteInput<"],
