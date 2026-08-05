@@ -163,11 +163,11 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 			overrideName := operationTypeName(operationRouteKey(findOperation(document, "override")))
 			for _, expected := range []string{
 				`readonly headerParams?: ` + managedOnlyName + `HeaderInput | undefined`,
-				`(input?: ` + managedOnlyName + `Input, options?: ` + managedOnlyName + `Options)`,
-				`readonly raw: ` + managedOnlyName + `RawCall`,
+				`(input?: RouteInput<"GET /managed-only">, options?: RouteOptions<"GET /managed-only">)`,
+				`readonly raw: OperationRawCall<"GET /managed-only">`,
 				`readonly headerParams?: ` + oauthName + `HeaderInput | undefined`,
 				`readonly body: ` + oauthName + `BodyInput`,
-				`(input: ` + oauthName + `Input, options?: ` + oauthName + `Options)`,
+				`(input: RouteInput<"POST /oauth">, options?: RouteOptions<"POST /oauth">)`,
 				`readonly headerParams: ` + overrideName + `HeaderInput`,
 			} {
 				if !strings.Contains(client, expected) {

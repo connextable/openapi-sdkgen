@@ -9,6 +9,13 @@ import (
 	"openapi-sdkgen/internal/compiler/ir"
 )
 
+func TestRequestInputSectionRejectsUnknownSuffix(t *testing.T) {
+	operationName := operationTypeName("GET /widgets")
+	if _, err := requestInputSection(operationName, operationName+"UnsupportedInput"); err == nil || !strings.Contains(err.Error(), "supported request section suffix") {
+		t.Fatalf("requestInputSection error = %v, want unsupported suffix diagnostic", err)
+	}
+}
+
 func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.1.0",
@@ -44,9 +51,9 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	optionalName := operationTypeName("GET /optional")
 	optionalCall := interfaceBody(optionalName + "Call")
 	for _, expected := range []string{
-		"(options?: " + optionalName + "Options)",
-		"(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
-		"readonly raw: " + optionalName + "RawCall",
+		`(options?: RouteOptions<"GET /optional">)`,
+		`(input?: RouteInput<"GET /optional">, options?: RouteOptions<"GET /optional">)`,
+		`readonly raw: OperationRawCall<"GET /optional">`,
 	} {
 		if !strings.Contains(optionalCall, expected) {
 			t.Fatalf("optional call missing %q:\n%s", expected, optionalCall)
@@ -54,8 +61,8 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	}
 	optionalRawCall := interfaceBody(optionalName + "RawCall")
 	for _, expected := range []string{
-		"(options?: " + optionalName + "Options)",
-		"(input?: " + optionalName + "Input, options?: " + optionalName + "Options)",
+		`(options?: RouteOptions<"GET /optional">)`,
+		`(input?: RouteInput<"GET /optional">, options?: RouteOptions<"GET /optional">)`,
 	} {
 		if !strings.Contains(optionalRawCall, expected) {
 			t.Fatalf("optional raw call missing %q:\n%s", expected, optionalRawCall)
@@ -63,28 +70,30 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	}
 
 	requiredName := operationTypeName("POST /required")
-	if requiredCall := interfaceBody(requiredName + "Call"); strings.Contains(requiredCall, "(options?: "+requiredName+"Options)") {
+	if requiredCall := interfaceBody(requiredName + "Call"); strings.Contains(requiredCall, `(options?: RouteOptions<"POST /required">)`) {
 		t.Fatalf("required call gained options-only overload:\n%s", requiredCall)
 	}
-	if requiredRawCall := interfaceBody(requiredName + "RawCall"); strings.Contains(requiredRawCall, "(options?: "+requiredName+"Options)") {
+	if requiredRawCall := interfaceBody(requiredName + "RawCall"); strings.Contains(requiredRawCall, `(options?: RouteOptions<"POST /required">)`) {
 		t.Fatalf("required raw call gained options-only overload:\n%s", requiredRawCall)
 	}
 
 	healthName := operationTypeName("GET /health")
 	healthCall := interfaceBody(healthName + "Call")
 	healthRawCall := interfaceBody(healthName + "RawCall")
-	if strings.Count(healthCall, "\n  (options?: "+healthName+"Options)") != 1 || strings.Count(healthRawCall, "\n  (options?: "+healthName+"Options)") != 1 {
+	if strings.Count(healthCall, `
+  (options?: RouteOptions<"GET /health">)`) != 1 || strings.Count(healthRawCall, `
+  (options?: RouteOptions<"GET /health">)`) != 1 {
 		t.Fatalf("no-input call should retain one options-only signature:\n%s", healthCall)
 	}
 
 	deleteName := operationTypeName("DELETE /accounts/{accountID}/phone")
 	deleteCall := interfaceBody(deleteName + "Call")
-	if strings.Contains(deleteCall, "(options?: "+deleteName+"Options)") {
+	if strings.Contains(deleteCall, `(options?: RouteOptions<"DELETE /accounts/{accountID}/phone">)`) {
 		t.Fatalf("full path call gained options-only overload:\n%s", deleteCall)
 	}
 	deleteResourceCall := interfaceBody(deleteName + "ResourceCall")
 	deleteResourceRawCall := interfaceBody(deleteName + "ResourceRawCall")
-	if !strings.Contains(deleteResourceCall, "(options?: "+deleteName+"Options)") || !strings.Contains(deleteResourceRawCall, "(options?: "+deleteName+"Options)") {
+	if !strings.Contains(deleteResourceCall, `(options?: RouteOptions<"DELETE /accounts/{accountID}/phone">)`) || !strings.Contains(deleteResourceRawCall, `(options?: RouteOptions<"DELETE /accounts/{accountID}/phone">)`) {
 		t.Fatalf("optional resource call missing options-only overload:\n%s", deleteResourceCall)
 	}
 }
