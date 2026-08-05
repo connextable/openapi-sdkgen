@@ -12,6 +12,11 @@
         "parameters": [
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           {
+            "name": "state",
+            "in": "query",
+            "schema": { "type": ["string", "null"] }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": { "type": "integer", "minimum": 1 }
@@ -55,6 +60,12 @@
         },
         "x-envelope": "data",
         "x-pagination": "cursor"
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Read service health.",
+        "responses": { "204": { "description": "Healthy" } }
       }
     },
     "/widgets": {

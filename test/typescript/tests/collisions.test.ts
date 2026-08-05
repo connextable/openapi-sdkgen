@@ -4,7 +4,10 @@ import {
   Enums,
   createClient,
   isErrorCategory,
+  type Client,
   type Components,
+  type OperationInput,
+  type OperationParameter,
   type Operations,
 } from "../fixtures/generated/collisions/index.js";
 import {
@@ -26,6 +29,21 @@ type SuffixInputProjection = Components["ProjectionInput"]["input"];
 type SuffixOutputProjection = Components["ProjectionInput"]["output"];
 type ModernOperation = Operations["get-pet"];
 type LegacyOperation = Operations["get_pet"];
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
+    ? true
+    : false;
+type Expect<Value extends true> = Value;
+type OperationIdentityAssertions = [
+  Expect<Equal<OperationInput<"get-pet">, ModernOperation["input"]>>,
+  Expect<Equal<OperationInput<Client["$operations"]["get-pet"]>, ModernOperation["input"]>>,
+  Expect<Equal<OperationInput<"get_pet">, LegacyOperation["input"]>>,
+  Expect<Equal<OperationInput<Client["$operations"]["get_pet"]>, LegacyOperation["input"]>>,
+  Expect<Equal<OperationParameter<"get-pet", "query", "foo-bar">, string>>,
+  Expect<Equal<OperationParameter<"get-pet", "query", "foo_bar">, string>>,
+];
+// @ts-expect-error Normalized parameter spellings are not accepted in place of exact names.
+type NormalizedParameterName = OperationParameter<"get-pet", "query", "fooBar">;
 type ReusedCallbackA =
   Callbacks["get-pet"]["component-status"]["{$request.query.callbackURL}"]["POST"];
 type ReusedCallbackB =
@@ -105,6 +123,8 @@ void [
   invalidSuffixInput,
   invalidSuffixOutput,
   operationTypes,
+  null as unknown as OperationIdentityAssertions,
+  null as unknown as NormalizedParameterName,
   modernInput,
   legacyInput,
   invalidLegacyInput,

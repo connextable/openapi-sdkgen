@@ -9,17 +9,36 @@ import {
   isErrorCode,
 } from "../fixtures/generated/client/index.js";
 import type {
+  Client,
   LinkCalls,
+  OperationBody,
+  OperationContract,
+  OperationHeaders,
+  OperationInput,
+  OperationOutput,
+  OperationParameter,
+  OperationPath,
+  OperationQuery,
   Operations,
   PaginateCall,
   RawCall,
   ResourceCall,
+  RouteBody,
   RouteContract,
+  RouteHeaders,
+  RouteInput,
+  RouteOutput,
+  RouteParameter,
+  RoutePath,
   StreamCall,
 } from "../fixtures/generated/client/index.js";
 import { openapi } from "../fixtures/generated/client/metadata.js";
 
 type Expect<Value extends true> = Value;
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
+    ? true
+    : false;
 type RootHidesMetadata = Expect<
   "openapi" extends keyof typeof import("../fixtures/generated/client/index.js") ? false : true
 >;
@@ -42,8 +61,77 @@ type CreateAfterSaleRawCall = RawCall<"POST /orders/{orderID}/after-sales-reques
 type AfterSalePagination = PaginateCall<"GET /after-sales-requests">;
 type NoStream = StreamCall<"POST /orders/{orderID}/after-sales-requests">;
 type NoLinks = LinkCalls<"POST /orders/{orderID}/after-sales-requests">;
+type CreateAfterSaleExactMethod = Client["$operations"]["createAfterSalesRequest"];
+type CreateAfterSaleRouteMethod = Client["$routes"]["POST /orders/{orderID}/after-sales-requests"];
+type CreateAfterSaleResourceMethod = ReturnType<Client["orders"]>["afterSalesRequests"]["create"];
+type CreateAfterSaleInputByID = OperationInput<"createAfterSalesRequest">;
+type CreateAfterSaleInputByMethod = OperationInput<CreateAfterSaleExactMethod>;
+type CreateAfterSaleInputByRouteMethod = OperationInput<CreateAfterSaleRouteMethod>;
+type CreateAfterSaleResourceInput = OperationInput<CreateAfterSaleResourceMethod>;
+type CreateAfterSaleBody = OperationBody<"createAfterSalesRequest">;
+type ListAfterSalesQuery = OperationQuery<"listAfterSalesRequests">;
+type ListAfterSalesState = OperationParameter<"listAfterSalesRequests", "query", "state">;
+type CreateWidgetHeaders = OperationHeaders<Client["widgets"]["create"]>;
+type CreateWidgetTraceID = OperationParameter<Client["widgets"]["create"], "header", "X-Trace-Id">;
+type HealthOutput = OperationOutput<Client["$routes"]["GET /health"]>;
+type OperationHelperAssertions = [
+  Expect<
+    Equal<
+      OperationContract<"createAfterSalesRequest">,
+      OperationContract<CreateAfterSaleExactMethod>
+    >
+  >,
+  Expect<Equal<CreateAfterSaleInputByID, CreateAfterSale["input"]>>,
+  Expect<Equal<CreateAfterSaleInputByMethod, CreateAfterSale["input"]>>,
+  Expect<Equal<CreateAfterSaleInputByRouteMethod, CreateAfterSale["input"]>>,
+  Expect<Equal<CreateAfterSaleResourceInput, CreateAfterSale["resourceInput"]>>,
+  Expect<Equal<CreateAfterSaleBody, RouteBody<"POST /orders/{orderID}/after-sales-requests">>>,
+  Expect<Equal<OperationOutput<CreateAfterSaleResourceMethod>, CreateAfterSale["output"]>>,
+  Expect<
+    Equal<RouteInput<"POST /orders/{orderID}/after-sales-requests">, CreateAfterSale["input"]>
+  >,
+  Expect<
+    Equal<RouteOutput<"POST /orders/{orderID}/after-sales-requests">, CreateAfterSale["output"]>
+  >,
+  Expect<
+    Equal<RoutePath<"POST /orders/{orderID}/after-sales-requests">, { readonly orderID: string }>
+  >,
+  Expect<
+    Equal<RouteParameter<"POST /orders/{orderID}/after-sales-requests", "path", "orderID">, string>
+  >,
+  Expect<Equal<ListAfterSalesState, string | null>>,
+  Expect<Equal<ListAfterSalesQuery["state"], string | null | undefined>>,
+  Expect<Equal<CreateWidgetHeaders, RouteHeaders<"POST /widgets">>>,
+  Expect<Equal<CreateWidgetTraceID, string>>,
+  Expect<Equal<HealthOutput, void>>,
+];
 // @ts-expect-error Unknown route keys are rejected by the public helper.
 type UnknownRoute = RouteContract<"GET /missing">;
+// @ts-expect-error Unknown operation IDs are rejected.
+type UnknownOperation = OperationInput<"missingOperation">;
+// @ts-expect-error Route strings use Route* helpers rather than Operation* helpers.
+type RouteStringAsOperation = OperationInput<"POST /orders/{orderID}/after-sales-requests">;
+// @ts-expect-error Arbitrary functions are not generated operation sources.
+type ArbitraryFunctionOperation = OperationInput<(input: unknown) => Promise<unknown>>;
+// @ts-expect-error Resource-tree parent nodes are not operation methods.
+type ResourceParentOperation = OperationInput<ReturnType<Client["orders"]>["afterSalesRequests"]>;
+// @ts-expect-error Raw methods are not standalone operation sources.
+type RawMethodOperation = OperationInput<CreateAfterSaleExactMethod["raw"]>;
+// @ts-expect-error Pagination methods are not standalone operation sources.
+type PaginationMethodOperation = OperationInput<Client["afterSalesRequests"]["paginate"]>;
+// @ts-expect-error Bound resource methods do not retain a path input section.
+type BoundResourcePath = OperationPath<CreateAfterSaleResourceMethod>;
+// @ts-expect-error Query-only operations have no request body section.
+type MissingBody = OperationBody<"listAfterSalesRequests">;
+// @ts-expect-error Body-only operations have no query section.
+type MissingQuery = OperationQuery<"createAfterSalesRequest">;
+// @ts-expect-error Body is not an OpenAPI parameter location.
+type BodyParameter = OperationParameter<"createAfterSalesRequest", "body", "reason">;
+// @ts-expect-error Unknown parameter names are rejected.
+type UnknownParameter = OperationParameter<"listAfterSalesRequests", "query", "missing">;
+// @ts-expect-error Individual optional parameter helpers exclude omission undefined.
+const undefinedState: ListAfterSalesState = undefined;
+const nullableState: ListAfterSalesState = null;
 
 const rootHidesMetadata: RootHidesMetadata = true;
 void [
@@ -54,7 +142,21 @@ void [
   null as unknown as AfterSalePagination,
   null as unknown as NoStream,
   null as unknown as NoLinks,
+  null as unknown as OperationHelperAssertions,
+  nullableState,
   null as unknown as UnknownRoute,
+  null as unknown as UnknownOperation,
+  null as unknown as RouteStringAsOperation,
+  null as unknown as ArbitraryFunctionOperation,
+  null as unknown as ResourceParentOperation,
+  null as unknown as RawMethodOperation,
+  null as unknown as PaginationMethodOperation,
+  null as unknown as BoundResourcePath,
+  null as unknown as MissingBody,
+  null as unknown as MissingQuery,
+  null as unknown as BodyParameter,
+  null as unknown as UnknownParameter,
+  undefinedState,
 ];
 
 describe("generated TypeScript source", () => {

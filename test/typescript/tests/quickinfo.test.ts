@@ -10,19 +10,32 @@ const probeFile = path.join(typescriptRoot, "quickinfo-probe.ts");
 const probeURI = pathToFileURL(probeFile).href;
 const probeSource = `
 import { createClient as createContractClient } from "./fixtures/generated/client/index.js"
+import type { OperationBody, OperationInput, OperationParameter, OperationQuery } from "./fixtures/generated/client/index.js"
 import { createClient as createOpenAPI31Client } from "./fixtures/generated/baseline-oas31/index.js"
 import { createClient as createOpenAPI32Client } from "./fixtures/generated/baseline-oas32/index.js"
 
 declare const contract: ReturnType<typeof createContractClient>
 declare const openAPI31: ReturnType<typeof createOpenAPI31Client>
 declare const openAPI32: ReturnType<typeof createOpenAPI32Client>
+declare const extractedInput: OperationInput<"createAfterSalesRequest">
+declare const extractedBody: OperationBody<"createAfterSalesRequest">
+declare const extractedQuery: OperationQuery<"listAfterSalesRequests">
+declare const extractedCursor: OperationParameter<"listAfterSalesRequests", "query", "cursor">
 
 contract.orders("order-1").afterSalesRequests.create
+contract.$operations.createAfterSalesRequest
+contract.$routes["POST /orders/{orderID}/after-sales-requests"]
+contract.$operations.createAfterSalesRequest({ path: { orderID: "order-1" }, body: { reason: "changed", type: "RETURN" } })
+contract.orders("order-1").afterSalesRequests.create({ body: { reason: "changed", type: "RETURN" } })
 contract.orders("order-1").afterSalesRequests.create.raw
 contract.afterSalesRequests.paginate
 contract.customers
 openAPI31.source.get.links
 openAPI32.events.get.stream
+extractedInput
+extractedBody
+extractedQuery
+extractedCursor
 `;
 
 type PendingRequest = {
@@ -128,6 +141,10 @@ type Hover = {
     | readonly (string | { language?: string; value: string })[];
 } | null;
 
+type SignatureHelp = {
+  signatures: readonly { label: string }[];
+} | null;
+
 let client: LSPClient;
 
 beforeAll(async () => {
@@ -167,6 +184,14 @@ function positionAtEnd(expression: string) {
   return { character: lines.at(-1)?.length ?? 0, line: lines.length - 1 };
 }
 
+function positionAfter(expression: string) {
+  const start = probeSource.indexOf(expression);
+  if (start < 0) throw new Error(`missing probe expression: ${expression}`);
+  const prefix = probeSource.slice(0, start + expression.length);
+  const lines = prefix.split("\n");
+  return { character: lines.at(-1)?.length ?? 0, line: lines.length - 1 };
+}
+
 function hoverText(hover: Hover) {
   if (hover === null) throw new Error("missing hover response");
   if (typeof hover.contents === "string") return hover.contents;
@@ -189,6 +214,16 @@ async function quickInfo(expression: string) {
   return { display: displayedType(text), text };
 }
 
+async function signatureInfo(expression: string) {
+  const result = await client.request<SignatureHelp>("textDocument/signatureHelp", {
+    context: { isRetrigger: false, triggerCharacter: "(", triggerKind: 2 },
+    position: positionAfter(expression),
+    textDocument: { uri: probeURI },
+  });
+  if (result === null) throw new Error(`missing signature help: ${expression}`);
+  return result.signatures.map((signature) => signature.label).join("\n");
+}
+
 describe("generated client QuickInfo", () => {
   it("keeps resource operation properties concise and public", async () => {
     const info = await quickInfo('contract.orders("order-1").afterSalesRequests.create');
@@ -200,6 +235,47 @@ describe("generated client QuickInfo", () => {
     expect(info.text).toContain("Operation ID: `createAfterSalesRequest`.");
     expect(info.text).toContain("await api.orders(orderID).afterSalesRequests.create");
     expect(info.text).not.toContain("HTTP:");
+  });
+
+  it.each([
+    [
+      "contract.$operations.createAfterSalesRequest",
+      'OperationMethod<"POST /orders/{orderID}/after-sales-requests">',
+    ],
+    [
+      'contract.$routes["POST /orders/{orderID}/after-sales-requests"]',
+      'OperationMethod<"POST /orders/{orderID}/after-sales-requests">',
+    ],
+  ])("keeps exact method %s concise and public", async (expression, expected) => {
+    const info = await quickInfo(expression);
+
+    expect(info.display).toContain(expected);
+    expect(info.text).not.toContain("__sdkgen_");
+    expect(info.text).not.toContain("OperationTypeIdentity");
+    expect(info.text).not.toContain("operationTypeBrand");
+  });
+
+  it.each(["extractedInput", "extractedBody", "extractedQuery", "extractedCursor"])(
+    "keeps extracted helper %s free of implementation names",
+    async (expression) => {
+      const info = await quickInfo(expression);
+
+      expect(info.text).not.toContain("__sdkgen_");
+      expect(info.text).not.toContain("RouteRequestSections");
+      expect(info.text).not.toContain("OperationRoutes");
+      expect(info.text).not.toContain("OperationTypeIdentity");
+      expect(info.text).not.toContain("operationTypeBrand");
+    },
+  );
+
+  it.each([
+    ["contract.$operations.createAfterSalesRequest(", "RouteInput<"],
+    ['contract.orders("order-1").afterSalesRequests.create(', "RouteResourceInput<"],
+  ])("keeps %s signature help public", async (expression, expected) => {
+    const info = await signatureInfo(expression);
+
+    expect(info).toContain(expected);
+    expect(info).not.toContain("__sdkgen_");
   });
 
   it("uses readable path selector names", async () => {
