@@ -13,6 +13,11 @@ import {
   type Operations,
 } from "../fixtures/generated/collisions/index.js";
 import {
+  Enums as DirectEnums,
+  isEnumValue as isDirectEnumValue,
+  type EnumValue as DirectEnumValue,
+} from "../fixtures/generated/collisions/enums.js";
+import {
   createCallbackHandlers,
   type Callbacks,
   type CallbackHandlers,
@@ -33,6 +38,7 @@ type ModernOperation = Operations["get-pet"];
 type LegacyOperation = Operations["get_pet"];
 type TodoStatus = EnumValue<"TodoStatus">;
 type StatusValue = EnumValue<"Status">;
+type DirectTodoStatus = DirectEnumValue<"TodoStatus">;
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2
     ? true
@@ -50,6 +56,8 @@ type EnumAssertions = [
   Expect<Equal<typeof Enums.TodoStatus.TODO, "TODO">>,
   Expect<Equal<typeof Enums.TodoStatus.DONE, "DONE">>,
   Expect<Equal<TodoStatus, "TODO" | "DONE">>,
+  Expect<Equal<DirectTodoStatus, TodoStatus>>,
+  Expect<Equal<typeof DirectEnums, typeof Enums>>,
   Expect<
     Equal<
       StatusValue,
@@ -214,6 +222,12 @@ const record = Object.fromEntries([
 ]) as Components["CollisionRecord"]["output"];
 
 describe("exact identity collision fixture", () => {
+  it("keeps root enum exports identical to the direct enum entry", () => {
+    expect(DirectEnums).toBe(Enums);
+    expect(DirectEnums.TodoStatus).toBe(Enums.TodoStatus);
+    expect(isDirectEnumValue).toBe(isEnumValue);
+  });
+
   it("keeps component, operation, property, header, link, stream, and enum identities distinct", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       const path = new URL(String(input)).pathname;

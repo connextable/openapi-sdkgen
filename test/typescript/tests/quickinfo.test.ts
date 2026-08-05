@@ -24,6 +24,8 @@ import { createClient as createOpenAPI31Client } from "./fixtures/generated/base
 import { createClient as createOpenAPI32Client } from "./fixtures/generated/baseline-oas32/index.js"
 import { Enums as collisionEnums, isEnumValue as isCollisionEnumValue } from "./fixtures/generated/collisions/index.js"
 import type { EnumValue as CollisionEnumValue } from "./fixtures/generated/collisions/index.js"
+import { Enums as directCollisionEnums, isEnumValue as isDirectCollisionEnumValue } from "./fixtures/generated/collisions/enums.js"
+import type { EnumValue as DirectCollisionEnumValue } from "./fixtures/generated/collisions/enums.js"
 
 declare const contract: ReturnType<typeof createContractClient>
 declare const openAPI31: ReturnType<typeof createOpenAPI31Client>
@@ -37,6 +39,7 @@ declare const extractedRouteContract: RouteContract<"POST /projects/{projectID}/
 declare const extractedRouteInput: RouteInput<"POST /projects/{projectID}/tasks">
 declare const extractedRouteBody: RouteBody<"POST /projects/{projectID}/tasks">
 declare const extractedTodoStatus: CollisionEnumValue<"TodoStatus">
+declare const directExtractedTodoStatus: DirectCollisionEnumValue<"TodoStatus">
 
 contract.projects("project-1").tasks.create
 contract.$operations.createTask
@@ -59,7 +62,10 @@ extractedRouteBody
 collisionEnums.TodoStatus
 collisionEnums.TodoStatus.DONE
 extractedTodoStatus
+directCollisionEnums.TodoStatus
+directExtractedTodoStatus
 isCollisionEnumValue(
+isDirectCollisionEnumValue(
 `;
 
 type PendingRequest = {
@@ -299,6 +305,8 @@ describe("generated client QuickInfo", () => {
     ["collisionEnums.TodoStatus", "TodoStatus"],
     ["collisionEnums.TodoStatus.DONE", '"DONE"'],
     ["extractedTodoStatus", '"DONE" | "TODO"'],
+    ["directCollisionEnums.TodoStatus", "TodoStatus"],
+    ["directExtractedTodoStatus", '"DONE" | "TODO"'],
   ])("keeps enum surface %s exact and public", async (expression, expected) => {
     const info = await quickInfo(expression);
 
@@ -309,13 +317,15 @@ describe("generated client QuickInfo", () => {
   });
 
   it("keeps enum guard signature public", async () => {
-    const info = await signatureInfo("isCollisionEnumValue(");
+    for (const expression of ["isCollisionEnumValue(", "isDirectCollisionEnumValue("]) {
+      const info = await signatureInfo(expression);
 
-    expect(info).toContain("isCollisionEnumValue");
-    expect(info).toContain("value: unknown");
-    expect(info).toContain("value is");
-    expect(info).not.toContain("__sdkgen_");
-    expect(info).not.toContain("enumValueEquals");
+      expect(info).toContain(expression.slice(0, -1));
+      expect(info).toContain("value: unknown");
+      expect(info).toContain("value is");
+      expect(info).not.toContain("__sdkgen_");
+      expect(info).not.toContain("enumValueEquals");
+    }
   });
 
   it.each([

@@ -133,7 +133,7 @@ components:
 ```
 
 ```ts
-import { Enums, isEnumValue, type EnumValue } from "./generated/api";
+import { Enums, isEnumValue, type EnumValue } from "./generated/api/enums";
 
 type TodoStatus = EnumValue<"TodoStatus">;
 // "TODO" | "DONE"
@@ -153,6 +153,11 @@ if (isEnumValue(Enums.TodoStatus, input)) {
   input satisfies TodoStatus;
 }
 ```
+
+The same `Enums`, `EnumValue`, and `isEnumValue` exports remain available from the
+main `./generated/api` entry, so existing imports do not need to change. Use the
+dedicated `./generated/api/enums` entry when a module only needs generated enum
+runtime values and types.
 
 `Enums` contains enums declared as component schemas. Inline and nested enums remain
 available through their generated request, response, or component types.

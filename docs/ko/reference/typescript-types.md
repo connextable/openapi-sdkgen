@@ -133,7 +133,7 @@ components:
 ```
 
 ```ts
-import { Enums, isEnumValue, type EnumValue } from "./generated/api";
+import { Enums, isEnumValue, type EnumValue } from "./generated/api/enums";
 
 type TodoStatus = EnumValue<"TodoStatus">;
 // "TODO" | "DONE"
@@ -153,6 +153,11 @@ if (isEnumValue(Enums.TodoStatus, input)) {
   input satisfies TodoStatus;
 }
 ```
+
+기존과 같이 기본 `./generated/api` 진입점에서도 `Enums`, `EnumValue`,
+`isEnumValue`를 가져올 수 있으므로 기존 import는 바꿀 필요가 없습니다. 생성된
+enum 런타임 값과 타입만 필요한 모듈에서는 전용 `./generated/api/enums` 진입점을
+사용할 수 있습니다.
 
 `Enums`에는 component 스키마로 선언된 enum이 포함됩니다. Inline enum과 중첩
 enum은 생성된 요청, 응답, component 타입에서 사용할 수 있습니다.
