@@ -266,7 +266,7 @@ func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 }
 
 func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
-	source, err := emitTypes(&ir.Document{
+	source, err := emitEnums(&ir.Document{
 		ComponentSchemas: map[string]map[string]any{
 			"Status": {"enum": []any{
 				"foo-bar", "foo_bar", "__proto__", "constructor", "map", "length", "0",
@@ -788,7 +788,7 @@ func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artifacts) != 7 {
-		t.Fatalf("source artifact count = %d, want 7", len(artifacts))
+	if len(artifacts) != 10 {
+		t.Fatalf("source artifact count = %d, want 10", len(artifacts))
 	}
 }

@@ -228,6 +228,11 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	constantsSource := emitConstants()
+	enumsSource, err := emitEnums(document)
+	if err != nil {
+		return nil, err
+	}
 	errorsSource, err := emitErrors(document)
 	if err != nil {
 		return nil, err
@@ -241,23 +246,28 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		return nil, err
 	}
 	if err := validateSourceExportSymbols(map[string][]byte{
-		"types":    typesSource,
-		"errors":   errorsSource,
-		"metadata": metadataSource,
-		"client":   clientSource,
+		"client":    clientSource,
+		"constants": constantsSource,
+		"enums":     enumsSource,
+		"errors":    errorsSource,
+		"metadata":  metadataSource,
+		"types":     typesSource,
 	}); err != nil {
 		return nil, err
 	}
-	indexSource := []byte("export * from \"./types.js\"\nexport * from \"./errors.js\"\nexport * from \"./client.js\"\n")
+	indexSource := generatedIndexSource(enumsSource)
 
 	artifacts := []Artifact{
 		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./generated/index.js\"\n"))},
-		{Path: "generated/types.ts", Data: generatedSource(typesSource)},
 		{Path: "generated/client.ts", Data: generatedSource(clientSource)},
+		{Path: "generated/constants.ts", Data: generatedSource(constantsSource)},
+		{Path: "generated/enums.ts", Data: generatedSource(enumsSource)},
 		{Path: "generated/errors.ts", Data: generatedSource(errorsSource)},
 		{Path: "generated/index.ts", Data: generatedSource(indexSource)},
-		{Path: "metadata.ts", Data: generatedSource(metadataSource)},
 		{Path: "generated/runtime.ts", Data: generatedSource(runtimeTemplate)},
+		{Path: "generated/types.ts", Data: generatedSource(typesSource)},
+		{Path: "enums.ts", Data: generatedSource([]byte("export * from \"./generated/enums.js\"\n"))},
+		{Path: "metadata.ts", Data: generatedSource(metadataSource)},
 	}
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
@@ -266,8 +276,43 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		}
 		artifacts = append(artifacts, serverArtifacts...)
 	}
-	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifactEmissionOrder(artifacts[i].Path) < artifactEmissionOrder(artifacts[j].Path)
+	})
 	return artifacts, nil
+}
+
+func artifactEmissionOrder(path string) string {
+	if strings.HasPrefix(path, "generated/") {
+		return "0/" + path
+	}
+	switch path {
+	case "index.ts":
+		return "1/" + path
+	case "enums.ts":
+		return "2/" + path
+	case "metadata.ts":
+		return "3/" + path
+	default:
+		return "4/" + path
+	}
+}
+
+func generatedIndexSource(enumsSource []byte) []byte {
+	var output strings.Builder
+	for _, module := range []string{"types", "constants", "enums", "errors", "client"} {
+		fmt.Fprintf(&output, "export type * from %s\n", quoteTS("./"+module+".js"))
+	}
+	output.WriteString("export { SortDirection } from \"./constants.js\"\n")
+	if exportedSymbols(string(enumsSource))["isEnumValue"] {
+		output.WriteString("export { Enums, isEnumValue } from \"./enums.js\"\n")
+	} else {
+		output.WriteString("export { Enums } from \"./enums.js\"\n")
+	}
+	output.WriteString("export { isErrorCategory } from \"./errors.js\"\n")
+	output.WriteString("export { createClient } from \"./client.js\"\n")
+	output.WriteString("export { APIError, TransportErrorCode, getErrorCode, getRequestID, isAPIError, isErrorCode } from \"./runtime.js\"\n")
+	return []byte(output.String())
 }
 
 func generatedSource(source []byte) []byte {

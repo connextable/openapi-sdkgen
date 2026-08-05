@@ -52,8 +52,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	if len(artifacts) != 7 {
-		t.Fatalf("source artifact count = %d, want exactly seven TypeScript files", len(artifacts))
+	if len(artifacts) != 10 {
+		t.Fatalf("source artifact count = %d, want exactly ten TypeScript files", len(artifacts))
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -62,6 +62,11 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 
 	typesSource := string(artifacts["generated/types.ts"])
+	for _, forbidden := range []string{"export const ", "export function ", "Object.fromEntries", "Object.create"} {
+		if strings.Contains(typesSource, forbidden) {
+			t.Fatalf("types module contains runtime statement %q:\n%s", forbidden, typesSource)
+		}
+	}
 	for _, expected := range []string{
 		`readonly "Product": {`,
 		"readonly input:",
@@ -115,17 +120,38 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	errorsSource := string(artifacts["generated/errors.ts"])
 	runtimeSource := string(artifacts["generated/runtime.ts"])
 	publicIndex := string(artifacts["index.ts"])
+	publicEnums := string(artifacts["enums.ts"])
 	metadataSource := string(artifacts["metadata.ts"])
 	if !strings.Contains(publicIndex, `export * from "./generated/index.js"`) {
 		t.Fatalf("source entrypoint missing relative re-export:\n%s", publicIndex)
+	}
+	if !strings.Contains(publicEnums, `export * from "./generated/enums.js"`) {
+		t.Fatalf("enum entrypoint missing relative re-export:\n%s", publicEnums)
 	}
 	for _, expected := range []string{"export const openapi = { document:", `["openapi", "3.2.0"]`, `versionLine: "3.2"`} {
 		if !strings.Contains(metadataSource, expected) {
 			t.Fatalf("metadata missing %q:\n%s", expected, metadataSource)
 		}
 	}
-	if generatedIndex := string(artifacts["generated/index.ts"]); strings.Contains(generatedIndex, "metadata.js") {
+	generatedIndex := string(artifacts["generated/index.ts"])
+	if strings.Contains(generatedIndex, "metadata.js") {
 		t.Fatalf("client root must not re-export metadata:\n%s", generatedIndex)
+	}
+	for _, expected := range []string{
+		`export type * from "./types.js"`,
+		`export type * from "./constants.js"`,
+		`export type * from "./enums.js"`,
+		`export type * from "./errors.js"`,
+		`export type * from "./client.js"`,
+		`export { SortDirection } from "./constants.js"`,
+		`export { Enums, isEnumValue } from "./enums.js"`,
+		`export { isErrorCategory } from "./errors.js"`,
+		`export { createClient } from "./client.js"`,
+		`from "./runtime.js"`,
+	} {
+		if !strings.Contains(generatedIndex, expected) {
+			t.Fatalf("generated entrypoint missing %q:\n%s", expected, generatedIndex)
+		}
 	}
 	if !strings.HasPrefix(runtimeSource, generatedFileHeader) || !strings.Contains(runtimeSource, "export function createRequest") {
 		t.Fatalf("generated runtime missing or invalid:\n%s", runtimeSource)
