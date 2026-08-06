@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
+
+if (($# != 1)); then
+  echo "usage: just agent typescript-split-diff BASELINE" >&2
+  exit 2
+fi
+
+baseline_input="$1"
+if ! baseline_commit="$(git -C "$ROOT" rev-parse --verify "${baseline_input}^{commit}" 2>/dev/null)"; then
+  echo "invalid baseline commit: $baseline_input" >&2
+  exit 2
+fi
+
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all)" ]]; then
+  echo "typescript split differential requires a clean candidate worktree" >&2
+  exit 2
+fi
+
+temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/openapi-sdkgen-typescript-split-diff.XXXXXX")"
+baseline_root="$temporary_root/baseline"
+baseline_output="$temporary_root/output/baseline"
+candidate_output="$temporary_root/output/candidate"
+baseline_cli="$temporary_root/bin/baseline-openapi-sdkgen"
+candidate_cli="$temporary_root/bin/candidate-openapi-sdkgen"
+baseline_attached=0
+
+cleanup() {
+  if ((baseline_attached == 1)); then
+    git -C "$ROOT" worktree remove --force "$baseline_root" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$temporary_root"
+}
+trap cleanup EXIT
+
+bounded_diff() {
+  local left="$1"
+  local right="$2"
+  diff -u "$left" "$right" 2>/dev/null | sed -n '1,160p' || true
+}
+
+compare_file() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "failed $label" >&2
+    bounded_diff "$left" "$right" >&2
+    return 1
+  fi
+  agent_note "ok $label"
+}
+
+compare_tree() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  local report="$temporary_root/tree-diff.txt"
+  if ! diff -qr "$left" "$right" >"$report" 2>&1; then
+    echo "failed $label" >&2
+    sed -n '1,160p' "$report" >&2
+    return 1
+  fi
+  agent_note "ok $label"
+}
+
+generate() {
+  local label="$1"
+  local cli="$2"
+  local input="$3"
+  local output="$4"
+  shift 4
+  rm -rf "$output"
+  agent_run "$label" "$cli" generate \
+    --input "$input" \
+    --target typescript \
+    --output "$output" \
+    "$@"
+}
+
+compare_public_roots() {
+  local fixture="$1"
+  local baseline_directory="$2"
+  local candidate_directory="$3"
+  local path
+  for path in index.ts enums.ts metadata.ts; do
+    compare_file "$fixture public $path" \
+      "$baseline_directory/$path" \
+      "$candidate_directory/$path"
+  done
+}
+
+compare_client_map_with_server() {
+  local plain="$1"
+  local with_server="$2"
+  local plain_paths="$temporary_root/plain-client-paths.txt"
+  local addon_paths="$temporary_root/server-client-paths.txt"
+  (
+    cd "$plain"
+    find . -type f -print | LC_ALL=C sort
+  ) >"$plain_paths"
+  (
+    cd "$with_server"
+    find . -type f ! -path './server/*' -print | LC_ALL=C sort
+  ) >"$addon_paths"
+  compare_file "candidate client artifact paths with and without server" "$plain_paths" "$addon_paths"
+  while IFS= read -r path; do
+    compare_file "candidate client artifact ${path#./}" "$plain/$path" "$with_server/$path"
+  done <"$plain_paths"
+}
+
+mkdir -p "$temporary_root/bin" "$temporary_root/output"
+agent_run "attach baseline worktree" git -C "$ROOT" worktree add --detach "$baseline_root" "$baseline_commit"
+baseline_attached=1
+
+# Reuse the pinned TypeScript dependency installation without changing either revision.
+if [[ -d "$TYPESCRIPT_ROOT/node_modules" ]]; then
+  ln -s "$TYPESCRIPT_ROOT/node_modules" "$baseline_root/test/typescript/node_modules"
+fi
+
+agent_run "build baseline CLI" env \
+  GOCACHE="$ROOT/.tmp/go-build" \
+  GOMODCACHE="$ROOT/.tmp/go-mod" \
+  go -C "$baseline_root" build -o "$baseline_cli" ./cmd/openapi-sdkgen
+agent_run "build candidate CLI" env \
+  GOCACHE="$ROOT/.tmp/go-build" \
+  GOMODCACHE="$ROOT/.tmp/go-mod" \
+  go -C "$ROOT" build -o "$candidate_cli" ./cmd/openapi-sdkgen
+
+advanced_input="$ROOT/examples/typescript-advanced-app/openapi.json"
+capabilities_input="$ROOT/examples/typescript-openapi-capabilities-app/openapi.json"
+
+generate "generate baseline advanced SDK" "$baseline_cli" "$advanced_input" "$baseline_output/advanced"
+generate "generate candidate advanced SDK" "$candidate_cli" "$advanced_input" "$candidate_output/advanced"
+generate "generate baseline capabilities SDK" "$baseline_cli" "$capabilities_input" "$baseline_output/capabilities" --with server
+generate "generate candidate capabilities SDK" "$candidate_cli" "$capabilities_input" "$candidate_output/capabilities" --with server
+generate "generate candidate advanced SDK with server" "$candidate_cli" "$advanced_input" "$candidate_output/advanced-server" --with server
+
+compare_public_roots "advanced" "$baseline_output/advanced" "$candidate_output/advanced"
+compare_public_roots "capabilities" "$baseline_output/capabilities" "$candidate_output/capabilities"
+compare_client_map_with_server "$candidate_output/advanced" "$candidate_output/advanced-server"
+compare_tree \
+  "candidate runtime path and content invariance" \
+  "$candidate_output/advanced/internal/runtime" \
+  "$candidate_output/capabilities/internal/runtime"
+
+# These revision-local suites are the shared public export, type, QuickInfo,
+# diagnostic, runtime, callable-identity, accepted/rejected-input, and bundle probes.
+agent_run "baseline TypeScript compatibility probes" just -d "$baseline_root" agent ts-test
+agent_run "candidate TypeScript compatibility probes" just -d "$ROOT" agent ts-test
+
+# Candidate Go tests own the new semantic import-direction, runtime DAG, artifact
+# ordering, duplicate rejection, and client-map structural assertions.
+agent_run "candidate semantic module probes" just -d "$ROOT" agent test
+
+agent_note "ok TypeScript split differential against $baseline_commit"

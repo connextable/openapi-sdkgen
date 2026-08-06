@@ -2,8 +2,9 @@
 import { computed, ref } from "vue";
 import { useData } from "vitepress";
 import CodeViewer from "./CodeViewer.vue";
-import FileTree, { type TreeNode } from "./FileTree.vue";
+import FileTree from "./FileTree.vue";
 import { codeThemes, type CodeTheme } from "../playground/highlight";
+import { buildArtifactTree, findArtifact } from "../playground/tree";
 import { generate, type GeneratedArtifact } from "../playground/wasm";
 
 const maximumInputBytes = 64 * 1024 * 1024;
@@ -87,11 +88,11 @@ const loading = ref(false);
 const dragging = ref(false);
 const fileInput = ref<HTMLInputElement>();
 
-const selectedArtifact = computed(() => artifacts.value.find((item) => item.path === selectedPath.value));
+const selectedArtifact = computed(() => findArtifact(artifacts.value, selectedPath.value));
 const selectedLineCount = computed(() => selectedArtifact.value?.content.split("\n").length ?? 0);
 const lineCountLabel = computed(() => lang.value === "ko-KR" ? `${selectedLineCount.value}줄` : `${selectedLineCount.value} lines`);
 const loaded = computed(() => artifacts.value.length > 0);
-const tree = computed(() => buildTree(artifacts.value));
+const tree = computed(() => buildArtifactTree(artifacts.value));
 
 type TargetAddressSpace = "local" | "loopback";
 type LocalNetworkRequestInit = RequestInit & { targetAddressSpace?: TargetAddressSpace };
@@ -107,33 +108,6 @@ function targetAddressSpace(url: URL): TargetAddressSpace {
     return "loopback";
   }
   return "local";
-}
-
-function buildTree(files: GeneratedArtifact[]): TreeNode[] {
-  const root: TreeNode[] = [];
-  for (const file of files) {
-    let level = root;
-    const segments = file.path.split("/");
-    segments.forEach((name, index) => {
-      const path = segments.slice(0, index + 1).join("/");
-      const type = index === segments.length - 1 ? "file" : "directory";
-      let node = level.find((item) => item.name === name && item.type === type);
-      if (!node) {
-        node = { name, path, type, children: type === "directory" ? [] : undefined };
-        level.push(node);
-      }
-      if (node.children) level = node.children;
-    });
-  }
-  const sort = (nodes: TreeNode[]) => {
-    nodes.sort((left, right) => {
-      if (left.type !== right.type) return left.type === "directory" ? -1 : 1;
-      return left.name.localeCompare(right.name);
-    });
-    nodes.forEach((node) => node.children && sort(node.children));
-  };
-  sort(root);
-  return root;
 }
 
 function resetMessages() {

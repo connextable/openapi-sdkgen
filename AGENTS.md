@@ -33,6 +33,7 @@ just agent ts-fmt-check
 just agent ts-lint
 just agent ts-typecheck
 just agent ts-test
+just agent typescript-split-diff BASELINE
 just agent example-todo
 just agent example-advanced
 just agent example-capabilities

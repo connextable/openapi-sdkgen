@@ -195,9 +195,7 @@ describe("generated public entry bundle isolation", () => {
     const result = results.metadata;
     expect(result).toBeDefined();
     expect(internalModules(result!)).toEqual([]);
-    expect(result!.modules.filter((id) => id.startsWith(fixtureRoot))).toEqual([
-      metadataEntry,
-    ]);
+    expect(result!.modules.filter((id) => id.startsWith(fixtureRoot))).toEqual([metadataEntry]);
     expect(result!.code).toContain("Bundle Isolation API");
   });
 });

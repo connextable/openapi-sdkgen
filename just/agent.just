@@ -69,6 +69,9 @@ ts-typecheck:
 ts-test:
     ./scripts/agent/ts-test
 
+typescript-split-diff baseline:
+    ./scripts/agent/typescript-split-diff {{quote(baseline)}}
+
 example-todo:
     ./scripts/agent/example-todo
 

@@ -1,6 +1,7 @@
 {
   "name": "openapi-sdkgen-docs",
   "private": true,
+  "type": "module",
   "version": "0.0.0",
   "packageManager": "pnpm@11.11.0",
   "engines": {

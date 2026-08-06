@@ -1,10 +1,5 @@
 <script setup lang="ts">
-export interface TreeNode {
-  name: string;
-  path: string;
-  type: "directory" | "file";
-  children?: TreeNode[];
-}
+import type { TreeNode } from "../playground/tree";
 
 defineProps<{
   nodes: TreeNode[];
