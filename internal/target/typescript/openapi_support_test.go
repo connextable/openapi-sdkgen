@@ -141,7 +141,7 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 			if err != nil {
 				t.Fatal(err)
 			}
-			client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+			client := clientSemanticSource(artifacts)
 			for _, expected := range []string{
 				`readonly "Origin"?: string | undefined`,
 				`readonly "X-Trace": string`,
@@ -277,7 +277,7 @@ func TestSourceArtifactsSupportsMultipleScopedServers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, "https://one.example.test") || !strings.Contains(source, "https://two.example.test") {
+		if source := clientSemanticSource(artifacts); !strings.Contains(source, "https://one.example.test") || !strings.Contains(source, "https://two.example.test") {
 			t.Fatalf("scoped server choices were not emitted:\n%s", source)
 		}
 	}
@@ -495,7 +495,7 @@ func TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := artifactByPath(t, artifacts, "internal/client.ts")
+	client := []byte(clientSemanticSource(artifacts))
 	for _, expected := range []string{
 		`route: "QUERY /records", method: "QUERY"`,
 		`route: "PURGE /records", method: "PURGE"`,
@@ -525,7 +525,7 @@ func TestSourceArtifactsGenerateEveryStandardHTTPMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, method := range methods {
 		expected := fmt.Sprintf(`route: %q, method: %q`, strings.ToUpper(method)+" /"+method, strings.ToUpper(method))
 		if !strings.Contains(client, expected) {
@@ -623,6 +623,17 @@ func schemaWireSource(artifacts []Artifact) string {
 	var output strings.Builder
 	for _, artifact := range artifacts {
 		if strings.HasPrefix(artifact.Path, "internal/schemas/") && artifact.Path != "internal/schemas/index.ts" {
+			output.Write(artifact.Data)
+			output.WriteByte('\n')
+		}
+	}
+	return output.String()
+}
+
+func clientSemanticSource(artifacts []Artifact) string {
+	var output strings.Builder
+	for _, artifact := range artifacts {
+		if artifact.Path == "internal/client.ts" || artifact.Path == "internal/client/registry.ts" || strings.HasPrefix(artifact.Path, "internal/operations/") {
 			output.Write(artifact.Data)
 			output.WriteByte('\n')
 		}

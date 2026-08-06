@@ -38,7 +38,7 @@ func TestVersionFeatureFixturesGenerateForTypeScript(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if source := schemaProjectionSource(typescriptArtifacts) + string(artifactByPath(t, typescriptArtifacts, "internal/client.ts")); !strings.Contains(source, test.want) {
+			if source := schemaProjectionSource(typescriptArtifacts) + clientSemanticSource(typescriptArtifacts); !strings.Contains(source, test.want) {
 				t.Fatalf("TypeScript source missing %q:\n%s", test.want, source)
 			}
 			probe := fmt.Sprintf(`

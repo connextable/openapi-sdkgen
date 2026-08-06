@@ -142,6 +142,8 @@ describe("generated public entry bundle isolation", () => {
     expect(result).toBeDefined();
     expect(internalModules(result!), bundleEvidence(result!)).toEqual([
       "internal/client.ts",
+      "internal/client/registry.ts",
+      "internal/operations/bundle-isolation-sentinel/get.ts",
       "internal/runtime/callables.ts",
       "internal/runtime/codecs.ts",
       "internal/runtime/errors.ts",

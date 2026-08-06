@@ -289,6 +289,10 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	registrySource, err := emitClientRegistry(document, manifest, plan.modules, plan.links, plan.streams)
+	if err != nil {
+		return nil, err
+	}
 	constantsSource, err := readRuntimeTemplate("constants.ts")
 	if err != nil {
 		return nil, err
@@ -338,6 +342,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	artifacts = append(artifacts, schemaArtifacts...)
 	artifacts = append(artifacts, operationArtifacts...)
 	artifacts = append(artifacts, routeArtifacts...)
+	artifacts = append(artifacts, Artifact{Path: plan.modules.fixed["client-registry"], Data: generatedSource(registrySource)})
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {

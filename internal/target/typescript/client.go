@@ -46,22 +46,18 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	hasPathOperations := resourceTreeHasPathOperations(tree)
 	hasPagination := manifestHasPagination(manifest)
 	var output bytes.Buffer
-	output.WriteString("import {\n")
-	output.WriteString("  assignCallableProperties,\n")
-	output.WriteString("  bindOperation,\n")
-	if len(streams) > 0 {
-		output.WriteString("  bindStreamOperation,\n")
-	}
+	output.WriteString("import { assignCallableProperties")
 	if hasPathOperations {
-		output.WriteString("  bindPathOperation,\n")
+		output.WriteString(", bindPathOperation")
 	}
-	output.WriteString("} from \"./runtime/callables.js\"\n")
+	output.WriteString(" } from \"./runtime/callables.js\"\n")
 	if hasPagination {
-		output.WriteString("import { createPaginator, type PaginateInput } from \"./runtime/pagination.js\"\n")
+		output.WriteString("import type { PaginateInput } from \"./runtime/pagination.js\"\n")
 	}
+	output.WriteString("import { createCallableRegistry } from \"./client/registry.js\"\n")
 	output.WriteString("import { createRequest } from \"./runtime/http.js\"\n")
 	if len(links) > 0 {
-		output.WriteString("import { mergeLinkInput, resolveLinkInput, type LinkInvocation, type RequiredLinkInvocation } from \"./runtime/links.js\"\n")
+		output.WriteString("import type { LinkInvocation, RequiredLinkInvocation } from \"./runtime/links.js\"\n")
 		output.WriteString("import type { APIError } from \"./runtime/errors.js\"\n")
 	}
 	output.WriteString("import type { ClientOptions } from \"./runtime/configuration.js\"\n")
@@ -350,80 +346,24 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	output.WriteString(" */\n")
 	output.WriteString("export function createClient(options: ClientOptions): Client {\n")
 	output.WriteString("  const request = createRequest(options)\n")
+	registryArguments := []string{"request"}
+	if hasVisibleInputSchemas(document) {
+		registryArguments = append(registryArguments, "inputSchemas")
+	} else if hasVisibleResponseBodies(document) {
+		registryArguments = append(registryArguments, "undefined")
+	}
+	if hasVisibleResponseBodies(document) {
+		registryArguments = append(registryArguments, "outputSchemas")
+	}
+	fmt.Fprintf(&output, "  const registry = createCallableRegistry(%s)\n", strings.Join(registryArguments, ", "))
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
 			continue
 		}
 		routeKey := manifestRouteKey(operation)
-		binding := operationValueName(routeKey)
-		baseBinding := binding
-		linkValue, err := routeLinksValue(links, routeKey)
-		if err != nil {
-			return nil, err
-		}
-		_, hasStream := streamForRoute(streams, routeKey)
-		if operationsByRoute[routeKey].PaginationPlan != nil || linkValue != "" || hasStream {
-			baseBinding = operationBaseValueName(routeKey)
-		}
-		outputType := operation.renderOutput(typeRenderContract)
-		definition, err := operationDefinition(document, operationsByRoute[routeKey], operation)
-		if err != nil {
-			return nil, err
-		}
-		inputType := "never"
-		hasInput := false
-		inputOptional := false
-		if len(operation.InputTypes) > 0 {
-			inputType = operationTypeName(routeKey) + "Input"
-			hasInput = true
-			inputRequired, err := operationInputRequired(document, operationsByRoute[routeKey], operation.InputTypes, false)
-			if err != nil {
-				return nil, err
-			}
-			inputOptional = !inputRequired
-		}
-		fmt.Fprintf(&output, "  const %s = bindOperation<%s, %s, %sOptions, %sRawResponse>(request, %s, %t, %t) as %sCall\n", baseBinding, inputType, outputType, operationTypeName(routeKey), operationTypeName(routeKey), definition, hasInput, inputOptional, operationTypeName(routeKey))
-		paginationPlan := operationsByRoute[routeKey].PaginationPlan
-		if paginationPlan != nil {
-			itemType, err := operationItemTypeForScope(document, operationsByRoute[routeKey], typeRenderContract)
-			if err != nil {
-				return nil, err
-			}
-			paginationBinding := operationPaginationValueName(routeKey)
-			plan, err := paginationRuntimePlanExpression(*paginationPlan)
-			if err != nil {
-				return nil, err
-			}
-			fmt.Fprintf(&output, "  const %s = createPaginator<%s, %sInput, unknown, %s, %s, %s, %sOptions>((input, requestOptions) => %s.raw(input, requestOptions).then((response) => response.data), %s)\n", paginationBinding, itemType, operationTypeName(routeKey), quoteTS(paginationPlan.Mode), quoteTS(paginationPlan.Request.Cursor), quoteTS(paginationPlan.Request.Offset), operationTypeName(routeKey), baseBinding, plan)
-		}
-	}
-	if err := emitLinkValues(&output, document, links); err != nil {
-		return nil, err
-	}
-	if err := emitStreamValues(&output, document, streams); err != nil {
-		return nil, err
-	}
-	for _, operation := range manifest.Operations {
-		if operation.Visibility == "hidden" {
-			continue
-		}
-		routeKey := manifestRouteKey(operation)
-		properties := make([]runtimeProperty, 0, 3)
+		fmt.Fprintf(&output, "  const %s = registry.routes[%s]\n", operationValueName(routeKey), quoteTS(routeKey))
 		if operationsByRoute[routeKey].PaginationPlan != nil {
-			properties = append(properties, runtimeProperty{key: "paginate", value: operationPaginationValueName(routeKey)})
-		}
-		linkValue, err := routeLinksValue(links, routeKey)
-		if err != nil {
-			return nil, err
-		}
-		if linkValue != "" {
-			properties = append(properties, runtimeProperty{key: "links", value: linkValue})
-		}
-		if stream, exists := streamForRoute(streams, routeKey); exists {
-			properties = append(properties, runtimeProperty{key: "stream", value: stablePrivateIdentifier("stream-value", operationRouteKey(stream.Operation))})
-		}
-		if len(properties) != 0 {
-			fmt.Fprintf(&output, "  const %s = assignCallableProperties(%s, %s) as unknown as Routes[%s][\"call\"]\n", operationValueName(routeKey), operationBaseValueName(routeKey), runtimeObjectExpression(properties), quoteTS(routeKey))
+			fmt.Fprintf(&output, "  const %s = %s.paginate\n", operationPaginationValueName(routeKey), operationValueName(routeKey))
 		}
 	}
 	output.WriteString("\n")
@@ -431,25 +371,13 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		return nil, err
 	}
 	output.WriteString("\n  return {\n")
-	routeValues := make([]runtimeProperty, 0)
-	operationValues := make([]runtimeProperty, 0)
-	for _, operation := range manifest.Operations {
-		if operation.Visibility == "hidden" {
-			continue
-		}
-		routeKey := manifestRouteKey(operation)
-		routeValues = append(routeValues, runtimeProperty{key: routeKey, value: operationValueName(routeKey)})
-		if operation.OperationID != "" {
-			operationValues = append(operationValues, runtimeProperty{key: operation.OperationID, value: operationValueName(routeKey)})
-		}
+	output.WriteString("    $routes: registry.routes,\n")
+	output.WriteString("    $operations: registry.operations,\n")
+	if len(links) > 0 {
+		output.WriteString("    $links: registry.links,\n")
 	}
-	fmt.Fprintf(&output, "    $routes: %s as unknown as Client[\"$routes\"],\n", runtimeObjectExpression(routeValues))
-	fmt.Fprintf(&output, "    $operations: %s as unknown as Client[\"$operations\"],\n", runtimeObjectExpression(operationValues))
-	if err := emitLinkReturnValue(&output, links); err != nil {
-		return nil, err
-	}
-	if err := emitStreamReturnValue(&output, streams); err != nil {
-		return nil, err
+	if len(streams) > 0 {
+		output.WriteString("    $streams: registry.streams,\n")
 	}
 	for _, name := range sortedResourceMemberNames(tree) {
 		if tree.children[name] != nil {

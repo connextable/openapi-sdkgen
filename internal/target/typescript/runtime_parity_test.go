@@ -391,7 +391,7 @@ func TestGeneratedLinksAndStreamsUseStandardHeaderParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`invocation?: LinkInvocation<Routes["POST /target"]["input"], Routes["POST /target"]["options"]`,
 		`readonly "Idempotency-Key": string`,
@@ -787,7 +787,7 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	routesByID := make(map[string]string, len(document.Operations))
 	for _, operation := range document.Operations {
 		routesByID[operation.OperationID] = operation.Method + " " + operation.Path
@@ -1982,7 +1982,7 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientSource := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	clientSource := clientSemanticSource(artifacts)
 	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept">`) || strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "securityRequirement">`) {
 		t.Fatal("generated operation options retain the removed RequestOptions security selector")
 	}
@@ -2855,7 +2855,7 @@ func TestVisibleRecursiveComponentCanServeRequestSuccessAndErrorRoles(t *testing
 	}
 	types := schemaProjectionSource(artifacts)
 	errorsSource := string(artifactByPath(t, artifacts, "internal/errors.ts"))
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`readonly "NodeError": {`,
 		`readonly "child"?: Input`,

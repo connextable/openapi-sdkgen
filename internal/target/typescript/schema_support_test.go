@@ -60,11 +60,11 @@ func TestSourceArtifactsEmitsBooleanSchemaFromAnOpenAPI31Document(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+		source := clientSemanticSource(artifacts)
 		if !strings.Contains(source, "boolean: false") {
 			t.Fatalf("boolean schema descriptor missing:\n%s", source)
 		}
-		for _, expected := range []string{"bindOperation<never, never", "BodyInput = unknown"} {
+		for _, expected := range []string{"export type Input = never", "Output = never", "BodyInput = unknown"} {
 			if !strings.Contains(source, expected) {
 				t.Fatalf("boolean schema type missing %q:\n%s", expected, source)
 			}
@@ -98,7 +98,7 @@ func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 			t.Fatalf("named boolean component type missing %q:\n%s", expected, source)
 		}
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{`Contract.ComponentInput<"Always">`, `Contract.ComponentOutput<"Never">`} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("named boolean operation bypassed component projection %q:\n%s", expected, client)
@@ -224,7 +224,7 @@ func TestSourceArtifactsEmitsSchemaReferenceSiblingsWithWireSemantics(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `reference: "Widget", minLength: 3`) {
+		if source := clientSemanticSource(artifacts); !strings.Contains(source, `reference: "Widget", minLength: 3`) {
 			t.Fatalf("reference sibling descriptor missing:\n%s", source)
 		}
 	}
@@ -243,7 +243,7 @@ func TestSourceArtifactsAllowsSchemaReferenceVendorExtensions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+		source := clientSemanticSource(artifacts)
 		if !strings.Contains(source, `reference: "Widget"`) || strings.Contains(source, `reference: "Widget", {}`) {
 			t.Fatalf("annotation-only reference sibling produced an invalid descriptor:\n%s", source)
 		}

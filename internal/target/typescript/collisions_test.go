@@ -17,7 +17,7 @@ func TestSourceArtifactsPreservesNormalizationEquivalentOperationIDs(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	for operationID, routeKey := range map[string]string{"get-pet": "GET /pets/modern", "get_pet": "GET /pets/legacy"} {
 		if !strings.Contains(source, "readonly "+quoteTS(operationID)+": Routes["+quoteTS(routeKey)+"]") ||
 			!strings.Contains(source, `["`+operationID+`", __sdkgen_`) {
@@ -31,7 +31,7 @@ func TestSourceArtifactsAllowsMissingOperationIDAndRejectsDuplicateExactIDs(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	if !strings.Contains(source, `readonly "GET /missing": Routes["GET /missing"]["call"]`) || strings.Contains(source, `readonly "":`) {
 		t.Fatalf("route-only operation surface missing:\n%s", source)
 	}
@@ -228,7 +228,7 @@ func TestResourceSelectorsUseReadableLocallyUniquePathBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		"(fooBar: string):", "(fooBar2: string):", "(defaultValue: string):",
 		"(value123ID: string):", "(한글: string):", "(pathParameter: string):",
@@ -386,7 +386,7 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	if !strings.Contains(source, `readonly list: ResourceCall<"GET /users"> & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
 		t.Fatalf("callable namespace was not emitted:\n%s", source)
 	}
@@ -478,7 +478,7 @@ func TestRepeatedPathParameterFallsBackToExactRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	start := strings.Index(client, `readonly "GET /users/{id}/aliases/{id}": {`)
 	if start < 0 || !strings.Contains(client[start:], "readonly resourceCall: never") {
 		t.Fatalf("repeated path parameter retained a resource call:\n%s", client)
@@ -509,7 +509,7 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	start := strings.Index(source, `readonly "GET /users": {`)
 	if start < 0 {
 		t.Fatalf("listUsers operation entry missing:\n%s", source)
@@ -659,7 +659,7 @@ func TestBuildResourceTreeSharesCompatibleParameterPositionAndRemapsNames(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := clientSemanticSource(artifacts)
 	if !strings.Contains(source, `{ "id": id`) || !strings.Contains(source, `{ "userID": id`) {
 		t.Fatalf("terminal parameter remapping missing:\n%s", source)
 	}
@@ -817,7 +817,7 @@ func TestSourceArtifactsSeparatesComponentAndOperationNamespaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	types := schemaProjectionSource(artifacts)
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	if !strings.Contains(types, `readonly "APIError": {`) || !strings.Contains(client, `Contract.ComponentOutput<"APIError">`) {
 		t.Fatalf("component namespace was not preserved:\n%s\n%s", types, client)
 	}
@@ -828,7 +828,7 @@ func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artifacts) != 26 {
-		t.Fatalf("source artifact count = %d, want 26 including route registries", len(artifacts))
+	if len(artifacts) != 27 {
+		t.Fatalf("source artifact count = %d, want 27 including semantic registries", len(artifacts))
 	}
 }

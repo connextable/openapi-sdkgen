@@ -58,8 +58,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			visibleOperations++
 		}
 	}
-	if len(artifacts) != 34+visibleOperations {
-		t.Fatalf("source artifact count = %d, want 34 base files plus %d operation leaves", len(artifacts), visibleOperations)
+	if len(artifacts) != 35+visibleOperations {
+		t.Fatalf("source artifact count = %d, want 35 base files plus %d operation leaves", len(artifacts), visibleOperations)
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -121,7 +121,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		t.Fatalf("annotation-only $ref siblings changed the generated type:\n%s", typesSource)
 	}
 
-	clientSource := string(artifacts["internal/client.ts"])
+	clientSource := clientSemanticSource(first)
+	clientPublicSource := string(artifacts["internal/client.ts"])
 	errorsSource := string(artifacts["internal/errors.ts"])
 	var runtimeSource strings.Builder
 	for artifactPath, source := range artifacts {
@@ -180,7 +181,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("runtime JSDoc missing %q:\n%s", expected, runtimeModules)
 		}
 	}
-	if strings.Contains(clientSource, "../../runtime") || !strings.Contains(clientSource, `from "./runtime/http.js"`) {
+	if !strings.Contains(clientSource, `from "./runtime/http.js"`) || !strings.Contains(clientSource, `from "../runtime/callables.js"`) {
 		t.Fatalf("client does not use its generated source runtime:\n%s", clientSource)
 	}
 	if strings.Contains(errorsSource, "../../runtime") || !strings.Contains(errorsSource, `from "./runtime/errors.js"`) {
@@ -234,7 +235,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "type "+sortOnlyName+"QueryInput =") {
 		t.Fatalf("sort-only operation query input is missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<Contract.ComponentOutput<"Product">`) {
+	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
 	if !strings.Contains(clientSource, `readonly "Idempotency-Key": string`) || strings.Contains(clientSource, "readonly idempotencyKey") || strings.Contains(clientSource, "readonly ifMatch") {
@@ -279,7 +280,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		t.Fatalf("deprecated operation metadata missing: %#v", manifest.Operations[3])
 	}
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "types", source: typesSource, nestedReadonly: true})
-	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "client", source: clientSource, nestedReadonly: true})
+	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "client", source: clientPublicSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "errors", source: errorsSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeModules})
 }
@@ -354,11 +355,12 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
-		"import { createPaginator, type PaginateInput } from \"./runtime/pagination.js\"",
+		"import type { PaginateInput } from \"./runtime/pagination.js\"",
 		`readonly "GET /orders/{orderID}/items": {`,
-		" = createPaginator<",
+		"export function bindPagination",
+		"createPaginator<",
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("path-bound pagination client missing %q:\n%s", expected, client)
@@ -493,7 +495,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	for _, artifact := range artifacts {
 		byPath[artifact.Path] = artifact.Data
 	}
-	client := string(byPath["internal/client.ts"])
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`export interface RouteContract<Route extends keyof Routes> {`,
 		`readonly input: RouteInput<Route>`,
@@ -581,7 +583,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`readonly get: ResourceCall<"GET /">`,
 		"get: __sdkgen_",
@@ -629,14 +631,14 @@ func TestSourceArtifactsGenerateExactRouteWithoutOperationID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`readonly "GET /": {`,
 		`readonly "GET /health": {`,
 		`readonly "GET /": Routes["GET /"]["call"]`,
 		`readonly "getHealth": Routes["GET /health"]`,
-		`$routes: /* @__PURE__ */ Object.fromEntries([["GET /",`,
-		`$operations: /* @__PURE__ */ Object.fromEntries([["getHealth",`,
+		`$routes: registry.routes`,
+		`$operations: registry.operations`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("route contract missing %q:\n%s", expected, client)
@@ -675,7 +677,7 @@ func TestExactRouteCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`readonly "GET /events": {`,
 		`readonly stream: (options?: Routes["GET /events"]["options"]) => AsyncIterable<string>`,
@@ -683,7 +685,8 @@ func TestExactRouteCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 		`readonly links: { readonly "follow":`,
 		`readonly "GET /source": Routes["GET /source"]["call"]`,
 		`["stream", __sdkgen_`,
-		`["links", /* @__PURE__ */ Object.fromEntries`,
+		`["links", __sdkgen_`,
+		`export function bindLinks`,
 		`as unknown as Routes["GET /source"]["call"]`,
 	} {
 		if !strings.Contains(client, expected) {
