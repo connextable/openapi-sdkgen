@@ -265,6 +265,35 @@ func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 	}
 }
 
+func TestEmitEnumsUsesConstInferenceForLiteralValues(t *testing.T) {
+	source, err := emitEnums(&ir.Document{
+		ComponentSchemas: map[string]map[string]any{
+			"RequestState": {"enum": []any{"REQUESTED", "APPROVED", "REJECTED"}},
+		},
+		Operations: []ir.Operation{{Raw: map[string]any{
+			"responses": map[string]any{
+				"200": map[string]any{
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": map[string]any{"$ref": "#/components/schemas/RequestState"},
+						},
+					},
+				},
+			},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := string(source)
+	if !strings.Contains(generated, ` = ["REQUESTED", "APPROVED", "REJECTED"] as const`) {
+		t.Fatalf("literal enum values do not use const inference:\n%s", source)
+	}
+	if strings.Contains(generated, "__sdkgen_createJSONRecord") || strings.Contains(generated, "as unknown as readonly") {
+		t.Fatalf("literal enum values contain unnecessary type machinery:\n%s", source)
+	}
+}
+
 func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 	source, err := emitEnums(&ir.Document{
 		ComponentSchemas: map[string]map[string]any{
@@ -293,6 +322,9 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 		t.Fatalf("enum values missing:\n%s", source)
 	}
 	for _, expected := range []string{
+		`function __sdkgen_createJSONRecord<Value extends object>`,
+		`return Object.fromEntries(entries) as Value`,
+		`/* @__PURE__ */ __sdkgen_createJSONRecord<{ readonly "__proto__": true }>([["__proto__", true]])`,
 		`function __sdkgen_createEnumCatalog(values: readonly unknown[]): object`,
 		`const catalog = Object.create(null)`,
 		`Object.defineProperty(catalog, Symbol.iterator`,
@@ -308,6 +340,12 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 		if !strings.Contains(generated, expected) {
 			t.Fatalf("enum catalog missing %q:\n%s", expected, source)
 		}
+	}
+	if !strings.Contains(generated, `, ["x", "y"], "foo-bar"] as const`) {
+		t.Fatalf("enum values do not use const inference:\n%s", source)
+	}
+	if strings.Contains(generated, `as unknown as readonly`) {
+		t.Fatalf("enum values retain a double tuple assertion:\n%s", source)
 	}
 	if strings.Contains(generated, `readonly "Status": typeof __sdkgen_`) {
 		t.Fatalf("exact enum catalog entry missing:\n%s", source)

@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,9 +15,9 @@ type enumCatalogPlan struct {
 	valuesBinding  string
 	catalogBinding string
 	renderedValues string
-	tupleType      string
 	valueType      string
 	members        []string
+	hasJSONRecord  bool
 }
 
 func emitEnums(document *ir.Document) ([]byte, error) {
@@ -25,6 +26,18 @@ func emitEnums(document *ir.Document) ([]byte, error) {
 		return nil, err
 	}
 	var output bytes.Buffer
+	for _, catalog := range catalogs {
+		if catalog.hasJSONRecord {
+			output.WriteString(`function __sdkgen_createJSONRecord<Value extends object>(
+  entries: readonly (readonly [PropertyKey, unknown])[],
+): Value {
+  return Object.fromEntries(entries) as Value
+}
+
+`)
+			break
+		}
+	}
 	if len(catalogs) > 0 {
 		output.WriteString(`function __sdkgen_createEnumCatalog(values: readonly unknown[]): object {
   const catalog = Object.create(null) as Record<PropertyKey, unknown>
@@ -80,7 +93,7 @@ function __sdkgen_enumValueEquals(left: unknown, right: unknown, seen = new Weak
 	}
 	bindings := make([]runtimeProperty, 0, len(catalogs))
 	for _, catalog := range catalogs {
-		fmt.Fprintf(&output, "const %s = %s as unknown as %s\n", catalog.valuesBinding, catalog.renderedValues, catalog.tupleType)
+		fmt.Fprintf(&output, "const %s = %s as const\n", catalog.valuesBinding, catalog.renderedValues)
 		fmt.Fprintf(&output, "const %s = /* @__PURE__ */ __sdkgen_createEnumCatalog(%s)\n", catalog.catalogBinding, catalog.valuesBinding)
 		bindings = append(bindings, runtimeProperty{key: catalog.name, value: catalog.catalogBinding})
 	}
@@ -135,13 +148,9 @@ func enumCatalogPlans(document *ir.Document) ([]enumCatalogPlan, error) {
 		if !exists {
 			continue
 		}
-		rendered, err := runtimeJSONExpression(values)
+		rendered, hasJSONRecord, err := enumRuntimeJSONExpression(values)
 		if err != nil {
 			return nil, fmt.Errorf("component %s enum: %w", schemaName, err)
-		}
-		tupleType, err := readonlyJSONType(values)
-		if err != nil {
-			return nil, fmt.Errorf("component %s enum type: %w", schemaName, err)
 		}
 		valueType, err := enumValueType(values)
 		if err != nil {
@@ -152,12 +161,64 @@ func enumCatalogPlans(document *ir.Document) ([]enumCatalogPlan, error) {
 			valuesBinding:  stablePrivateIdentifier("component-enum-values", schemaName),
 			catalogBinding: stablePrivateIdentifier("component-enum-catalog", schemaName),
 			renderedValues: rendered,
-			tupleType:      tupleType,
 			valueType:      valueType,
 			members:        enumStringMembers(values),
+			hasJSONRecord:  hasJSONRecord,
 		})
 	}
 	return catalogs, nil
+}
+
+// enumRuntimeJSONExpression keeps enum literals inferable under an outer
+// `as const`. Records still use a typed Object.fromEntries helper so exact
+// keys, including "__proto__", remain own data properties without widening
+// their generated readonly JSON types.
+func enumRuntimeJSONExpression(value any) (string, bool, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		names := make([]string, 0, len(typed))
+		for name := range typed {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		entries := make([]string, 0, len(names))
+		for _, name := range names {
+			rendered, _, err := enumRuntimeJSONExpression(typed[name])
+			if err != nil {
+				return "", false, fmt.Errorf("JSON property %q: %w", name, err)
+			}
+			entries = append(entries, "["+quoteTS(name)+", "+rendered+"]")
+		}
+		valueType, err := readonlyJSONType(typed)
+		if err != nil {
+			return "", false, err
+		}
+		return "/* @__PURE__ */ __sdkgen_createJSONRecord<" + valueType + ">([" + strings.Join(entries, ", ") + "])", true, nil
+	case map[string]map[string]any:
+		values := make(map[string]any, len(typed))
+		for key, item := range typed {
+			values[key] = item
+		}
+		return enumRuntimeJSONExpression(values)
+	case []any:
+		items := make([]string, 0, len(typed))
+		hasJSONRecord := false
+		for index, item := range typed {
+			rendered, itemHasJSONRecord, err := enumRuntimeJSONExpression(item)
+			if err != nil {
+				return "", false, fmt.Errorf("JSON item %d: %w", index, err)
+			}
+			items = append(items, rendered)
+			hasJSONRecord = hasJSONRecord || itemHasJSONRecord
+		}
+		return "[" + strings.Join(items, ", ") + "]", hasJSONRecord, nil
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return "", false, fmt.Errorf("marshal JSON literal: %w", err)
+		}
+		return string(data), false, nil
+	}
 }
 
 func enumValueType(values []any) (string, error) {
