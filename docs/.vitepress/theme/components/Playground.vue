@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useData } from "vitepress";
 import CodeViewer from "./CodeViewer.vue";
 import FileTree from "./FileTree.vue";
 import { codeThemes, type CodeTheme } from "../playground/highlight";
+import { readPlaygroundPreferences, writePlaygroundPreferences } from "../playground/preferences";
 import { buildArtifactTree, findArtifact } from "../playground/tree";
 import { generate, type GeneratedArtifact } from "../playground/wasm";
 
 const maximumInputBytes = 64 * 1024 * 1024;
+const codeThemeValues = codeThemes.map((theme) => theme.value);
 const translations = {
   en: {
     heading: "SDK Playground",
@@ -77,6 +79,7 @@ const { lang } = useData();
 const copy = computed(() => lang.value === "ko-KR" ? translations.ko : translations.en);
 const target = ref("typescript");
 const colorTheme = ref<CodeTheme>("github-dark");
+const expandedPaths = ref<ReadonlySet<string>>(new Set());
 const url = ref("");
 const localNetworkAccess = ref(false);
 const sourceLabel = ref("");
@@ -93,6 +96,30 @@ const selectedLineCount = computed(() => selectedArtifact.value?.content.split("
 const lineCountLabel = computed(() => lang.value === "ko-KR" ? `${selectedLineCount.value}줄` : `${selectedLineCount.value} lines`);
 const loaded = computed(() => artifacts.value.length > 0);
 const tree = computed(() => buildArtifactTree(artifacts.value));
+let preferencesReady = false;
+
+onMounted(() => {
+  const preferences = readPlaygroundPreferences(preferenceStorage(), codeThemeValues);
+  if (preferences.codeTheme) colorTheme.value = preferences.codeTheme;
+  expandedPaths.value = new Set(preferences.expandedPaths);
+  preferencesReady = true;
+});
+
+watch([colorTheme, expandedPaths], () => {
+  if (!preferencesReady) return;
+  writePlaygroundPreferences(preferenceStorage(), {
+    codeTheme: colorTheme.value,
+    expandedPaths: expandedPaths.value,
+  });
+});
+
+function preferenceStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 type TargetAddressSpace = "local" | "loopback";
 type LocalNetworkRequestInit = RequestInit & { targetAddressSpace?: TargetAddressSpace };
@@ -206,6 +233,13 @@ function startOver() {
   url.value = "";
   if (fileInput.value) fileInput.value.value = "";
 }
+
+function toggleDirectory(path: string) {
+  const next = new Set(expandedPaths.value);
+  if (next.has(path)) next.delete(path);
+  else next.add(path);
+  expandedPaths.value = next;
+}
 </script>
 
 <template>
@@ -274,7 +308,13 @@ function startOver() {
           </div>
           <div class="target-summary"><span>{{ copy.target }}</span><strong>TypeScript</strong></div>
           <nav class="tree-scroll" :aria-label="copy.generatedFiles">
-            <FileTree :nodes="tree" :selected-path="selectedPath" @select="selectedPath = $event" />
+            <FileTree
+              :expanded-paths="expandedPaths"
+              :nodes="tree"
+              :selected-path="selectedPath"
+              @select="selectedPath = $event"
+              @toggle="toggleDirectory"
+            />
           </nav>
         </template>
       </aside>
@@ -369,16 +409,7 @@ select { padding: 0 12px; }
 .tree-header button { padding: 7px 10px; color: var(--vp-c-brand-1); background: color-mix(in srgb, var(--vp-c-brand-1) 10%, transparent); font-size: 12px; }
 .target-summary { display: flex; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); font-size: 12px; }
 .target-summary strong { color: var(--vp-c-text-2); }
-.tree-scroll { min-height: 0; flex: 1; padding: 12px 10px; overflow: auto; }
-:deep(.file-tree) { margin: 0; padding: 0; list-style: none; }
-:deep(.file-tree .file-tree) { padding-left: 14px; }
-:deep(.tree-directory), :deep(.tree-file) { display: flex; width: 100%; height: 32px; align-items: center; gap: 7px; border: 0; border-radius: 6px; color: var(--vp-c-text-2); background: transparent; font: inherit; font-size: 13px; text-align: left; }
-:deep(.tree-directory) { padding: 0 8px; font-weight: 650; }
-:deep(.tree-file) { padding: 0 8px; cursor: pointer; }
-:deep(.tree-file:hover) { background: var(--vp-c-bg-soft); }
-:deep(.tree-file.selected) { color: var(--vp-c-brand-1); background: color-mix(in srgb, var(--vp-c-brand-1) 11%, transparent); font-weight: 650; }
-:deep(.tree-icon) { color: var(--vp-c-text-3); }
-:deep(.tree-file-icon) { color: #3178c6; font-size: 9px; font-weight: 850; letter-spacing: -.03em; }
+.tree-scroll { min-height: 0; flex: 1; padding: 12px 10px; overflow-x: hidden; overflow-y: auto; }
 
 .code-panel { display: flex; min-width: 0; min-height: 0; overflow: hidden; flex-direction: column; background: #0d1117; color: #d1d7e0; }
 .code-header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid #252b35; background: #111720; font-size: 12px; }
