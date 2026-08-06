@@ -10,10 +10,10 @@ import (
 	"openapi-sdkgen/internal/compiler/ir"
 )
 
-type enumCatalogPlan struct {
+type enumValuesPlan struct {
 	name           string
 	valuesBinding  string
-	catalogBinding string
+	enumBinding    string
 	renderedValues string
 	valueType      string
 	members        []string
@@ -21,13 +21,13 @@ type enumCatalogPlan struct {
 }
 
 func emitEnums(document *ir.Document) ([]byte, error) {
-	catalogs, err := enumCatalogPlans(document)
+	plans, err := enumValuesPlans(document)
 	if err != nil {
 		return nil, err
 	}
 	var output bytes.Buffer
-	for _, catalog := range catalogs {
-		if catalog.hasJSONRecord {
+	for _, plan := range plans {
+		if plan.hasJSONRecord {
 			output.WriteString(`function __sdkgen_createJSONRecord<Value extends object>(
   entries: readonly (readonly [PropertyKey, unknown])[],
 ): Value {
@@ -38,15 +38,15 @@ func emitEnums(document *ir.Document) ([]byte, error) {
 			break
 		}
 	}
-	if len(catalogs) > 0 {
-		output.WriteString(`function __sdkgen_createEnumCatalog(values: readonly unknown[]): object {
-  const catalog = Object.create(null) as Record<PropertyKey, unknown>
+	if len(plans) > 0 {
+		output.WriteString(`function __sdkgen_createEnumValues(values: readonly unknown[]): object {
+  const enumValues = Object.create(null) as Record<PropertyKey, unknown>
   for (const value of values) {
-    if (typeof value !== "string" || Object.hasOwn(catalog, value)) continue
-    Object.defineProperty(catalog, value, { enumerable: true, value })
+    if (typeof value !== "string" || Object.hasOwn(enumValues, value)) continue
+    Object.defineProperty(enumValues, value, { enumerable: true, value })
   }
-  Object.defineProperty(catalog, Symbol.iterator, { value: () => values[Symbol.iterator]() })
-  return Object.freeze(catalog)
+  Object.defineProperty(enumValues, Symbol.iterator, { value: () => values[Symbol.iterator]() })
+  return Object.freeze(enumValues)
 }
 
 function __sdkgen_enumValueEquals(left: unknown, right: unknown, seen = new WeakMap<object, WeakSet<object>>()): boolean {
@@ -91,35 +91,35 @@ function __sdkgen_enumValueEquals(left: unknown, right: unknown, seen = new Weak
 
 `)
 	}
-	bindings := make([]runtimeProperty, 0, len(catalogs))
-	for _, catalog := range catalogs {
-		fmt.Fprintf(&output, "const %s = %s as const\n", catalog.valuesBinding, catalog.renderedValues)
-		fmt.Fprintf(&output, "const %s = /* @__PURE__ */ __sdkgen_createEnumCatalog(%s)\n", catalog.catalogBinding, catalog.valuesBinding)
-		bindings = append(bindings, runtimeProperty{key: catalog.name, value: catalog.catalogBinding})
+	bindings := make([]runtimeProperty, 0, len(plans))
+	for _, plan := range plans {
+		fmt.Fprintf(&output, "const %s = %s as const\n", plan.valuesBinding, plan.renderedValues)
+		fmt.Fprintf(&output, "const %s = /* @__PURE__ */ __sdkgen_createEnumValues(%s)\n", plan.enumBinding, plan.valuesBinding)
+		bindings = append(bindings, runtimeProperty{key: plan.name, value: plan.enumBinding})
 	}
 	output.WriteString("/** Runtime enum values keyed by exact OpenAPI component schema names. */\n")
 	fmt.Fprintf(&output, "export const Enums = %s as {\n", runtimeObjectExpression(bindings))
-	for _, catalog := range catalogs {
-		fmt.Fprintf(&output, "  /** Values declared by OpenAPI component `%s`. */\n", sanitizeComment(catalog.name))
-		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(catalog.name))
-		for _, member := range catalog.members {
+	for _, plan := range plans {
+		fmt.Fprintf(&output, "  /** Values declared by OpenAPI component `%s`. */\n", sanitizeComment(plan.name))
+		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(plan.name))
+		for _, member := range plan.members {
 			fmt.Fprintf(&output, "    /** Exact string value `%s`. */\n", sanitizeComment(member))
 			fmt.Fprintf(&output, "    readonly %s: %s\n", quoteTS(member), quoteTS(member))
 		}
-		fmt.Fprintf(&output, "    [Symbol.iterator](): IterableIterator<%s>\n", catalog.valueType)
+		fmt.Fprintf(&output, "    [Symbol.iterator](): IterableIterator<%s>\n", plan.valueType)
 		output.WriteString("  }\n")
 	}
 	output.WriteString("}\n")
-	if len(catalogs) > 0 {
+	if len(plans) > 0 {
 		output.WriteString("/** Literal value union for an exact generated enum component name. */\n")
 		output.WriteString("export type EnumValue<Name extends keyof typeof Enums> = (typeof Enums)[Name] extends Iterable<infer Value> ? Value : never\n")
 		output.WriteString("/** Return whether a runtime value structurally matches a generated enum value. */\n")
-		output.WriteString("export function isEnumValue<Catalog extends (typeof Enums)[keyof typeof Enums]>(\n")
-		output.WriteString("  catalog: Catalog,\n")
+		output.WriteString("export function isEnumValue<EnumValues extends (typeof Enums)[keyof typeof Enums]>(\n")
+		output.WriteString("  enumValues: EnumValues,\n")
 		output.WriteString("  value: unknown,\n")
-		output.WriteString("): value is Catalog extends Iterable<infer Value> ? Value : never {\n")
+		output.WriteString("): value is EnumValues extends Iterable<infer Value> ? Value : never {\n")
 		output.WriteString("  try {\n")
-		output.WriteString("    for (const candidate of catalog) {\n")
+		output.WriteString("    for (const candidate of enumValues) {\n")
 		output.WriteString("      if (__sdkgen_enumValueEquals(candidate, value)) return true\n")
 		output.WriteString("    }\n")
 		output.WriteString("  } catch {\n")
@@ -131,14 +131,14 @@ function __sdkgen_enumValueEquals(left: unknown, right: unknown, seen = new Weak
 	return output.Bytes(), nil
 }
 
-func enumCatalogPlans(document *ir.Document) ([]enumCatalogPlan, error) {
+func enumValuesPlans(document *ir.Document) ([]enumValuesPlan, error) {
 	reachable := reachableComponentSchemas(document)
 	names := make([]string, 0, len(reachable))
 	for name := range reachable {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	catalogs := make([]enumCatalogPlan, 0)
+	plans := make([]enumValuesPlan, 0)
 	for _, schemaName := range names {
 		schema, ok := componentSchemaValue(document, schemaName).(map[string]any)
 		if !ok {
@@ -156,17 +156,17 @@ func enumCatalogPlans(document *ir.Document) ([]enumCatalogPlan, error) {
 		if err != nil {
 			return nil, fmt.Errorf("component %s enum value type: %w", schemaName, err)
 		}
-		catalogs = append(catalogs, enumCatalogPlan{
+		plans = append(plans, enumValuesPlan{
 			name:           schemaName,
 			valuesBinding:  stablePrivateIdentifier("component-enum-values", schemaName),
-			catalogBinding: stablePrivateIdentifier("component-enum-catalog", schemaName),
+			enumBinding:    stablePrivateIdentifier("component-enum", schemaName),
 			renderedValues: rendered,
 			valueType:      valueType,
 			members:        enumStringMembers(values),
 			hasJSONRecord:  hasJSONRecord,
 		})
 	}
-	return catalogs, nil
+	return plans, nil
 }
 
 // enumRuntimeJSONExpression keeps enum literals inferable under an outer

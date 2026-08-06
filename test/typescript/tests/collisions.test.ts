@@ -158,13 +158,13 @@ const invalidEnumArray: Extract<StatusValue, readonly ["x", "y"]> = ["y", "x"];
 // @ts-expect-error unknown enum component names are rejected
 type UnknownEnum = EnumValue<"MissingStatus">;
 function assertEnumArrayAPIsAreAbsent(): void {
-  // @ts-expect-error enum catalogs have no positional index contract
+  // @ts-expect-error generated enum values have no positional index contract
   Enums.TodoStatus[0];
-  // @ts-expect-error enum catalogs do not expose Array.prototype.map
+  // @ts-expect-error generated enum values do not expose Array.prototype.map
   Enums.TodoStatus.map((value: TodoStatus) => value);
-  // @ts-expect-error enum catalogs do not expose Array.prototype.includes
+  // @ts-expect-error generated enum values do not expose Array.prototype.includes
   Enums.TodoStatus.includes("TODO");
-  // @ts-expect-error enum catalogs are not tuple-indexed types
+  // @ts-expect-error generated enum values are not tuple-indexed types
   type TupleIndexedEnum = (typeof Enums.TodoStatus)[number];
   void (null as unknown as TupleIndexedEnum);
 }
@@ -311,7 +311,7 @@ describe("exact identity collision fixture", () => {
     expect(fetch).toHaveBeenCalledTimes(8);
   });
 
-  it("exposes exact enum members through iterable non-array catalogs", () => {
+  it("exposes exact enum members through iterable non-array values", () => {
     expect(Enums.TodoStatus.TODO).toBe("TODO");
     expect(Enums.TodoStatus.DONE).toBe("DONE");
     expect(Array.isArray(Enums.TodoStatus)).toBe(false);

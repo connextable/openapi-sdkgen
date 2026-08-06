@@ -325,9 +325,9 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 		`function __sdkgen_createJSONRecord<Value extends object>`,
 		`return Object.fromEntries(entries) as Value`,
 		`/* @__PURE__ */ __sdkgen_createJSONRecord<{ readonly "__proto__": true }>([["__proto__", true]])`,
-		`function __sdkgen_createEnumCatalog(values: readonly unknown[]): object`,
-		`const catalog = Object.create(null)`,
-		`Object.defineProperty(catalog, Symbol.iterator`,
+		`function __sdkgen_createEnumValues(values: readonly unknown[]): object`,
+		`const enumValues = Object.create(null)`,
+		`Object.defineProperty(enumValues, Symbol.iterator`,
 		`["Status", __sdkgen_status_`,
 		`readonly "foo-bar": "foo-bar"`,
 		`readonly "__proto__": "__proto__"`,
@@ -335,10 +335,11 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 		`readonly "0": "0"`,
 		`[Symbol.iterator](): IterableIterator<`,
 		`export type EnumValue<Name extends keyof typeof Enums>`,
-		`export function isEnumValue<Catalog extends (typeof Enums)[keyof typeof Enums]>`,
+		`export function isEnumValue<EnumValues extends (typeof Enums)[keyof typeof Enums]>`,
+		`enumValues: EnumValues`,
 	} {
 		if !strings.Contains(generated, expected) {
-			t.Fatalf("enum catalog missing %q:\n%s", expected, source)
+			t.Fatalf("enum values missing %q:\n%s", expected, source)
 		}
 	}
 	if !strings.Contains(generated, `, ["x", "y"], "foo-bar"] as const`) {
@@ -348,7 +349,7 @@ func TestEmitTypesPreservesCollidingEnumValuesAsLiterals(t *testing.T) {
 		t.Fatalf("enum values retain a double tuple assertion:\n%s", source)
 	}
 	if strings.Contains(generated, `readonly "Status": typeof __sdkgen_`) {
-		t.Fatalf("exact enum catalog entry missing:\n%s", source)
+		t.Fatalf("exact enum entry missing:\n%s", source)
 	}
 	if strings.Contains(generated, "FOO_BAR:") || strings.Contains(generated, `readonly "values": readonly`) {
 		t.Fatalf("normalized enum member leaked:\n%s", source)

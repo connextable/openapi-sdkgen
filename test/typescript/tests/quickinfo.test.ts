@@ -312,7 +312,7 @@ describe("generated client QuickInfo", () => {
 
     expect(info.display).toContain(expected);
     expect(info.text).not.toContain("__sdkgen_");
-    expect(info.text).not.toContain("createEnumCatalog");
+    expect(info.text).not.toContain("createEnumValues");
     expect(info.text).not.toContain("enumValueEquals");
   });
 
