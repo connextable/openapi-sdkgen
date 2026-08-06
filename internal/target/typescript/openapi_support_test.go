@@ -141,7 +141,7 @@ func TestSourceArtifactsProjectEnvironmentControlledHeadersAsOptionalClientInput
 			if err != nil {
 				t.Fatal(err)
 			}
-			client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+			client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 			for _, expected := range []string{
 				`readonly "Origin"?: string | undefined`,
 				`readonly "X-Trace": string`,
@@ -277,7 +277,7 @@ func TestSourceArtifactsSupportsMultipleScopedServers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, "https://one.example.test") || !strings.Contains(source, "https://two.example.test") {
+		if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, "https://one.example.test") || !strings.Contains(source, "https://two.example.test") {
 			t.Fatalf("scoped server choices were not emitted:\n%s", source)
 		}
 	}
@@ -495,7 +495,7 @@ func TestSourceArtifactsGenerateOpenAPI32QueryAndAdditionalOperations(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := artifactByPath(t, artifacts, "generated/client.ts")
+	client := artifactByPath(t, artifacts, "internal/client.ts")
 	for _, expected := range []string{
 		`route: "QUERY /records", method: "QUERY"`,
 		`route: "PURGE /records", method: "PURGE"`,
@@ -525,7 +525,7 @@ func TestSourceArtifactsGenerateEveryStandardHTTPMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, method := range methods {
 		expected := fmt.Sprintf(`route: %q, method: %q`, strings.ToUpper(method)+" /"+method, strings.ToUpper(method))
 		if !strings.Contains(client, expected) {
@@ -572,7 +572,7 @@ func TestSourceArtifactsGenerateAcrossSupportedOpenAPIVersionLines(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, test.want) {
+			if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, test.want) {
 				t.Fatalf("types source missing %q:\n%s", test.want, source)
 			}
 		})
@@ -592,7 +592,7 @@ func TestSourceArtifactsDoesNotApplyOpenAPI30NullableToOpenAPI31Schemas(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, "readonly input: string") || strings.Contains(source, "readonly input: string | null") {
+	if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, "readonly input: string") || strings.Contains(source, "readonly input: string | null") {
 		t.Fatalf("unexpected nullable 3.1 lowering:\n%s", source)
 	}
 }

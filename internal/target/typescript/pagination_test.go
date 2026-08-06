@@ -26,7 +26,7 @@ func TestHermeticItemPaginationFixtureGenerates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly "GET /items":`,
 		`readonly paginate:`,

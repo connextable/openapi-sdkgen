@@ -38,11 +38,11 @@ func TestVersionFeatureFixturesGenerateForTypeScript(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if source := string(artifactByPath(t, typescriptArtifacts, "generated/types.ts")) + string(artifactByPath(t, typescriptArtifacts, "generated/client.ts")); !strings.Contains(source, test.want) {
+			if source := string(artifactByPath(t, typescriptArtifacts, "internal/types.ts")) + string(artifactByPath(t, typescriptArtifacts, "internal/client.ts")); !strings.Contains(source, test.want) {
 				t.Fatalf("TypeScript source missing %q:\n%s", test.want, source)
 			}
 			probe := fmt.Sprintf(`
-import type { Client, OperationInput, OperationOutput, RouteInput, RouteOutput } from "./generated/client.js"
+import type { Client, OperationInput, OperationOutput, RouteInput, RouteOutput } from "./internal/client.js"
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends (<Value>() => Value extends Right ? 1 : 2) ? true : false
 type Expect<Value extends true> = Value
 type Method = Client["$operations"][%q]

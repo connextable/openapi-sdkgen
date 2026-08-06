@@ -243,7 +243,7 @@ func TestGenerateWritesTypeScriptSourceTree(t *testing.T) {
 	if err := run([]string{"generate", "--input", input, "--target", "typescript", "--output", output}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"index.ts", "metadata.ts", "generated/types.ts", "generated/client.ts", "generated/errors.ts", "generated/index.ts", "generated/runtime.ts"} {
+	for _, expected := range []string{"index.ts", "metadata.ts", "internal/types.ts", "internal/client.ts", "internal/errors.ts", "internal/index.ts", "internal/runtime.ts"} {
 		if _, err := os.Stat(filepath.Join(output, expected)); err != nil {
 			t.Fatalf("missing %s: %v", expected, err)
 		}
@@ -686,11 +686,11 @@ func TestWriteArtifactsRejectsSymlinkOutput(t *testing.T) {
 	if err := os.Symlink(outside, output); err != nil {
 		t.Fatal(err)
 	}
-	err := writeArtifacts(output, []generator.Artifact{{Path: "generated/client.ts", Data: []byte("export {}\n")}})
+	err := writeArtifacts(output, []generator.Artifact{{Path: "nested/client.ts", Data: []byte("export {}\n")}})
 	if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
 		t.Fatalf("writeArtifacts error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outside, "generated", "client.ts")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(outside, "nested", "client.ts")); !os.IsNotExist(err) {
 		t.Fatalf("outside artifact stat error = %v", err)
 	}
 }
@@ -699,8 +699,8 @@ func TestWriteArtifactsRollsBackArtifactPathConflict(t *testing.T) {
 	directory := t.TempDir()
 	output := filepath.Join(directory, "output")
 	err := writeArtifacts(output, []generator.Artifact{
-		{Path: "generated", Data: []byte("not a directory\n")},
-		{Path: "generated/client.ts", Data: []byte("export {}\n")},
+		{Path: "nested", Data: []byte("not a directory\n")},
+		{Path: "nested/client.ts", Data: []byte("export {}\n")},
 	})
 	if err == nil || !strings.Contains(err.Error(), "create artifact directory") {
 		t.Fatalf("writeArtifacts error = %v", err)

@@ -12,7 +12,7 @@ import {
   type WireProperty,
   type WireSchema,
   type WireSchemas,
-} from "../generated/runtime.js";
+} from "../internal/runtime.js";
 
 /** Metadata provided to host-owned inbound authentication policy. */
 export interface InboundRequestContext {

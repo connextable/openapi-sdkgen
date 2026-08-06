@@ -52,7 +52,7 @@ func TestSourceArtifactsEmitsClosedObjectRuntimeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `additionalProperties: false`) {
+	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `additionalProperties: false`) {
 		t.Fatalf("closed schema descriptor missing:\n%s", source)
 	}
 }
@@ -220,7 +220,7 @@ func TestSourceArtifactsGenerateRecursiveComponentSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, `readonly "next"?: ComponentInput<"Node">`) || !strings.Contains(source, `readonly "next"?: ComponentOutput<"Node">`) {
+	if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, `readonly "next"?: ComponentInput<"Node">`) || !strings.Contains(source, `readonly "next"?: ComponentOutput<"Node">`) {
 		t.Fatalf("recursive schema missing from generated types:\n%s", source)
 	}
 }

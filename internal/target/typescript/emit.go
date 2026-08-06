@@ -12,7 +12,7 @@ import (
 	"openapi-sdkgen/internal/generator"
 )
 
-//go:embed runtime/generated/runtime.ts
+//go:embed runtime/internal/runtime.ts
 var runtimeTemplate []byte
 
 //go:embed runtime/server/runtime.ts
@@ -261,15 +261,15 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	indexSource := generatedIndexSource(enumsSource)
 
 	artifacts := []Artifact{
-		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./generated/index.js\"\n"))},
-		{Path: "generated/client.ts", Data: generatedSource(clientSource)},
-		{Path: "generated/constants.ts", Data: generatedSource(constantsSource)},
-		{Path: "generated/enums.ts", Data: generatedSource(enumsSource)},
-		{Path: "generated/errors.ts", Data: generatedSource(errorsSource)},
-		{Path: "generated/index.ts", Data: generatedSource(indexSource)},
-		{Path: "generated/runtime.ts", Data: generatedSource(runtimeTemplate)},
-		{Path: "generated/types.ts", Data: generatedSource(typesSource)},
-		{Path: "enums.ts", Data: generatedSource([]byte("export * from \"./generated/enums.js\"\n"))},
+		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./internal/index.js\"\n"))},
+		{Path: "internal/client.ts", Data: generatedSource(clientSource)},
+		{Path: "internal/constants.ts", Data: generatedSource(constantsSource)},
+		{Path: "internal/enums.ts", Data: generatedSource(enumsSource)},
+		{Path: "internal/errors.ts", Data: generatedSource(errorsSource)},
+		{Path: "internal/index.ts", Data: generatedSource(indexSource)},
+		{Path: "internal/runtime.ts", Data: generatedSource(runtimeTemplate)},
+		{Path: "internal/types.ts", Data: generatedSource(typesSource)},
+		{Path: "enums.ts", Data: generatedSource([]byte("export * from \"./internal/enums.js\"\n"))},
 		{Path: "metadata.ts", Data: generatedSource(metadataSource)},
 	}
 	if includeServer {
@@ -286,7 +286,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 }
 
 func artifactEmissionOrder(path string) string {
-	if strings.HasPrefix(path, "generated/") {
+	if strings.HasPrefix(path, "internal/") {
 		return "0/" + path
 	}
 	switch path {

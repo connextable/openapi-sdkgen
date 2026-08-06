@@ -34,7 +34,7 @@ func TestOptionalInputCallsEmitOptionsOnlyOverloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	interfaceBody := func(name string) string {
 		t.Helper()
 		start := strings.Index(client, "interface "+name)

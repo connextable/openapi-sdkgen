@@ -60,7 +60,7 @@ func TestSourceArtifactsEmitsBooleanSchemaFromAnOpenAPI31Document(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+		source := string(artifactByPath(t, artifacts, "internal/client.ts"))
 		if !strings.Contains(source, "boolean: false") {
 			t.Fatalf("boolean schema descriptor missing:\n%s", source)
 		}
@@ -86,7 +86,7 @@ func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "generated/types.ts"))
+	source := string(artifactByPath(t, artifacts, "internal/types.ts"))
 	for _, expected := range []string{
 		`readonly "Always": {`,
 		`readonly "Never": {`,
@@ -98,7 +98,7 @@ func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 			t.Fatalf("named boolean component type missing %q:\n%s", expected, source)
 		}
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{`Contract.ComponentInput<"Always">`, `Contract.ComponentOutput<"Never">`} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("named boolean operation bypassed component projection %q:\n%s", expected, client)
@@ -145,7 +145,7 @@ func TestSourceArtifactsDecodesEscapedComponentSchemaReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `reference: "a/b"`) {
+	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `reference: "a/b"`) {
 		t.Fatalf("escaped component reference was not decoded:\n%s", source)
 	}
 }
@@ -177,7 +177,7 @@ func TestSourceArtifactsLowersAnchoredSchemaReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(source, `reference: "Node"`) {
 		t.Fatalf("anchor reference was not emitted as a component reference:\n%s", source)
 	}
@@ -196,7 +196,7 @@ func TestSourceArtifactsLowersLocalDefinitionsBeforeTypeScriptEmission(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(source, "minLength: 3") {
 		t.Fatalf("local definition validation was not lowered:\n%s", source)
 	}
@@ -224,7 +224,7 @@ func TestSourceArtifactsEmitsSchemaReferenceSiblingsWithWireSemantics(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `reference: "Widget", minLength: 3`) {
+		if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `reference: "Widget", minLength: 3`) {
 			t.Fatalf("reference sibling descriptor missing:\n%s", source)
 		}
 	}
@@ -243,7 +243,7 @@ func TestSourceArtifactsAllowsSchemaReferenceVendorExtensions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		source := string(artifactByPath(t, artifacts, "generated/client.ts"))
+		source := string(artifactByPath(t, artifacts, "internal/client.ts"))
 		if !strings.Contains(source, `reference: "Widget"`) || strings.Contains(source, `reference: "Widget", {}`) {
 			t.Fatalf("annotation-only reference sibling produced an invalid descriptor:\n%s", source)
 		}
@@ -269,7 +269,7 @@ func TestSourceArtifactsEmitsPatternPropertyWireSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/types.ts")); !strings.Contains(source, "labels") {
+	if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, "labels") {
 		t.Fatalf("pattern property type missing:\n%s", source)
 	}
 }
@@ -292,7 +292,7 @@ func TestSourceArtifactsEmitsVariantWireBranchSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, "oneOf:") || !strings.Contains(source, `types: ["string"]`) {
+	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, "oneOf:") || !strings.Contains(source, `types: ["string"]`) {
 		t.Fatalf("variant wire descriptor missing:\n%s", source)
 	}
 }
@@ -315,7 +315,7 @@ func TestSourceArtifactsEmitsNegatedSchemaAssertion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "generated/client.ts")); !strings.Contains(source, `not: { constValue: "forbidden" }`) {
+	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `not: { constValue: "forbidden" }`) {
 		t.Fatalf("negated schema descriptor missing:\n%s", source)
 	}
 }

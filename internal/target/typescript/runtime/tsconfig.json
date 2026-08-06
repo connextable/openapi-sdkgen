@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["generated/runtime.ts", "server/runtime.ts"]
+  "include": ["internal/runtime.ts", "server/runtime.ts"]
 }

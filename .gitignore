@@ -5,8 +5,6 @@
 node_modules
 dist
 generated
-!internal/target/typescript/runtime/generated/
-!internal/target/typescript/runtime/generated/runtime.ts
 coverage
 .openapi-sdkgen-cache
 .DS_Store

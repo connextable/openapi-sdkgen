@@ -300,7 +300,7 @@ func TestEnvelopeDataProjectsOrdinaryOutputButKeepsRawBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(client, `type `+operationTypeName("GET /value")+`Output = string | void`) {
 		t.Fatalf("projected output missing:\n%s", client)
 	}
@@ -368,7 +368,7 @@ func TestSortWithoutExtensionKeepsExactStandardEnumInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(client, `"createdAt:asc" | "createdAt:desc"`) || !strings.Contains(client, `readonly "filter"?: string | undefined`) || strings.Contains(client, `readonly field: "createdAt"`) {
 		t.Fatalf("standard enum sort was projected without x-sort:\n%s", client)
 	}
@@ -395,7 +395,7 @@ func TestVisibilityPlanKeepsInternalRoutesAndRemovesHiddenOperations(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{`readonly "GET /public":`, `readonly "GET /internal":`, `readonly "getInternal": Routes["GET /internal"]`} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("visibility surface missing %q:\n%s", expected, client)
@@ -534,7 +534,7 @@ func TestRequiredWireErrorCategoryGeneratesExactCategoryWithoutExtension(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	errorsSource := string(artifactByPath(t, artifacts, "generated/errors.ts"))
+	errorsSource := string(artifactByPath(t, artifacts, "internal/errors.ts"))
 	if !strings.Contains(errorsSource, `readonly "authentication-required": "authentication_required"`) {
 		t.Fatalf("wire error category missing:\n%s", errorsSource)
 	}

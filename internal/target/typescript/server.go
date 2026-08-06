@@ -453,9 +453,9 @@ func inboundResponseHeaderValuesType(document *ir.Document, response map[string]
 func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byte, error) {
 	var output bytes.Buffer
 	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
-	output.WriteString("import type { MediaCodec, WireSchemas } from \"../generated/runtime.js\"\n")
+	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime.js\"\n")
 	if len(callbacks) > 0 {
-		output.WriteString("import type * as Contract from \"../generated/types.js\"\n")
+		output.WriteString("import type * as Contract from \"../internal/types.js\"\n")
 	}
 	output.WriteString("\n")
 	if err := emitInboundSchemas(&output, document); err != nil {
@@ -905,9 +905,9 @@ func emitInboundSecuritySchemes(output *bytes.Buffer, document *ir.Document) err
 func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, error) {
 	var output bytes.Buffer
 	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, matchInboundRoute, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
-	output.WriteString("import type { MediaCodec, WireSchemas } from \"../generated/runtime.js\"\n")
+	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime.js\"\n")
 	if len(webhooks) > 0 {
-		output.WriteString("import type * as Contract from \"../generated/types.js\"\n")
+		output.WriteString("import type * as Contract from \"../internal/types.js\"\n")
 	}
 	output.WriteString("\n")
 	if err := emitInboundSchemas(&output, document); err != nil {

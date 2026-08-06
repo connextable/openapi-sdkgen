@@ -9,7 +9,7 @@ const fixtureRoot = fileURLToPath(
   new URL("../fixtures/generated/bundle-isolation/", import.meta.url),
 );
 const publicEntry = join(fixtureRoot, "index.ts");
-const generatedEntry = (module: string) => join(fixtureRoot, "generated", `${module}.ts`);
+const internalEntry = (module: string) => join(fixtureRoot, "internal", `${module}.ts`);
 
 type BundleResult = {
   readonly code: string;
@@ -33,7 +33,7 @@ function bundle(name: string, source: string): Promise<BundleResult> {
           if (id === "virtual:sdkgen-bundle-entry") return "\0virtual:sdkgen-bundle-entry.ts";
           if (id === "sdkgen-fixture:index") return publicEntry;
           if (id.startsWith("sdkgen-fixture:"))
-            return generatedEntry(id.slice("sdkgen-fixture:".length));
+            return internalEntry(id.slice("sdkgen-fixture:".length));
           return null;
         },
         load(id) {
@@ -81,11 +81,11 @@ function directValue(name: string, module: string): string {
   return `export { ${name} } from "sdkgen-fixture:${module}"`;
 }
 
-function generatedModules(result: BundleResult): string[] {
+function internalModules(result: BundleResult): string[] {
   return result.modules
     .filter((id) => id.startsWith(fixtureRoot))
     .map((id) => id.slice(fixtureRoot.length))
-    .filter((id) => id.startsWith("generated/"))
+    .filter((id) => id.startsWith("internal/"))
     .sort();
 }
 
@@ -129,7 +129,7 @@ describe("generated public entry bundle isolation", () => {
   it("keeps the runtime error guard independent", () => {
     const result = results.rootError;
     expect(result).toBeDefined();
-    expect(generatedModules(result!), bundleEvidence(result!)).toEqual(["generated/runtime.ts"]);
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual(["internal/runtime.ts"]);
     expect(result!.code).not.toContain("bundle-enum-sentinel-01");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
     expect(result!.code).not.toContain("bundle-isolation-sentinel");
@@ -138,9 +138,9 @@ describe("generated public entry bundle isolation", () => {
   it("keeps the client independent from public enum and error-category runtime", () => {
     const result = results.rootClient;
     expect(result).toBeDefined();
-    expect(generatedModules(result!), bundleEvidence(result!)).toEqual([
-      "generated/client.ts",
-      "generated/runtime.ts",
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual([
+      "internal/client.ts",
+      "internal/runtime.ts",
     ]);
     expect(result!.code).not.toContain("Symbol.iterator");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
@@ -149,7 +149,7 @@ describe("generated public entry bundle isolation", () => {
   it("keeps the sort constant independent", () => {
     const result = results.rootSort;
     expect(result).toBeDefined();
-    expect(generatedModules(result!), bundleEvidence(result!)).toEqual(["generated/constants.ts"]);
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual(["internal/constants.ts"]);
     expect(result!.code).not.toContain("bundle-enum-sentinel-01");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
     expect(result!.code).not.toContain("bundle-isolation-sentinel");
@@ -158,7 +158,7 @@ describe("generated public entry bundle isolation", () => {
   it("keeps public enum runtime behind its owning concern", () => {
     const result = results.rootEnums;
     expect(result).toBeDefined();
-    expect(generatedModules(result!), bundleEvidence(result!)).toEqual(["generated/enums.ts"]);
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual(["internal/enums.ts"]);
     expect(result!.code).toContain("bundle-enum-sentinel-01");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
     expect(result!.code).not.toContain("bundle-isolation-sentinel");
@@ -167,7 +167,7 @@ describe("generated public entry bundle isolation", () => {
   it("emits no runtime for a type-only root import", () => {
     const result = results.rootType;
     expect(result).toBeDefined();
-    expect(generatedModules(result!)).toEqual([]);
+    expect(internalModules(result!)).toEqual([]);
     expect(result!.code.trim()).toBe("");
   });
 });

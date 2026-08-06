@@ -188,7 +188,7 @@ for (const [format, value] of Object.entries(invalid)) {
   catch (error) { if (String(error).includes("accepted")) throw error; }
 }
 `
-	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "generated", "runtime.js")).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "internal", "runtime.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript format registry runtime test: %v\n%s", err, output)
 	}
 }
@@ -391,7 +391,7 @@ func TestGeneratedLinksAndStreamsUseStandardHeaderParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`invocation?: LinkInvocation<Routes["POST /target"]["input"], Routes["POST /target"]["options"]`,
 		`readonly "Idempotency-Key": string`,
@@ -787,7 +787,7 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	routesByID := make(map[string]string, len(document.Operations))
 	for _, operation := range document.Operations {
 		routesByID[operation.OperationID] = operation.Method + " " + operation.Path
@@ -1982,7 +1982,7 @@ func TestGeneratedSecurityRequirementOptionsStayOperationSpecificAcrossCallSurfa
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientSource := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	clientSource := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(clientSource, `Omit<RequestOptions, "accept">`) || strings.Contains(clientSource, `Omit<RequestOptions, "accept" | "securityRequirement">`) {
 		t.Fatal("generated operation options retain the removed RequestOptions security selector")
 	}
@@ -2853,9 +2853,9 @@ func TestVisibleRecursiveComponentCanServeRequestSuccessAndErrorRoles(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	types := string(artifactByPath(t, artifacts, "generated/types.ts"))
-	errorsSource := string(artifactByPath(t, artifacts, "generated/errors.ts"))
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	types := string(artifactByPath(t, artifacts, "internal/types.ts"))
+	errorsSource := string(artifactByPath(t, artifacts, "internal/errors.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly "NodeError": {`,
 		`readonly "child"?: ComponentInput<"NodeError">`,

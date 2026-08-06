@@ -11,13 +11,13 @@ import {
   isErrorCode,
   mergeLinkInput,
   resolveLinkInput,
-} from "../fixtures/generated/client/generated/runtime.js";
+} from "../fixtures/generated/client/internal/runtime.js";
 import type {
   OperationDefinition,
   RawResponse,
   RequestFunction,
   RequestOptions,
-} from "../fixtures/generated/client/generated/runtime.js";
+} from "../fixtures/generated/client/internal/runtime.js";
 
 const operation = (overrides: Partial<OperationDefinition> = {}): OperationDefinition => ({
   route: "POST /items/{itemID}",

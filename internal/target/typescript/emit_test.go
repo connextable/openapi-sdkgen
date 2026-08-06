@@ -61,7 +61,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		}
 	}
 
-	typesSource := string(artifacts["generated/types.ts"])
+	typesSource := string(artifacts["internal/types.ts"])
 	for _, forbidden := range []string{"export const ", "export function ", "Object.fromEntries", "Object.create"} {
 		if strings.Contains(typesSource, forbidden) {
 			t.Fatalf("types module contains runtime statement %q:\n%s", forbidden, typesSource)
@@ -116,16 +116,16 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		t.Fatalf("annotation-only $ref siblings changed the generated type:\n%s", typesSource)
 	}
 
-	clientSource := string(artifacts["generated/client.ts"])
-	errorsSource := string(artifacts["generated/errors.ts"])
-	runtimeSource := string(artifacts["generated/runtime.ts"])
+	clientSource := string(artifacts["internal/client.ts"])
+	errorsSource := string(artifacts["internal/errors.ts"])
+	runtimeSource := string(artifacts["internal/runtime.ts"])
 	publicIndex := string(artifacts["index.ts"])
 	publicEnums := string(artifacts["enums.ts"])
 	metadataSource := string(artifacts["metadata.ts"])
-	if !strings.Contains(publicIndex, `export * from "./generated/index.js"`) {
+	if !strings.Contains(publicIndex, `export * from "./internal/index.js"`) {
 		t.Fatalf("source entrypoint missing relative re-export:\n%s", publicIndex)
 	}
-	if !strings.Contains(publicEnums, `export * from "./generated/enums.js"`) {
+	if !strings.Contains(publicEnums, `export * from "./internal/enums.js"`) {
 		t.Fatalf("enum entrypoint missing relative re-export:\n%s", publicEnums)
 	}
 	for _, expected := range []string{"export const openapi = { document:", `["openapi", "3.2.0"]`, `versionLine: "3.2"`} {
@@ -133,7 +133,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("metadata missing %q:\n%s", expected, metadataSource)
 		}
 	}
-	generatedIndex := string(artifacts["generated/index.ts"])
+	generatedIndex := string(artifacts["internal/index.ts"])
 	if strings.Contains(generatedIndex, "metadata.js") {
 		t.Fatalf("client root must not re-export metadata:\n%s", generatedIndex)
 	}
@@ -283,10 +283,10 @@ func TestRootReachableRuntimeInitializersAreOptimizerVisible(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"generated/client.ts",
-		"generated/enums.ts",
-		"generated/errors.ts",
-		"generated/runtime.ts",
+		"internal/client.ts",
+		"internal/enums.ts",
+		"internal/errors.ts",
+		"internal/runtime.ts",
 	} {
 		source := string(artifactByPath(t, artifacts, path))
 		for lineNumber, line := range strings.Split(source, "\n") {
@@ -340,7 +340,7 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		"  createPaginator,",
 		"  type PaginateInput,",
@@ -462,7 +462,7 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 			t.Fatalf("server runtime missing %q:\n%s", expected, runtime)
 		}
 	}
-	if !strings.Contains(string(artifactByPath(t, artifacts, "generated/types.ts")), `readonly "Order": {`) {
+	if !strings.Contains(string(artifactByPath(t, artifacts, "internal/types.ts")), `readonly "Order": {`) {
 		t.Fatal("webhook body component was not emitted into shared generated types")
 	}
 }
@@ -480,7 +480,7 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 	for _, artifact := range artifacts {
 		byPath[artifact.Path] = artifact.Data
 	}
-	client := string(byPath["generated/client.ts"])
+	client := string(byPath["internal/client.ts"])
 	for _, expected := range []string{
 		`export interface RouteContract<Route extends keyof Routes> {`,
 		`readonly input: RouteInput<Route>`,
@@ -568,7 +568,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly get: ResourceCall<"GET /">`,
 		"get: __sdkgen_",
@@ -616,7 +616,7 @@ func TestSourceArtifactsGenerateExactRouteWithoutOperationID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly "GET /": {`,
 		`readonly "GET /health": {`,
@@ -662,7 +662,7 @@ func TestExactRouteCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly "GET /events": {`,
 		`readonly stream: (options?: Routes["GET /events"]["options"]) => AsyncIterable<string>`,

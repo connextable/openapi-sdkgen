@@ -20,7 +20,7 @@ func TestGenerateEmitsTypeScriptFiles(t *testing.T) {
 	if len(result.Artifacts) == 0 {
 		t.Fatal("Generate() emitted no artifacts")
 	}
-	if result.Artifacts[0].Path != "generated/client.ts" {
+	if result.Artifacts[0].Path != "internal/client.ts" {
 		t.Fatalf("first artifact path = %q", result.Artifacts[0].Path)
 	}
 	if !strings.Contains(result.Artifacts[0].Content, "listTodos") {
