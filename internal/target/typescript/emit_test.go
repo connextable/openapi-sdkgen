@@ -52,8 +52,14 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	if len(artifacts) != 31 {
-		t.Fatalf("source artifact count = %d, want exactly 31 TypeScript files", len(artifacts))
+	visibleOperations := 0
+	for _, operation := range document.Operations {
+		if operation.Visibility != "hidden" {
+			visibleOperations++
+		}
+	}
+	if len(artifacts) != 31+visibleOperations {
+		t.Fatalf("source artifact count = %d, want 31 base files plus %d operation leaves", len(artifacts), visibleOperations)
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {

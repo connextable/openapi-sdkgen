@@ -281,6 +281,10 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	operationArtifacts, err := emitOperationArtifacts(document, manifest, plan.modules, plan.links, plan.streams)
+	if err != nil {
+		return nil, err
+	}
 	constantsSource, err := readRuntimeTemplate("constants.ts")
 	if err != nil {
 		return nil, err
@@ -328,6 +332,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	}
 	artifacts = append(artifacts, runtimeArtifacts...)
 	artifacts = append(artifacts, schemaArtifacts...)
+	artifacts = append(artifacts, operationArtifacts...)
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {
