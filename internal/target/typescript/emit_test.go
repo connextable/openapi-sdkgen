@@ -58,8 +58,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			visibleOperations++
 		}
 	}
-	if len(artifacts) != 31+visibleOperations {
-		t.Fatalf("source artifact count = %d, want 31 base files plus %d operation leaves", len(artifacts), visibleOperations)
+	if len(artifacts) != 34+visibleOperations {
+		t.Fatalf("source artifact count = %d, want 34 base files plus %d operation leaves", len(artifacts), visibleOperations)
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {

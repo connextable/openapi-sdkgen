@@ -828,7 +828,7 @@ func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artifacts) != 23 {
-		t.Fatalf("source artifact count = %d, want 23", len(artifacts))
+	if len(artifacts) != 26 {
+		t.Fatalf("source artifact count = %d, want 26 including route registries", len(artifacts))
 	}
 }
