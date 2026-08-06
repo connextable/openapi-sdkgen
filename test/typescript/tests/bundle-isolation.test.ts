@@ -9,6 +9,7 @@ const fixtureRoot = fileURLToPath(
   new URL("../fixtures/generated/bundle-isolation/", import.meta.url),
 );
 const publicEntry = join(fixtureRoot, "index.ts");
+const metadataEntry = join(fixtureRoot, "metadata.ts");
 const internalEntry = (module: string) => join(fixtureRoot, "internal", `${module}.ts`);
 
 type BundleResult = {
@@ -32,6 +33,7 @@ function bundle(name: string, source: string): Promise<BundleResult> {
         resolveId(id) {
           if (id === "virtual:sdkgen-bundle-entry") return "\0virtual:sdkgen-bundle-entry.ts";
           if (id === "sdkgen-fixture:index") return publicEntry;
+          if (id === "sdkgen-fixture:metadata") return metadataEntry;
           if (id.startsWith("sdkgen-fixture:"))
             return internalEntry(id.slice("sdkgen-fixture:".length));
           return null;
@@ -106,6 +108,7 @@ beforeAll(async () => {
     rootEnums: rootValue("Enums"),
     directEnums: directValue("Enums", "enums"),
     rootType: `import type { Client } from "sdkgen-fixture:index"; export type BundledClient = Client`,
+    metadata: `export { openapi } from "sdkgen-fixture:metadata"`,
   };
   await Promise.all(
     Object.entries(cases).map(async ([name, source]) => {
@@ -186,5 +189,15 @@ describe("generated public entry bundle isolation", () => {
     expect(result).toBeDefined();
     expect(internalModules(result!)).toEqual([]);
     expect(result!.code.trim()).toBe("");
+  });
+
+  it("keeps metadata at its explicit public subpath", () => {
+    const result = results.metadata;
+    expect(result).toBeDefined();
+    expect(internalModules(result!)).toEqual([]);
+    expect(result!.modules.filter((id) => id.startsWith(fixtureRoot))).toEqual([
+      metadataEntry,
+    ]);
+    expect(result!.code).toContain("Bundle Isolation API");
   });
 });
