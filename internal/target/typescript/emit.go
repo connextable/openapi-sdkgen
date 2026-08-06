@@ -36,6 +36,7 @@ type sourcePlan struct {
 	document      *ir.Document
 	includeServer bool
 	manifest      *Manifest
+	modules       *semanticModulePlan
 	links         []generatedLink
 	streams       []generatedStream
 	webhooks      []webhookDefinition
@@ -198,6 +199,13 @@ func prepareSourcePlan(document *ir.Document, includeServer bool) (*sourcePlan, 
 			plan.callbacks = callbacks
 		}
 	}
+	if plan.manifest != nil && !diagnostic.HasErrors(diagnostics) {
+		modules, moduleErr := buildSemanticModulePlan(prepared, *plan.manifest, plan.links, plan.streams)
+		if moduleErr != nil {
+			return nil, diagnostic.Sort(diagnostics), fmt.Errorf("build TypeScript semantic module plan: %w", moduleErr)
+		}
+		plan.modules = modules
+	}
 	return plan, diagnostic.Sort(diagnostics), nil
 }
 
@@ -278,6 +286,9 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 			return nil, err
 		}
 		artifacts = append(artifacts, serverArtifacts...)
+	}
+	if err := validateGeneratedArtifacts(artifacts); err != nil {
+		return nil, err
 	}
 	sort.Slice(artifacts, func(i, j int) bool {
 		return artifactEmissionOrder(artifacts[i].Path) < artifactEmissionOrder(artifacts[j].Path)
