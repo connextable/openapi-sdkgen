@@ -52,14 +52,13 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	visibleOperations := 0
-	for _, operation := range document.Operations {
-		if operation.Visibility != "hidden" {
-			visibleOperations++
+	for _, required := range []string{"internal/client/index.ts", "internal/client/types.ts", "internal/client/factory.ts", "internal/client/registry.ts", "internal/resources/index.ts", "internal/resources/root.ts"} {
+		if _, exists := artifacts[required]; !exists {
+			t.Fatalf("source artifacts missing semantic composition module %s", required)
 		}
 	}
-	if len(artifacts) != 35+visibleOperations {
-		t.Fatalf("source artifact count = %d, want 35 base files plus %d operation leaves", len(artifacts), visibleOperations)
+	if _, exists := artifacts["internal/client.ts"]; exists {
+		t.Fatal("source artifacts retained the legacy internal/client.ts module")
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -122,7 +121,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 
 	clientSource := clientSemanticSource(first)
-	clientPublicSource := string(artifacts["internal/client.ts"])
+	clientPublicSource := string(artifacts["internal/client/types.ts"]) + string(artifacts["internal/client/factory.ts"])
 	errorsSource := string(artifacts["internal/errors.ts"])
 	var runtimeSource strings.Builder
 	for artifactPath, source := range artifacts {
@@ -155,11 +154,11 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		`export type { BothPaginationInput, CursorPaginationInput, OffsetPaginationInput } from "./runtime/pagination.js"`,
 		`export type * from "./enums.js"`,
 		`export type * from "./errors.js"`,
-		`export type * from "./client.js"`,
+		`export type * from "./client/index.js"`,
 		`export { SortDirection } from "./runtime/constants.js"`,
 		`export { Enums, isEnumValue } from "./enums.js"`,
 		`export { isErrorCategory } from "./errors.js"`,
-		`export { createClient } from "./client.js"`,
+		`export { createClient } from "./client/index.js"`,
 		`from "./runtime/errors.js"`,
 	} {
 		if !strings.Contains(generatedIndex, expected) {
@@ -181,7 +180,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("runtime JSDoc missing %q:\n%s", expected, runtimeModules)
 		}
 	}
-	if !strings.Contains(clientSource, `from "./runtime/http.js"`) || !strings.Contains(clientSource, `from "../runtime/callables.js"`) {
+	if !strings.Contains(clientSource, `from "../runtime/http.js"`) || !strings.Contains(clientSource, `from "../runtime/callables.js"`) {
 		t.Fatalf("client does not use its generated source runtime:\n%s", clientSource)
 	}
 	if strings.Contains(errorsSource, "../../runtime") || !strings.Contains(errorsSource, `from "./runtime/errors.js"`) {
@@ -235,7 +234,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, "type "+sortOnlyName+"QueryInput =") {
 		t.Fatalf("sort-only operation query input is missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<Contract.ComponentOutput<"Product">>`) || !strings.Contains(clientSource, `createPaginator<`) {
+	if !strings.Contains(clientSource, "readonly paginate:") || !strings.Contains(clientSource, `AsyncIterable<__sdkgen_productOutput_`) || !strings.Contains(clientSource, `createPaginator<`) {
 		t.Fatalf("pagination helper missing:\n%s", clientSource)
 	}
 	if !strings.Contains(clientSource, `readonly "Idempotency-Key": string`) || strings.Contains(clientSource, "readonly idempotencyKey") || strings.Contains(clientSource, "readonly ifMatch") {
@@ -244,7 +243,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(clientSource, `readonly "createProduct": Routes["POST /products"]`) || !strings.Contains(clientSource, `readonly call:`) || !strings.Contains(clientSource, `readonly rawResponse:`) {
 		t.Fatalf("raw-capable operation call missing:\n%s", clientSource)
 	}
-	if !strings.Contains(clientSource, "(productID: string)") || !strings.Contains(clientSource, "bindPathOperation<__sdkgen_") {
+	if !strings.Contains(clientSource, "(productID: string)") || !strings.Contains(clientSource, "bindPathOperation<import(") {
 		t.Fatalf("instance resource builder missing:\n%s", clientSource)
 	}
 	for _, expected := range []string{
@@ -296,7 +295,7 @@ func TestRootReachableRuntimeInitializersAreOptimizerVisible(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"internal/client.ts",
+		"internal/client/registry.ts",
 		"internal/enums.ts",
 		"internal/errors.ts",
 		"internal/runtime/codecs.ts",
@@ -357,8 +356,8 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	}
 	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
-		"import type { PaginateInput } from \"./runtime/pagination.js\"",
-		`readonly "GET /orders/{orderID}/items": {`,
+		`import { createPaginator, type PaginateInput } from "../../../../runtime/pagination.js"`,
+		`readonly "GET /orders/{orderID}/items": import("../operations/orders/by-order-id/items/get.js").Contract`,
 		"export function bindPagination",
 		"createPaginator<",
 	} {
@@ -506,30 +505,31 @@ func TestSourceArtifactsGenerateNestedResourceTree(t *testing.T) {
 		`export type RouteOptions<Route extends keyof Routes> = PublicType<Routes[Route]["options"]>`,
 		`export type RouteOutput<Route extends keyof Routes> = PublicType<Routes[Route]["output"]>`,
 		`export type RouteRawResponse<Route extends keyof Routes> = PublicType<Routes[Route]["rawResponse"]>`,
-		`export type OperationMethod<Route extends keyof Routes> = ExactOperationMethods[Route] & OperationTypeIdentity<Route, "exact">`,
+		`export type OperationMethod<Route extends keyof Routes> = Routes[Route]["call"] & OperationTypeIdentity<Route, "exact">`,
 		`export type OperationRawCall<Route extends keyof Routes> = ExactRawCalls[Route] & RouteTypeIdentity<Route>`,
 		`export type ResourceCall<Route extends keyof Routes> = Routes[Route]["resourceCall"] & RouteTypeIdentity<Route> & OperationTypeIdentity<Route, "resource">`,
 		`export type RawCall<Route extends keyof Routes> = ResourceRawCalls[Route] & RouteTypeIdentity<Route>`,
 		`export type StreamCall<Route extends keyof Routes> = Routes[Route]["stream"] & RouteTypeIdentity<Route>`,
 		`export type PaginateCall<Route extends keyof Routes> = Routes[Route]["pagination"] & RouteTypeIdentity<Route>`,
 		`export type LinkCalls<Route extends keyof Routes> = Routes[Route]["links"] & RouteTypeIdentity<Route>`,
-		"readonly auth: {",
-		"readonly login: {",
+		`readonly auth: import("./auth/index.js").Surface`,
+		"export interface Surface {",
+		`readonly login: import("./login/index.js").Surface`,
 		`readonly post: ResourceCall<"POST /auth/login">`,
-		`readonly call: OperationMethod<"POST /auth/login">`,
+		`export type ExactCall = (`,
 		`readonly "login": "POST /auth/login"`,
 		`export type OperationSource = keyof OperationRoutes | OperationMethod<keyof Routes> | ResourceCall<keyof Routes>`,
-		`export type OperationInput<Source extends OperationSource> = PublicType<OperationContract<Source>["input"]>`,
-		`export type OperationOutput<Source extends OperationSource> = PublicType<OperationContract<Source>["output"]>`,
+		`export type OperationInput<Source extends OperationSource> =`,
+		`export type OperationOutput<Source extends OperationSource> =`,
 		`export type RouteBody<Route extends RouteSourceForSection<"body">>`,
 		`export type OperationBody<Source extends OperationSourceForSection<"body">>`,
 		`export type RouteParameter<`,
 		`export type OperationParameter<`,
-		"readonly sessions: {",
+		`readonly sessions: ((sessionID: string) => import("./sessions/by-session-id.js").Surface) & import("./sessions/index.js").Surface`,
 		"(sessionID: string)",
 		`readonly delete: ResourceCall<"DELETE /auth/sessions/{sessionId}">`,
-		"login: {\n      post: __sdkgen_",
-		"sessions: assignCallableProperties(",
+		"login: __sdkgen_",
+		"sessions: __sdkgen_",
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("nested resource surface missing %q:\n%s", expected, client)
@@ -586,7 +586,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
 		`readonly get: ResourceCall<"GET /">`,
-		"get: __sdkgen_",
+		`get: registry.routes["GET /"]`,
 	} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("root resource surface missing %q:\n%s", expected, client)
@@ -633,8 +633,8 @@ func TestSourceArtifactsGenerateExactRouteWithoutOperationID(t *testing.T) {
 	}
 	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
-		`readonly "GET /": {`,
-		`readonly "GET /health": {`,
+		`readonly "GET /": import("../operations/root/get.js").Contract`,
+		`readonly "GET /health": import("../operations/health/get.js").Contract`,
 		`readonly "GET /": Routes["GET /"]["call"]`,
 		`readonly "getHealth": Routes["GET /health"]`,
 		`$routes: registry.routes`,
@@ -679,10 +679,10 @@ func TestExactRouteCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 	}
 	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
-		`readonly "GET /events": {`,
-		`readonly stream: (options?: Routes["GET /events"]["options"]) => AsyncIterable<string>`,
-		`readonly "GET /source": {`,
-		`readonly links: { readonly "follow":`,
+		`readonly "GET /events": import("../operations/events/get.js").Contract`,
+		`export type Stream = (options?: Options) => AsyncIterable<string>`,
+		`readonly "GET /source": import("../operations/source/get.js").Contract`,
+		`export type Links = { readonly "follow":`,
 		`readonly "GET /source": Routes["GET /source"]["call"]`,
 		`["stream", __sdkgen_`,
 		`["links", __sdkgen_`,

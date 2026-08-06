@@ -20,11 +20,15 @@ func TestGenerateEmitsTypeScriptFiles(t *testing.T) {
 	if len(result.Artifacts) == 0 {
 		t.Fatal("Generate() emitted no artifacts")
 	}
-	if result.Artifacts[0].Path != "internal/client.ts" {
-		t.Fatalf("first artifact path = %q", result.Artifacts[0].Path)
+	found := false
+	for _, artifact := range result.Artifacts {
+		if strings.HasPrefix(artifact.Path, "internal/operations/") && strings.Contains(artifact.Content, "listTodos") {
+			found = true
+			break
+		}
 	}
-	if !strings.Contains(result.Artifacts[0].Content, "listTodos") {
-		t.Fatal("generated client does not contain listTodos")
+	if !found {
+		t.Fatal("generated semantic operation tree does not contain listTodos")
 	}
 }
 

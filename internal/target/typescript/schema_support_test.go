@@ -99,7 +99,7 @@ func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 		}
 	}
 	client := clientSemanticSource(artifacts)
-	for _, expected := range []string{`Contract.ComponentInput<"Always">`, `Contract.ComponentOutput<"Never">`} {
+	for _, expected := range []string{`schemas/always.js`, `schemas/never.js`} {
 		if !strings.Contains(client, expected) {
 			t.Fatalf("named boolean operation bypassed component projection %q:\n%s", expected, client)
 		}

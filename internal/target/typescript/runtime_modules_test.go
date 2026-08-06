@@ -102,7 +102,7 @@ func generatedRuntimeArtifactMap(t *testing.T, document *ir.Document) map[string
 		if artifact.Path == "internal/runtime.ts" || artifact.Path == "internal/constants.ts" {
 			t.Fatalf("legacy runtime artifact remains: %s", artifact.Path)
 		}
-		if (artifact.Path == "internal/client.ts" || artifact.Path == "internal/errors.ts") && strings.Contains(string(artifact.Data), `from "./runtime.js"`) {
+		if (strings.HasPrefix(artifact.Path, "internal/client/") || artifact.Path == "internal/errors.ts") && strings.Contains(string(artifact.Data), `from "./runtime.js"`) {
 			t.Fatalf("legacy runtime import remains in %s", artifact.Path)
 		}
 	}

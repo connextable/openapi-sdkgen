@@ -393,7 +393,7 @@ func TestGeneratedLinksAndStreamsUseStandardHeaderParameters(t *testing.T) {
 	}
 	client := clientSemanticSource(artifacts)
 	for _, expected := range []string{
-		`invocation?: LinkInvocation<Routes["POST /target"]["input"], Routes["POST /target"]["options"]`,
+		`invocation?: LinkInvocation<import("../target/post.js").Contract["input"], import("../target/post.js").Contract["options"]`,
 		`readonly "Idempotency-Key": string`,
 		`readonly "If-Match": string`,
 		`readonly "tailEvents": StreamCall<"GET /events">`,
@@ -788,6 +788,14 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 		t.Fatal(err)
 	}
 	client := clientSemanticSource(artifacts)
+	plan, _, err := prepareSourcePlan(document, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactsByPath := make(map[string]string, len(artifacts))
+	for _, artifact := range artifacts {
+		artifactsByPath[artifact.Path] = string(artifact.Data)
+	}
 	routesByID := make(map[string]string, len(document.Operations))
 	for _, operation := range document.Operations {
 		routesByID[operation.OperationID] = operation.Method + " " + operation.Path
@@ -796,15 +804,13 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 		"getModern", "getLegacy", "listPeople", "getTenant", "getAlias",
 		"getProfile", "getSettings", "getPaginate", "getRaw",
 	} {
-		start := strings.Index(client, `readonly `+quoteTS(routesByID[operationID])+`: {`)
-		if start < 0 {
+		route := routesByID[operationID]
+		operationPath, exists := plan.modules.operationByRoute[route]
+		if !exists || !strings.Contains(client, `readonly `+quoteTS(route)+`: import(`) {
 			t.Fatalf("operation %q missing from route contracts:\n%s", operationID, client)
 		}
-		entry := client[start:]
-		if end := strings.Index(entry, "\n  }"); end >= 0 {
-			entry = entry[:end]
-		}
-		if !strings.Contains(entry, "readonly resourceCall: never") {
+		entry := artifactsByPath[operationPath]
+		if !strings.Contains(entry, "export type ResourceCall = never") {
 			t.Fatalf("operation %q retained ambiguous resource call:\n%s", operationID, entry)
 		}
 	}
@@ -2865,7 +2871,7 @@ func TestVisibleRecursiveComponentCanServeRequestSuccessAndErrorRoles(t *testing
 			t.Fatalf("dual-role component missing %q:\n%s", expected, types)
 		}
 	}
-	if !strings.Contains(errorsSource, `"node_error"`) || !strings.Contains(client, `readonly error: Errors.ServerError<"node_error"`) {
+	if !strings.Contains(errorsSource, `"node_error"`) || !strings.Contains(client, `export type Error = Errors.ServerError<"node_error"`) {
 		t.Fatalf("dual-role error contract missing:\n%s\n%s", errorsSource, client)
 	}
 	_ = compileTypeScriptArtifacts(t, document)

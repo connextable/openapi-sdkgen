@@ -20,6 +20,12 @@ func emitOperationArtifacts(document *ir.Document, manifest Manifest, plan *sema
 	for _, item := range manifest.Operations {
 		items[manifestRouteKey(item)] = item
 	}
+	tree, err := buildResourceTree(document, manifest, resourceCapabilityMembers(links, streams))
+	if err != nil {
+		return nil, err
+	}
+	resourceReachable := make(map[string]bool)
+	resourceOperationIDs(tree, resourceReachable)
 
 	artifacts := make([]Artifact, 0, len(plan.operations))
 	for _, module := range plan.operations {
@@ -31,7 +37,7 @@ func emitOperationArtifacts(document *ir.Document, manifest Manifest, plan *sema
 		if !exists {
 			return nil, fmt.Errorf("operation module %q has no manifest operation", module.routeKey)
 		}
-		source, err := emitOperationLeaf(document, plan, module, operation, item, links, streams)
+		source, err := emitOperationLeaf(document, plan, module, operation, item, resourceReachable[module.routeKey], links, streams)
 		if err != nil {
 			return nil, fmt.Errorf("emit operation module %q: %w", module.routeKey, err)
 		}
@@ -40,7 +46,7 @@ func emitOperationArtifacts(document *ir.Document, manifest Manifest, plan *sema
 	return artifacts, nil
 }
 
-func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module operationModulePlan, operation ir.Operation, item ManifestOperation, links []generatedLink, streams []generatedStream) ([]byte, error) {
+func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module operationModulePlan, operation ir.Operation, item ManifestOperation, resourceReachable bool, links []generatedLink, streams []generatedStream) ([]byte, error) {
 	runtimeCallables, err := relativeModuleSpecifier(module.path, "internal/runtime/callables.ts")
 	if err != nil {
 		return nil, err
@@ -57,6 +63,10 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	if err != nil {
 		return nil, err
 	}
+	runtimeIdentity, err := relativeModuleSpecifier(module.path, "internal/runtime/identity.ts")
+	if err != nil {
+		return nil, err
+	}
 	schemaIndex, err := relativeModuleSpecifier(module.path, plan.fixed["schema-index"])
 	if err != nil {
 		return nil, err
@@ -65,7 +75,10 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	if err != nil {
 		return nil, err
 	}
-
+	routeHelpers, err := relativeModuleSpecifier(module.path, plan.fixed["route-helpers"])
+	if err != nil {
+		return nil, err
+	}
 	var body bytes.Buffer
 	if err := emitOperationTypes(&body, document, operation, item); err != nil {
 		return nil, err
@@ -85,7 +98,7 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 		resourceInputType = operationName + "ResourceInput"
 	}
 	resourceCallType := "never"
-	if item.Visibility == "public" {
+	if item.Visibility == "public" && resourceReachable {
 		resourceCallType = operationName + "ResourceCall"
 	}
 
@@ -113,6 +126,15 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 			return nil, err
 		}
 	}
+	for _, capabilityType := range []*string{&paginationType, &linksType, &streamType} {
+		if *capabilityType == "never" {
+			continue
+		}
+		*capabilityType, err = localizeOperationTypeSource(*capabilityType, module, plan)
+		if err != nil {
+			return nil, err
+		}
+	}
 	capabilityTypes := []struct {
 		field string
 		value string
@@ -124,13 +146,13 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	exactCallType := operationName + "Call"
 	for _, capability := range capabilityTypes {
 		if capability.value != "never" {
-			exactCallType = "(" + exactCallType + ") & { readonly " + capability.field + ": " + titleCapabilityType(capability.field) + " }"
+			exactCallType = "(" + exactCallType + ") & { readonly " + capability.field + ": " + publicCapabilityType(capability.field) + "<RouteKey> }"
 		}
 	}
 	if resourceCallType != "never" && len(item.PathParameterOrder) == 0 {
 		for _, capability := range capabilityTypes {
 			if capability.value != "never" {
-				resourceCallType = "(" + resourceCallType + ") & { readonly " + capability.field + ": " + titleCapabilityType(capability.field) + " }"
+				resourceCallType = "(" + resourceCallType + ") & { readonly " + capability.field + ": " + publicCapabilityType(capability.field) + "<RouteKey> }"
 			}
 		}
 	}
@@ -144,6 +166,8 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	fmt.Fprintf(&output, "import type { WireSchemas } from %s\n", quoteTS(runtimeCodecs))
 	fmt.Fprintf(&output, "import type { TransportError } from %s\n", quoteTS(runtimeErrors))
 	fmt.Fprintf(&output, "import type { BinaryBody, RawResponseFor, RequestOptions } from %s\n", quoteTS(runtimeRequest))
+	fmt.Fprintf(&output, "import type { OperationTypeIdentity } from %s\n", quoteTS(runtimeIdentity))
+	fmt.Fprintf(&output, "import type { LinkCalls, OperationRawCall, PaginateCall, ResourceRawCapability, RouteInput, RouteOptions, RouteOutput, RouteRawResponse, RouteResourceInput, StreamCall } from %s\n", quoteTS(routeHelpers))
 	fmt.Fprintf(&output, "import type * as ContractSchemas from %s\n", quoteTS(schemaIndex))
 	fmt.Fprintf(&output, "import type * as Errors from %s\n", quoteTS(errorCatalog))
 	if operation.PaginationPlan != nil {
@@ -163,17 +187,7 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	}
 	output.WriteByte('\n')
 	fmt.Fprintf(&output, "export type RouteKey = %s\n", quoteTS(module.routeKey))
-	fmt.Fprintf(&output, "type RouteInput<Route extends RouteKey> = %s\n", inputType)
-	fmt.Fprintf(&output, "type RouteResourceInput<Route extends RouteKey> = %s\n", resourceInputType)
-	fmt.Fprintf(&output, "type RouteOptions<Route extends RouteKey> = %sOptions\n", operationName)
-	fmt.Fprintf(&output, "type RouteOutput<Route extends RouteKey> = %sOutput\n", operationName)
-	fmt.Fprintf(&output, "type RouteRawResponse<Route extends RouteKey> = %sRawResponse\n", operationName)
-	fmt.Fprintf(&output, "type OperationRawCall<Route extends RouteKey> = %sRawCall\n", operationName)
-	resourceRawCapability := "never"
-	if item.Visibility == "public" {
-		resourceRawCapability = operationName + "ResourceRawCall"
-	}
-	fmt.Fprintf(&output, "interface ResourceRawCapability<Route extends RouteKey> { readonly raw: %s }\n\n", resourceRawCapability)
+	output.WriteByte('\n')
 	output.WriteString(bodySource)
 
 	output.WriteString("export interface RequestInputs {\n")
@@ -198,7 +212,7 @@ func emitOperationLeaf(document *ir.Document, plan *semanticModulePlan, module o
 	fmt.Fprintf(&output, "export type Pagination = %s\n", paginationType)
 	fmt.Fprintf(&output, "export type Links = %s\n", linksType)
 	fmt.Fprintf(&output, "export type Stream = %s\n", streamType)
-	fmt.Fprintf(&output, "export type ExactCall = %s\n", exactCallType)
+	fmt.Fprintf(&output, "export type ExactCall = (%s) & OperationTypeIdentity<RouteKey, \"exact\">\n", exactCallType)
 	fmt.Fprintf(&output, "export type ResourceCall = %s\n\n", resourceCallType)
 	output.WriteString("export interface Contract {\n")
 	output.WriteString("  readonly input: Input\n")
@@ -317,14 +331,14 @@ func emitOperationLinkFactory(document *ir.Document, plan *semanticModulePlan, m
 	return output.Bytes(), nil
 }
 
-func titleCapabilityType(field string) string {
+func publicCapabilityType(field string) string {
 	switch field {
 	case "paginate":
-		return "Pagination"
+		return "PaginateCall"
 	case "links":
-		return "Links"
+		return "LinkCalls"
 	case "stream":
-		return "Stream"
+		return "StreamCall"
 	default:
 		return "never"
 	}
@@ -362,6 +376,17 @@ func localizeOperationTypeSource(source string, module operationModulePlan, plan
 }
 
 func localizeOperationSchemaReferences(source string, module operationModulePlan, plan *semanticModulePlan, schemaIndexSpecifier string) (string, error) {
+	protectedDocs := make(map[string]string)
+	lines := strings.Split(source, "\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "*") && strings.Contains(line, "ContractSchemas.Component") {
+			placeholder := fmt.Sprintf("__SDKGEN_SCHEMA_DOC_%d__", index)
+			protectedDocs[placeholder] = strings.ReplaceAll(line, "ContractSchemas.", "Contract.")
+			lines[index] = placeholder
+		}
+	}
+	source = strings.Join(lines, "\n")
 	imports := make([]string, 0)
 	for _, schema := range plan.schemas {
 		if !schema.publicProjection {
@@ -400,6 +425,9 @@ func localizeOperationSchemaReferences(source string, module operationModulePlan
 	source = strings.Replace(source, namespaceImport, replacement, 1)
 	if strings.Contains(source, "ContractSchemas.") {
 		return "", fmt.Errorf("operation %q retains an unplanned schema registry reference", module.routeKey)
+	}
+	for placeholder, line := range protectedDocs {
+		source = strings.Replace(source, placeholder, line, 1)
 	}
 	return source, nil
 }

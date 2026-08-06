@@ -633,7 +633,7 @@ func schemaWireSource(artifacts []Artifact) string {
 func clientSemanticSource(artifacts []Artifact) string {
 	var output strings.Builder
 	for _, artifact := range artifacts {
-		if artifact.Path == "internal/client.ts" || artifact.Path == "internal/client/registry.ts" || strings.HasPrefix(artifact.Path, "internal/operations/") {
+		if strings.HasPrefix(artifact.Path, "internal/client/") || strings.HasPrefix(artifact.Path, "internal/operations/") || strings.HasPrefix(artifact.Path, "internal/routes/") || strings.HasPrefix(artifact.Path, "internal/resources/") {
 			output.Write(artifact.Data)
 			output.WriteByte('\n')
 		}

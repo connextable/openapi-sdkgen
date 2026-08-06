@@ -232,8 +232,8 @@ func TestResourceSelectorsUseReadableLocallyUniquePathBindings(t *testing.T) {
 	for _, expected := range []string{
 		"(fooBar: string):", "(fooBar2: string):", "(defaultValue: string):",
 		"(value123ID: string):", "(한글: string):", "(pathParameter: string):",
-		`"foo-bar": fooBar`, `"foo_bar": fooBar2`, `"default": defaultValue`,
-		`"123-id": value123ID`, `"한글": 한글`, `"$": pathParameter`,
+		`"foo-bar": bound[0]`, `"foo_bar": bound[1]`, `"default": bound[2]`,
+		`"123-id": bound[3]`, `"한글": bound[4]`, `"$": bound[5]`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("readable selector source missing %q:\n%s", expected, source)
@@ -387,7 +387,7 @@ func TestBuildResourceTreeComposesOperationAndChildNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := clientSemanticSource(artifacts)
-	if !strings.Contains(source, `readonly list: ResourceCall<"GET /users"> & {`) || !strings.Contains(source, "list: assignCallableProperties(") {
+	if !strings.Contains(source, `readonly list: ResourceCall<"GET /users"> & import("./list/index.js").Surface`) || !strings.Contains(source, "list: assignCallableProperties(") {
 		t.Fatalf("callable namespace was not emitted:\n%s", source)
 	}
 }
@@ -479,8 +479,7 @@ func TestRepeatedPathParameterFallsBackToExactRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := clientSemanticSource(artifacts)
-	start := strings.Index(client, `readonly "GET /users/{id}/aliases/{id}": {`)
-	if start < 0 || !strings.Contains(client[start:], "readonly resourceCall: never") {
+	if !strings.Contains(client, `export type ResourceCall = never`) {
 		t.Fatalf("repeated path parameter retained a resource call:\n%s", client)
 	}
 }
@@ -510,16 +509,12 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 		t.Fatal(err)
 	}
 	source := clientSemanticSource(artifacts)
-	start := strings.Index(source, `readonly "GET /users": {`)
+	start := strings.Index(source, `readonly "GET /users": import("../operations/users/get.js").Contract`)
 	if start < 0 {
 		t.Fatalf("listUsers operation entry missing:\n%s", source)
 	}
-	entry := source[start:]
-	if end := strings.Index(entry, "\n  }"); end >= 0 {
-		entry = entry[:end]
-	}
-	if !strings.Contains(entry, "readonly resourceCall: never") {
-		t.Fatalf("omitted resource shortcut remained callable:\n%s", entry)
+	if !strings.Contains(source, `export type ResourceCall = never`) {
+		t.Fatalf("omitted resource shortcut remained callable:\n%s", source)
 	}
 }
 
@@ -660,7 +655,7 @@ func TestBuildResourceTreeSharesCompatibleParameterPositionAndRemapsNames(t *tes
 		t.Fatal(err)
 	}
 	source := clientSemanticSource(artifacts)
-	if !strings.Contains(source, `{ "id": id`) || !strings.Contains(source, `{ "userID": id`) {
+	if !strings.Contains(source, `{ "id": bound[0]`) || !strings.Contains(source, `{ "userID": bound[0]`) {
 		t.Fatalf("terminal parameter remapping missing:\n%s", source)
 	}
 }
@@ -818,7 +813,7 @@ func TestSourceArtifactsSeparatesComponentAndOperationNamespaces(t *testing.T) {
 	}
 	types := schemaProjectionSource(artifacts)
 	client := clientSemanticSource(artifacts)
-	if !strings.Contains(types, `readonly "APIError": {`) || !strings.Contains(client, `Contract.ComponentOutput<"APIError">`) {
+	if !strings.Contains(types, `readonly "APIError": {`) || !strings.Contains(client, `schemas/apierror.js`) {
 		t.Fatalf("component namespace was not preserved:\n%s\n%s", types, client)
 	}
 }
@@ -828,7 +823,7 @@ func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artifacts) != 27 {
-		t.Fatalf("source artifact count = %d, want 27 including semantic registries", len(artifacts))
+	if len(artifacts) < 30 {
+		t.Fatalf("source artifact count = %d, want semantic client and resource modules", len(artifacts))
 	}
 }

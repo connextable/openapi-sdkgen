@@ -309,12 +309,16 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientSource, err := emitClient(document, manifest, plan.links, plan.streams)
+	resourceArtifacts, err := emitResourceArtifacts(document, manifest, plan.modules, plan.links, plan.streams)
+	if err != nil {
+		return nil, err
+	}
+	clientArtifacts, clientIndexSource, err := emitClientArtifacts(document, manifest, plan.modules, plan.links, plan.streams)
 	if err != nil {
 		return nil, err
 	}
 	if err := validateSourceExportSymbols(map[string][]byte{
-		"client":    clientSource,
+		"client":    clientIndexSource,
 		"constants": constantsSource,
 		"enums":     enumsSource,
 		"errors":    errorsSource,
@@ -331,7 +335,6 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 
 	artifacts := []Artifact{
 		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./internal/index.js\"\n"))},
-		{Path: "internal/client.ts", Data: generatedSource(clientSource)},
 		{Path: "internal/enums.ts", Data: generatedSource(enumsSource)},
 		{Path: "internal/errors.ts", Data: generatedSource(errorsSource)},
 		{Path: "internal/index.ts", Data: generatedSource(indexSource)},
@@ -343,6 +346,8 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	artifacts = append(artifacts, operationArtifacts...)
 	artifacts = append(artifacts, routeArtifacts...)
 	artifacts = append(artifacts, Artifact{Path: plan.modules.fixed["client-registry"], Data: generatedSource(registrySource)})
+	artifacts = append(artifacts, resourceArtifacts...)
+	artifacts = append(artifacts, clientArtifacts...)
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {
@@ -379,9 +384,13 @@ func generatedIndexSource(enumsSource []byte) []byte {
 	var output strings.Builder
 	output.WriteString("export type * from \"./schemas/index.js\"\n")
 	output.WriteString("export type { BothPaginationInput, CursorPaginationInput, OffsetPaginationInput } from \"./runtime/pagination.js\"\n")
-	for _, module := range []string{"enums", "errors", "client"} {
+	for _, module := range []string{"enums", "errors"} {
 		fmt.Fprintf(&output, "export type * from %s\n", quoteTS("./"+module+".js"))
 	}
+	output.WriteString("export type * from \"./routes/index.js\"\n")
+	output.WriteString("export type * from \"./routes/helpers.js\"\n")
+	output.WriteString("export type * from \"./client/index.js\"\n")
+	output.Write(publicRuntimeExportSource())
 	output.WriteString("export { SortDirection } from \"./runtime/constants.js\"\n")
 	if exportedSymbols(string(enumsSource))["isEnumValue"] {
 		output.WriteString("export { Enums, isEnumValue } from \"./enums.js\"\n")
@@ -389,7 +398,7 @@ func generatedIndexSource(enumsSource []byte) []byte {
 		output.WriteString("export { Enums } from \"./enums.js\"\n")
 	}
 	output.WriteString("export { isErrorCategory } from \"./errors.js\"\n")
-	output.WriteString("export { createClient } from \"./client.js\"\n")
+	output.WriteString("export { createClient } from \"./client/index.js\"\n")
 	output.WriteString("export { APIError, TransportErrorCode, getErrorCode, getRequestID, isAPIError, isErrorCode } from \"./runtime/errors.js\"\n")
 	return []byte(output.String())
 }

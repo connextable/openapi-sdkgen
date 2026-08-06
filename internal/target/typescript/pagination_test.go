@@ -30,7 +30,8 @@ func TestHermeticItemPaginationFixtureGenerates(t *testing.T) {
 	for _, expected := range []string{
 		`readonly "GET /items":`,
 		`readonly paginate:`,
-		`AsyncIterable<Contract.ComponentOutput<"Item">>`,
+		`from "../../schemas/item.js"`,
+		`AsyncIterable<__sdkgen_itemOutput_`,
 		`["response", /* @__PURE__ */ Object.fromEntries([["items", ["data"]], ["nextCursor", ["meta","pagination","nextCursor"]]])]`,
 	} {
 		if !strings.Contains(client, expected) {

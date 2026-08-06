@@ -42,7 +42,7 @@ func TestVersionFeatureFixturesGenerateForTypeScript(t *testing.T) {
 				t.Fatalf("TypeScript source missing %q:\n%s", test.want, source)
 			}
 			probe := fmt.Sprintf(`
-import type { Client, OperationInput, OperationOutput, RouteInput, RouteOutput } from "./internal/client.js"
+import type { Client, OperationInput, OperationOutput, RouteInput, RouteOutput } from "./index.js"
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends (<Value>() => Value extends Right ? 1 : 2) ? true : false
 type Expect<Value extends true> = Value
 type Method = Client["$operations"][%q]

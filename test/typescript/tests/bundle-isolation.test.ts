@@ -100,7 +100,7 @@ beforeAll(async () => {
     rootError: rootValue("isAPIError"),
     directError: directValue("isAPIError", "runtime/errors"),
     rootClient: rootValue("createClient"),
-    directClient: directValue("createClient", "client"),
+    directClient: directValue("createClient", "client/index"),
     rootSort: rootValue("SortDirection"),
     directSort: directValue("SortDirection", "runtime/constants"),
     rootEnums: rootValue("Enums"),
@@ -141,9 +141,11 @@ describe("generated public entry bundle isolation", () => {
     const result = results.rootClient;
     expect(result).toBeDefined();
     expect(internalModules(result!), bundleEvidence(result!)).toEqual([
-      "internal/client.ts",
+      "internal/client/factory.ts",
       "internal/client/registry.ts",
       "internal/operations/bundle-isolation-sentinel/get.ts",
+      "internal/resources/bundle-isolation-sentinel/index.ts",
+      "internal/resources/root.ts",
       "internal/runtime/callables.ts",
       "internal/runtime/codecs.ts",
       "internal/runtime/errors.ts",

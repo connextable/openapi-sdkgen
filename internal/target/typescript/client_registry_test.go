@@ -32,7 +32,7 @@ func TestCallableRegistryOwnsSingleBindingAndCapabilityAssembly(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := string(artifactByPath(t, artifacts, "internal/client/registry.ts"))
-	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	client := string(artifactByPath(t, artifacts, "internal/client/factory.ts"))
 
 	if got := strings.Count(registry, "bindBase as "); got != 3 {
 		t.Fatalf("base factory imports = %d, want one per non-hidden route:\n%s", got, registry)
