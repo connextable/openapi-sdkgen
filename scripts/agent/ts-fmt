@@ -2,3 +2,4 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
 agent_run "TypeScript format" ts_pnpm run fmt
+agent_run "TypeScript runtime format" ts_pnpm exec oxfmt "$ROOT/internal/target/typescript/runtime"

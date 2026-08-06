@@ -2,9 +2,4 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
 agent_run "TypeScript format check" ts_pnpm run fmt:check
-
-runtime_source="$ROOT/internal/target/typescript/runtime.ts"
-check_runtime_indentation() {
-  ! grep -n $'\t' "$runtime_source"
-}
-agent_run "TypeScript runtime indentation check" check_runtime_indentation
+agent_run "TypeScript runtime format check" ts_pnpm exec oxfmt --check "$ROOT/internal/target/typescript/runtime"

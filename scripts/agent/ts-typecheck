@@ -2,4 +2,5 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/agent/lib.sh"
 "$ROOT/scripts/agent/prepare-conformance"
+agent_run "TypeScript runtime typecheck" ts_node node "$TYPESCRIPT_ROOT/node_modules/typescript/lib/tsc.js" --project "$ROOT/internal/target/typescript/runtime/tsconfig.json"
 agent_run "TypeScript typecheck" ts_pnpm run typecheck

@@ -12,8 +12,11 @@ import (
 	"openapi-sdkgen/internal/generator"
 )
 
-//go:embed runtime.ts
+//go:embed runtime/generated/runtime.ts
 var runtimeTemplate []byte
+
+//go:embed runtime/server/runtime.ts
+var serverRuntimeTemplate []byte
 
 // Artifact is a generated TypeScript source file.
 type Artifact = generator.Artifact
