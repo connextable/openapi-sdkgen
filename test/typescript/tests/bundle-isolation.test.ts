@@ -148,6 +148,10 @@ describe("generated public entry bundle isolation", () => {
       "internal/runtime/http.ts",
       "internal/runtime/objects.ts",
       "internal/runtime/operation.ts",
+      "internal/schemas/isolation-mode.ts",
+      "internal/schemas/isolation-record.ts",
+      "internal/schemas/isolation-rejected-error.ts",
+      "internal/schemas/wire.ts",
     ]);
     expect(result!.code).not.toContain("Symbol.iterator");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");

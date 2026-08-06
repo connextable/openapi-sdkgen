@@ -10,12 +10,26 @@ import (
 	"openapi-sdkgen/internal/compiler/naming"
 )
 
-type typeRenderScope uint8
+type typeRenderMode uint8
 
 const (
-	typeRenderLocal typeRenderScope = iota
-	typeRenderContract
+	typeRenderModeLocal typeRenderMode = iota
+	typeRenderModeContract
 )
+
+type typeRenderScope struct {
+	mode               typeRenderMode
+	componentReference func(name string, direction projection) string
+}
+
+var (
+	typeRenderLocal    = typeRenderScope{mode: typeRenderModeLocal}
+	typeRenderContract = typeRenderScope{mode: typeRenderModeContract}
+)
+
+func typeRenderModule(reference func(name string, direction projection) string) typeRenderScope {
+	return typeRenderScope{mode: typeRenderModeLocal, componentReference: reference}
+}
 
 // typeExpression keeps local and cross-module renderings together so emitters
 // never have to discover component references by rewriting rendered source.
@@ -43,7 +57,7 @@ func componentProjectionTypeExpression(name string, direction projection) typeEx
 }
 
 func (expression typeExpression) render(scope typeRenderScope) string {
-	if scope == typeRenderContract {
+	if scope.mode == typeRenderModeContract {
 		return expression.contract
 	}
 	return expression.local

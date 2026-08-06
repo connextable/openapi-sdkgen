@@ -36,7 +36,7 @@ func emitErrors(document *ir.Document) ([]byte, error) {
 		output.WriteString("import { isErrorCode } from \"./runtime/errors.js\"\n")
 	}
 	if errorContractsUseContractTypes(contracts) {
-		output.WriteString("import type * as Contract from \"./types.js\"\n")
+		output.WriteString("import type * as Contract from \"./schemas/index.js\"\n")
 	}
 	output.WriteString("\n")
 

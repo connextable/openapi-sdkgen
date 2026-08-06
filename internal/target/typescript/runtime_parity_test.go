@@ -2853,13 +2853,13 @@ func TestVisibleRecursiveComponentCanServeRequestSuccessAndErrorRoles(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	types := string(artifactByPath(t, artifacts, "internal/types.ts"))
+	types := schemaProjectionSource(artifacts)
 	errorsSource := string(artifactByPath(t, artifacts, "internal/errors.ts"))
 	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
 		`readonly "NodeError": {`,
-		`readonly "child"?: ComponentInput<"NodeError">`,
-		`readonly "child"?: ComponentOutput<"NodeError">`,
+		`readonly "child"?: Input`,
+		`readonly "child"?: Output`,
 	} {
 		if !strings.Contains(types, expected) {
 			t.Fatalf("dual-role component missing %q:\n%s", expected, types)

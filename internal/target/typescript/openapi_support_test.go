@@ -553,9 +553,9 @@ func TestSourceArtifactsGenerateAcrossSupportedOpenAPIVersionLines(t *testing.T)
 		schema  string
 		want    string
 	}{
-		{"3.0.3", `{"type":"string","nullable":true}`, "readonly input: string | null"},
-		{"3.1.1", `{"type":["string","null"]}`, "readonly input: string | null"},
-		{"3.2.0", `{"const":"stable"}`, `readonly input: "stable"`},
+		{"3.0.3", `{"type":"string","nullable":true}`, "export type Input = string | null"},
+		{"3.1.1", `{"type":["string","null"]}`, "export type Input = string | null"},
+		{"3.2.0", `{"const":"stable"}`, `export type Input = "stable"`},
 	} {
 		t.Run(test.version, func(t *testing.T) {
 			input := fmt.Sprintf(`{
@@ -572,7 +572,7 @@ func TestSourceArtifactsGenerateAcrossSupportedOpenAPIVersionLines(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, test.want) {
+			if source := schemaProjectionSource(artifacts); !strings.Contains(source, test.want) {
 				t.Fatalf("types source missing %q:\n%s", test.want, source)
 			}
 		})
@@ -592,7 +592,7 @@ func TestSourceArtifactsDoesNotApplyOpenAPI30NullableToOpenAPI31Schemas(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, "readonly input: string") || strings.Contains(source, "readonly input: string | null") {
+	if source := schemaProjectionSource(artifacts); !strings.Contains(source, "export type Input = string") || strings.Contains(source, "export type Input = string | null") {
 		t.Fatalf("unexpected nullable 3.1 lowering:\n%s", source)
 	}
 }
@@ -606,4 +606,26 @@ func artifactByPath(t *testing.T, artifacts []Artifact, path string) []byte {
 	}
 	t.Fatalf("missing artifact %s", path)
 	return nil
+}
+
+func schemaProjectionSource(artifacts []Artifact) string {
+	var output strings.Builder
+	for _, artifact := range artifacts {
+		if strings.HasPrefix(artifact.Path, "internal/schemas/") && artifact.Path != "internal/schemas/wire.ts" {
+			output.Write(artifact.Data)
+			output.WriteByte('\n')
+		}
+	}
+	return output.String()
+}
+
+func schemaWireSource(artifacts []Artifact) string {
+	var output strings.Builder
+	for _, artifact := range artifacts {
+		if strings.HasPrefix(artifact.Path, "internal/schemas/") && artifact.Path != "internal/schemas/index.ts" {
+			output.Write(artifact.Data)
+			output.WriteByte('\n')
+		}
+	}
+	return output.String()
 }

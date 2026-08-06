@@ -17,61 +17,6 @@ const (
 	projectionOutput projection = "output"
 )
 
-func emitTypes(document *ir.Document) ([]byte, error) {
-	var output bytes.Buffer
-	output.WriteString("/** Query controls for cursor-based pagination. */\n")
-	output.WriteString("export type CursorPaginationInput = {\n")
-	output.WriteString("  /** Opaque cursor returned by the previous page. Omit for the first page. */\n  readonly cursor?: string | undefined\n")
-	output.WriteString("  /** Maximum number of items requested for one page. */\n  readonly limit?: number | undefined\n")
-	output.WriteString("  /** Offset pagination is unavailable in cursor mode. */\n  readonly offset?: never\n")
-	output.WriteString("}\n")
-	output.WriteString("/** Query controls for offset-based pagination. */\n")
-	output.WriteString("export type OffsetPaginationInput = {\n")
-	output.WriteString("  /** Zero-based index of the first requested item. */\n  readonly offset?: number | undefined\n")
-	output.WriteString("  /** Maximum number of items requested for one page. */\n  readonly limit?: number | undefined\n")
-	output.WriteString("  /** Cursor pagination is unavailable in offset mode. */\n  readonly cursor?: never\n")
-	output.WriteString("}\n")
-	output.WriteString("/** Query controls for an operation supporting either cursor or offset pagination. */\n")
-	output.WriteString("export type BothPaginationInput = CursorPaginationInput | OffsetPaginationInput\n\n")
-
-	reachable := reachableComponentSchemas(document)
-	names := make([]string, 0, len(reachable))
-	for name := range reachable {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	output.WriteString("/** Component types keyed by exact OpenAPI schema names. */\n")
-	output.WriteString("export interface Components {\n")
-	for _, schemaName := range names {
-		schema := componentSchemaValue(document, schemaName)
-		input, err := schemaType(document, schema, projectionInput)
-		if err != nil {
-			return nil, fmt.Errorf("component %s input: %w", schemaName, err)
-		}
-		outputType, err := schemaType(document, schema, projectionOutput)
-		if err != nil {
-			return nil, fmt.Errorf("component %s output: %w", schemaName, err)
-		}
-		if object, ok := schema.(map[string]any); ok {
-			emitSchemaValueJSDoc(&output, "  ", object, "OpenAPI component `"+sanitizeComment(schemaName)+"`.")
-		} else {
-			fmt.Fprintf(&output, "  /** OpenAPI component `%s`. */\n", sanitizeComment(schemaName))
-		}
-		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(schemaName))
-		output.WriteString("    /** Request/input projection. */\n")
-		fmt.Fprintf(&output, "    readonly input: %s\n", input)
-		output.WriteString("    /** Response/output projection. */\n")
-		fmt.Fprintf(&output, "    readonly output: %s\n", outputType)
-		output.WriteString("  }\n")
-	}
-	output.WriteString("}\n\n")
-	output.WriteString("/** Input projection for an exact OpenAPI component schema name. */\n")
-	output.WriteString("export type ComponentInput<Name extends keyof Components> = Components[Name][\"input\"]\n")
-	output.WriteString("/** Output projection for an exact OpenAPI component schema name. */\n")
-	output.WriteString("export type ComponentOutput<Name extends keyof Components> = Components[Name][\"output\"]\n\n")
-	return output.Bytes(), nil
-}
-
 func reachableComponentSchemas(document *ir.Document) map[string]bool {
 	visible := make(map[string]bool)
 	hidden := make(map[string]bool)
@@ -487,6 +432,9 @@ func objectAdditionalType(document *ir.Document, schema map[string]any, directio
 
 func referencedType(document *ir.Document, name string, direction projection, scope typeRenderScope) (string, error) {
 	_ = document
+	if scope.componentReference != nil {
+		return scope.componentReference(name, direction), nil
+	}
 	return componentProjectionTypeExpression(name, direction).render(scope), nil
 }
 

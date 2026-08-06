@@ -70,12 +70,19 @@ func buildSemanticModulePlan(document *ir.Document, manifest Manifest, links []g
 }
 
 func (plan *semanticModulePlan) planSchemas(document *ir.Document) error {
+	reachable := reachableComponentSchemas(document)
+	inputWire := hasVisibleInputSchemas(document)
+	outputWire := hasVisibleResponseBodies(document)
 	all := make(map[string]bool, len(document.ComponentSchemas)+len(document.Schemas))
 	for name := range document.ComponentSchemas {
-		all[name] = true
+		if reachable[name] || inputWire || outputWire {
+			all[name] = true
+		}
 	}
 	for name := range document.Schemas {
-		all[name] = true
+		if reachable[name] || inputWire || outputWire {
+			all[name] = true
+		}
 	}
 	names := sortedStringKeys(all)
 	candidates := make([]artifactPathCandidate, 0, len(names))
@@ -86,9 +93,8 @@ func (plan *semanticModulePlan) planSchemas(document *ir.Document) error {
 	if err != nil {
 		return fmt.Errorf("plan schema artifacts: %w", err)
 	}
-	reachable := reachableComponentSchemas(document)
 	for _, name := range names {
-		item := schemaModulePlan{name: name, path: paths[name], publicProjection: reachable[name], inputWire: true, outputWire: true}
+		item := schemaModulePlan{name: name, path: paths[name], publicProjection: reachable[name], inputWire: inputWire, outputWire: outputWire}
 		plan.schemas = append(plan.schemas, item)
 		plan.schemaByName[name] = item.path
 	}

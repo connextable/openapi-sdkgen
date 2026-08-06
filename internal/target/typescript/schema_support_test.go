@@ -86,13 +86,13 @@ func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/types.ts"))
+	source := schemaProjectionSource(artifacts)
 	for _, expected := range []string{
 		`readonly "Always": {`,
 		`readonly "Never": {`,
 		`readonly "Unused": {`,
-		`readonly input: unknown`,
-		`readonly output: never`,
+		`export type Input = unknown`,
+		`export type Output = never`,
 	} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("named boolean component type missing %q:\n%s", expected, source)
@@ -145,7 +145,7 @@ func TestSourceArtifactsDecodesEscapedComponentSchemaReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `reference: "a/b"`) {
+	if source := schemaWireSource(artifacts); !strings.Contains(source, `reference: "a/b"`) {
 		t.Fatalf("escaped component reference was not decoded:\n%s", source)
 	}
 }
@@ -177,7 +177,7 @@ func TestSourceArtifactsLowersAnchoredSchemaReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := schemaWireSource(artifacts)
 	if !strings.Contains(source, `reference: "Node"`) {
 		t.Fatalf("anchor reference was not emitted as a component reference:\n%s", source)
 	}
@@ -196,7 +196,7 @@ func TestSourceArtifactsLowersLocalDefinitionsBeforeTypeScriptEmission(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(artifactByPath(t, artifacts, "internal/client.ts"))
+	source := schemaWireSource(artifacts)
 	if !strings.Contains(source, "minLength: 3") {
 		t.Fatalf("local definition validation was not lowered:\n%s", source)
 	}
@@ -269,7 +269,7 @@ func TestSourceArtifactsEmitsPatternPropertyWireSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "internal/types.ts")); !strings.Contains(source, "labels") {
+	if source := schemaProjectionSource(artifacts); !strings.Contains(source, "labels") {
 		t.Fatalf("pattern property type missing:\n%s", source)
 	}
 }
@@ -292,7 +292,7 @@ func TestSourceArtifactsEmitsVariantWireBranchSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, "oneOf:") || !strings.Contains(source, `types: ["string"]`) {
+	if source := schemaWireSource(artifacts); !strings.Contains(source, "oneOf:") || !strings.Contains(source, `types: ["string"]`) {
 		t.Fatalf("variant wire descriptor missing:\n%s", source)
 	}
 }
@@ -315,7 +315,7 @@ func TestSourceArtifactsEmitsNegatedSchemaAssertion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(artifactByPath(t, artifacts, "internal/client.ts")); !strings.Contains(source, `not: { constValue: "forbidden" }`) {
+	if source := schemaWireSource(artifacts); !strings.Contains(source, `not: { constValue: "forbidden" }`) {
 		t.Fatalf("negated schema descriptor missing:\n%s", source)
 	}
 }

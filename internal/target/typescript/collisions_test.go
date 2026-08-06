@@ -81,7 +81,7 @@ func TestSourceArtifactsAllowsMissingOperationIDForEveryVisibility(t *testing.T)
 	}
 }
 
-func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *testing.T) {
+func TestSchemaModulesPreserveNormalizedAndProjectionComponentNameCollisions(t *testing.T) {
 	for name, schema := range map[string]map[string]map[string]any{
 		"normalized": {
 			"foo-bar": map[string]any{"type": "string"},
@@ -94,16 +94,17 @@ func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *tes
 	} {
 		t.Run(name, func(t *testing.T) {
 			document := &ir.Document{ComponentSchemas: schema}
-			source, err := emitTypes(document)
+			artifacts, err := SourceArtifacts(document)
 			if err != nil {
 				t.Fatal(err)
 			}
+			source := schemaProjectionSource(artifacts)
 			for component := range schema {
-				if !strings.Contains(string(source), "readonly "+quoteTS(component)+": {") {
+				if !strings.Contains(source, "readonly "+quoteTS(component)+": {") {
 					t.Fatalf("component %q missing from exact-key type map:\n%s", component, source)
 				}
 			}
-			if strings.Contains(string(source), "export type ProductInput =") || strings.Contains(string(source), "export type FooBar =") {
+			if strings.Contains(source, "export type ProductInput =") || strings.Contains(source, "export type FooBar =") {
 				t.Fatalf("flat normalized component alias leaked:\n%s", source)
 			}
 		})
@@ -815,7 +816,7 @@ func TestSourceArtifactsSeparatesComponentAndOperationNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	types := string(artifactByPath(t, artifacts, "internal/types.ts"))
+	types := schemaProjectionSource(artifacts)
 	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	if !strings.Contains(types, `readonly "APIError": {`) || !strings.Contains(client, `Contract.ComponentOutput<"APIError">`) {
 		t.Fatalf("component namespace was not preserved:\n%s\n%s", types, client)
@@ -827,7 +828,7 @@ func TestSourceArtifactsDoesNotRequireNPMNameOrSemVer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(artifacts) != 22 {
-		t.Fatalf("source artifact count = %d, want 22", len(artifacts))
+	if len(artifacts) != 23 {
+		t.Fatalf("source artifact count = %d, want 23", len(artifacts))
 	}
 }

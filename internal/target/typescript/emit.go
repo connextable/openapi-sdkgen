@@ -277,7 +277,7 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		return nil, fmt.Errorf("internal TypeScript target: prepared plan has no manifest")
 	}
 	manifest := *plan.manifest
-	typesSource, err := emitTypes(document)
+	schemaArtifacts, typesSource, err := emitSchemaArtifacts(document, plan.modules)
 	if err != nil {
 		return nil, err
 	}
@@ -323,11 +323,11 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		{Path: "internal/enums.ts", Data: generatedSource(enumsSource)},
 		{Path: "internal/errors.ts", Data: generatedSource(errorsSource)},
 		{Path: "internal/index.ts", Data: generatedSource(indexSource)},
-		{Path: "internal/types.ts", Data: generatedSource(typesSource)},
 		{Path: "enums.ts", Data: generatedSource([]byte("export * from \"./internal/enums.js\"\n"))},
 		{Path: "metadata.ts", Data: generatedSource(metadataSource)},
 	}
 	artifacts = append(artifacts, runtimeArtifacts...)
+	artifacts = append(artifacts, schemaArtifacts...)
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {
@@ -362,7 +362,9 @@ func artifactEmissionOrder(path string) string {
 
 func generatedIndexSource(enumsSource []byte) []byte {
 	var output strings.Builder
-	for _, module := range []string{"types", "enums", "errors", "client"} {
+	output.WriteString("export type * from \"./schemas/index.js\"\n")
+	output.WriteString("export type { BothPaginationInput, CursorPaginationInput, OffsetPaginationInput } from \"./runtime/pagination.js\"\n")
+	for _, module := range []string{"enums", "errors", "client"} {
 		fmt.Fprintf(&output, "export type * from %s\n", quoteTS("./"+module+".js"))
 	}
 	output.WriteString("export { SortDirection } from \"./runtime/constants.js\"\n")

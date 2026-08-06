@@ -67,20 +67,16 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	output.WriteString("import type { ClientOptions } from \"./runtime/configuration.js\"\n")
 	output.WriteString("import type { BinaryBody, RawResponseFor, RequestOptions } from \"./runtime/request.js\"\n")
 	output.WriteString("import type { TransportError } from \"./runtime/errors.js\"\n")
-	output.WriteString("import type { WireSchemas } from \"./runtime/codecs.js\"\n")
 	output.WriteString("import type { OperationSurface, OperationTypeIdentity, RouteTypeIdentity } from \"./runtime/identity.js\"\n")
-	output.WriteString("import type * as Contract from \"./types.js\"\n\n")
+	if hasVisibleInputSchemas(document) && hasVisibleResponseBodies(document) {
+		output.WriteString("import { inputSchemas, outputSchemas } from \"./schemas/wire.js\"\n")
+	} else if hasVisibleInputSchemas(document) {
+		output.WriteString("import { inputSchemas } from \"./schemas/wire.js\"\n")
+	} else if hasVisibleResponseBodies(document) {
+		output.WriteString("import { outputSchemas } from \"./schemas/wire.js\"\n")
+	}
+	output.WriteString("import type * as Contract from \"./schemas/index.js\"\n\n")
 	output.WriteString("import type * as Errors from \"./errors.js\"\n\n")
-	if hasVisibleInputSchemas(document) {
-		if err := emitWireComponents(&output, document, "inputSchemas", projectionInput); err != nil {
-			return nil, err
-		}
-	}
-	if hasVisibleResponseBodies(document) {
-		if err := emitWireComponents(&output, document, "outputSchemas", projectionOutput); err != nil {
-			return nil, err
-		}
-	}
 	output.WriteString("export {\n")
 	output.WriteString("  APIError,\n")
 	output.WriteString("  TransportErrorCode,\n")

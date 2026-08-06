@@ -52,8 +52,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	if len(artifacts) != 22 {
-		t.Fatalf("source artifact count = %d, want exactly 22 TypeScript files", len(artifacts))
+	if len(artifacts) != 31 {
+		t.Fatalf("source artifact count = %d, want exactly 31 TypeScript files", len(artifacts))
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -61,10 +61,11 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		}
 	}
 
-	typesSource := string(artifacts["internal/types.ts"])
+	typesSource := schemaProjectionSource(first)
+	schemaRegistrySource := string(artifacts["internal/schemas/index.ts"])
 	for _, forbidden := range []string{"export const ", "export function ", "Object.fromEntries", "Object.create"} {
-		if strings.Contains(typesSource, forbidden) {
-			t.Fatalf("types module contains runtime statement %q:\n%s", forbidden, typesSource)
+		if strings.Contains(schemaRegistrySource, forbidden) {
+			t.Fatalf("schema type registry contains runtime statement %q:\n%s", forbidden, schemaRegistrySource)
 		}
 	}
 	for _, expected := range []string{
@@ -72,9 +73,9 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"readonly input:",
 		"readonly output:",
 		`readonly "note"?: string | undefined`,
-		`readonly input: "ready" | 2 | null`,
-		"readonly input: readonly [number, number, ...unknown[]]",
-		"readonly output: readonly [number, number, ...unknown[]]",
+		`export type Input = "ready" | 2 | null`,
+		"export type Input = readonly [number, number, ...unknown[]]",
+		"export type Output = readonly [number, number, ...unknown[]]",
 		`export type ComponentInput<Name extends keyof Components> = Components[Name]["input"]`,
 		`export type ComponentOutput<Name extends keyof Components> = Components[Name]["output"]`,
 	} {
@@ -82,9 +83,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Errorf("types missing %q\n%s", expected, typesSource)
 		}
 	}
-	productStart := strings.Index(typesSource, `readonly "Product": {`)
-	pageStart := strings.Index(typesSource, `readonly "ProductPage": {`)
-	product := typesSource[productStart:pageStart]
+	product := string(artifacts["internal/schemas/product.ts"])
 	productOutputStart := strings.Index(product, "/** Response/output projection. */")
 	productInput := product[:productOutputStart]
 	productOutput := product[productOutputStart:]
@@ -94,8 +93,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if !strings.Contains(productOutput, `readonly "id":`) || strings.Contains(productOutput, `readonly "secret":`) {
 		t.Fatalf("output readOnly/writeOnly projection is wrong:\n%s", productOutput)
 	}
-	if strings.Contains(typesSource, "HiddenOnly") {
-		t.Fatalf("hidden-only component leaked:\n%s", typesSource)
+	if strings.Contains(schemaRegistrySource, `readonly "HiddenOnly":`) {
+		t.Fatalf("hidden-only component leaked into the public registry:\n%s", schemaRegistrySource)
 	}
 	for _, expected := range []string{
 		"Product values.",
@@ -106,7 +105,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"@default \"legacy\"",
 		"@deprecated This OpenAPI value is deprecated.",
 		"Component types keyed by exact OpenAPI schema names",
-		`readonly "id": ComponentOutput<"Identifier">`,
+		`readonly "id": import("./identifier.js").Output`,
 	} {
 		if !strings.Contains(typesSource, expected) {
 			t.Fatalf("type JSDoc missing %q:\n%s", expected, typesSource)
@@ -145,7 +144,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		t.Fatalf("client root must not re-export metadata:\n%s", generatedIndex)
 	}
 	for _, expected := range []string{
-		`export type * from "./types.js"`,
+		`export type * from "./schemas/index.js"`,
+		`export type { BothPaginationInput, CursorPaginationInput, OffsetPaginationInput } from "./runtime/pagination.js"`,
 		`export type * from "./enums.js"`,
 		`export type * from "./errors.js"`,
 		`export type * from "./client.js"`,
@@ -180,7 +180,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if strings.Contains(errorsSource, "../../runtime") || !strings.Contains(errorsSource, `from "./runtime/errors.js"`) {
 		t.Fatalf("errors do not use the generated source runtime:\n%s", errorsSource)
 	}
-	if strings.Contains(errorsSource, "Contract.") != strings.Contains(errorsSource, `import type * as Contract from "./types.js"`) {
+	if strings.Contains(errorsSource, "Contract.") != strings.Contains(errorsSource, `import type * as Contract from "./schemas/index.js"`) {
 		t.Fatalf("errors Contract import does not match generated references:\n%s", errorsSource)
 	}
 	if !strings.Contains(clientSource, "createProduct") || strings.Contains(clientSource, "hiddenAudit") {
@@ -469,7 +469,7 @@ func TestGeneratorWithServerEmitsFetchNativeWebhookRouter(t *testing.T) {
 			t.Fatalf("server runtime missing %q:\n%s", expected, runtime)
 		}
 	}
-	if !strings.Contains(string(artifactByPath(t, artifacts, "internal/types.ts")), `readonly "Order": {`) {
+	if !strings.Contains(schemaProjectionSource(artifacts), `readonly "Order": {`) {
 		t.Fatal("webhook body component was not emitted into shared generated types")
 	}
 }

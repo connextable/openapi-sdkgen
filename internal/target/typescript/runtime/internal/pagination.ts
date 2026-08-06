@@ -1,6 +1,29 @@
 import { isRecord } from "./objects.js";
 import type { RequestOptions } from "./request.js";
 
+/** Query controls for cursor-based pagination. */
+export type CursorPaginationInput = {
+  /** Opaque cursor returned by the previous page. Omit for the first page. */
+  readonly cursor?: string | undefined;
+  /** Maximum number of items requested for one page. */
+  readonly limit?: number | undefined;
+  /** Offset pagination is unavailable in cursor mode. */
+  readonly offset?: never;
+};
+
+/** Query controls for offset-based pagination. */
+export type OffsetPaginationInput = {
+  /** Zero-based index of the first requested item. */
+  readonly offset?: number | undefined;
+  /** Maximum number of items requested for one page. */
+  readonly limit?: number | undefined;
+  /** Cursor pagination is unavailable in offset mode. */
+  readonly cursor?: never;
+};
+
+/** Query controls for an operation supporting either cursor or offset pagination. */
+export type BothPaginationInput = CursorPaginationInput | OffsetPaginationInput;
+
 /** Pagination strategy declared by an OpenAPI operation. */
 export type PaginationProfile = "cursor" | "offset" | "both";
 
