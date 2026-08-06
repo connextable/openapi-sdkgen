@@ -426,7 +426,7 @@ describe("exact identity collision fixture", () => {
     ).toBe(false);
   });
 
-  it("keeps webhook and callback catalogs exact and prototype-safe", async () => {
+  it("keeps webhook and callback maps exact and prototype-safe", async () => {
     const webhookNames = ["event-hook", "event_hook", "__proto__", "constructor"] as const;
     const webhookHandlers = Object.fromEntries(
       webhookNames.map((name) => [name, { POST: async () => ({ status: 204 as const }) }]),

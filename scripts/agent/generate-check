@@ -123,12 +123,12 @@ type _ComponentInput = Component["input"]
 type _ComponentOutput = Component["output"]
 
 type Client = ReturnType<typeof createClient>
-type _ExactOperationCatalog = Assert<Equal<keyof Client["$operations"], OperationID>>
+type _ExactOperations = Assert<Equal<keyof Client["$operations"], OperationID>>
 
 export type GenerateCheckConsumerProbe = {
   readonly operation: [_Input, _Output, _Error, _Options, _Call, _Raw, _RawResponse, _Pagination]
   readonly component: [_ComponentInput, _ComponentOutput]
-  readonly catalog: _ExactOperationCatalog
+  readonly operations: _ExactOperations
 }
 EOF
 

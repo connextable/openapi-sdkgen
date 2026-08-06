@@ -157,7 +157,7 @@ func operationIdentityDiagnostics(document *ir.Document) []diagnostic.Diagnostic
 				idPointer,
 				"SDKGEN-E503",
 				fmt.Sprintf("operationId %q is duplicated.", operation.OperationID),
-				"Give every declared operationId an exact unique value, or omit it and use the route catalog.",
+				"Give every declared operationId an exact unique value, or omit it and use the exact route key.",
 			)
 			previousLocation, _ := extensionDiagnosticLocation(document, previous.pointer)
 			value.Related = append(value.Related, previousLocation)

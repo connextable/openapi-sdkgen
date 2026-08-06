@@ -181,13 +181,13 @@ func callbackIdentity(callback callbackDefinition) string {
 	return callback.sourceRouteKey + "\x00" + callback.componentName + "\x00" + callback.callbackName + "\x00" + callback.expression + "\x00" + callback.method
 }
 
-type callbackCatalogNode struct {
-	children map[string]*callbackCatalogNode
+type callbackTreeNode struct {
+	children map[string]*callbackTreeNode
 	callback *callbackDefinition
 }
 
-func buildCallbackCatalog(callbacks []callbackDefinition, components, routeKeys bool) *callbackCatalogNode {
-	root := &callbackCatalogNode{children: make(map[string]*callbackCatalogNode)}
+func buildCallbackTree(callbacks []callbackDefinition, components, routeKeys bool) *callbackTreeNode {
+	root := &callbackTreeNode{children: make(map[string]*callbackTreeNode)}
 	for index := range callbacks {
 		callback := &callbacks[index]
 		if (callback.componentName != "") != components {
@@ -207,7 +207,7 @@ func buildCallbackCatalog(callbacks []callbackDefinition, components, routeKeys 
 		node := root
 		for _, key := range keys {
 			if node.children[key] == nil {
-				node.children[key] = &callbackCatalogNode{children: make(map[string]*callbackCatalogNode)}
+				node.children[key] = &callbackTreeNode{children: make(map[string]*callbackTreeNode)}
 			}
 			node = node.children[key]
 		}
@@ -216,7 +216,7 @@ func buildCallbackCatalog(callbacks []callbackDefinition, components, routeKeys 
 	return root
 }
 
-func callbackCatalogKeys(node *callbackCatalogNode) []string {
+func callbackTreeKeys(node *callbackTreeNode) []string {
 	keys := make([]string, 0, len(node.children))
 	for key := range node.children {
 		keys = append(keys, key)
@@ -225,55 +225,55 @@ func callbackCatalogKeys(node *callbackCatalogNode) []string {
 	return keys
 }
 
-func emitCallbackTypeCatalog(output *bytes.Buffer, name string, root *callbackCatalogNode) {
+func emitCallbackTypes(output *bytes.Buffer, name string, root *callbackTreeNode) {
 	fmt.Fprintf(output, "export interface %s ", name)
-	emitCallbackCatalogObject(output, root, nil, name, callbackCatalogTypes)
+	emitCallbackTree(output, root, nil, name, callbackTreeTypes)
 	output.WriteString("\n\n")
 }
 
-type callbackCatalogMode int
+type callbackTreeMode int
 
 const (
-	callbackCatalogTypes callbackCatalogMode = iota
-	callbackCatalogHandlers
-	callbackCatalogEndpoints
-	callbackCatalogPathParams
+	callbackTreeTypes callbackTreeMode = iota
+	callbackTreeHandlers
+	callbackTreeEndpoints
+	callbackTreePathParams
 )
 
-func emitCallbackCatalogObject(output *bytes.Buffer, node *callbackCatalogNode, path []string, catalog string, mode callbackCatalogMode) {
+func emitCallbackTree(output *bytes.Buffer, node *callbackTreeNode, path []string, rootType string, mode callbackTreeMode) {
 	output.WriteString("{\n")
 	indent := strings.Repeat("  ", len(path)+1)
-	for _, key := range callbackCatalogKeys(node) {
+	for _, key := range callbackTreeKeys(node) {
 		child := node.children[key]
 		optional := ""
-		if mode == callbackCatalogHandlers || mode == callbackCatalogPathParams {
+		if mode == callbackTreeHandlers || mode == callbackTreePathParams {
 			optional = "?"
 		}
 		fmt.Fprintf(output, "%sreadonly %s%s: ", indent, quoteTS(key), optional)
 		if child.callback != nil {
-			slot := catalog
+			slot := rootType
 			for _, item := range append(path, key) {
 				slot += "[" + quoteTS(item) + "]"
 			}
 			switch mode {
-			case callbackCatalogTypes:
+			case callbackTreeTypes:
 				fmt.Fprintf(output, "{ readonly context: %sContext; readonly input: %sContext; readonly output: %sResponse; readonly response: %sResponse; readonly handler: (context: %sContext) => %sResponse | Promise<%sResponse>; readonly endpoint: CallbackEndpoint }", child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName, child.callback.typeName)
-			case callbackCatalogHandlers:
+			case callbackTreeHandlers:
 				fmt.Fprintf(output, "%s[\"handler\"]", slot)
-			case callbackCatalogEndpoints:
+			case callbackTreeEndpoints:
 				fmt.Fprintf(output, "%s[\"endpoint\"]", slot)
-			case callbackCatalogPathParams:
+			case callbackTreePathParams:
 				output.WriteString("Readonly<Record<string, string>>")
 			}
 		} else {
-			emitCallbackCatalogObject(output, child, append(path, key), catalog, mode)
+			emitCallbackTree(output, child, append(path, key), rootType, mode)
 		}
 		output.WriteString("\n")
 	}
 	output.WriteString(strings.Repeat("  ", len(path)) + "}")
 }
 
-func callbackCatalogPath(callback callbackDefinition, routeKeys bool) (string, []string) {
+func callbackLookupPath(callback callbackDefinition, routeKeys bool) (string, []string) {
 	if callback.componentName != "" {
 		return "ComponentCallbacks", []string{callback.componentName, callback.expression, callback.method}
 	}
@@ -284,7 +284,7 @@ func callbackCatalogPath(callback callbackDefinition, routeKeys bool) (string, [
 }
 
 func callbackAccess(root string, callback callbackDefinition, routeKeys bool) string {
-	_, path := callbackCatalogPath(callback, routeKeys)
+	_, path := callbackLookupPath(callback, routeKeys)
 	for _, key := range path {
 		root += "?." + "[" + quoteTS(key) + "]"
 	}
@@ -309,15 +309,15 @@ func callbackRootField(callback callbackDefinition, routeKeys bool) string {
 	return "callbacks"
 }
 
-func callbackRuntimeCatalog(root *callbackCatalogNode) string {
+func callbackRuntimeTreeExpression(root *callbackTreeNode) string {
 	properties := make([]runtimeProperty, 0, len(root.children))
-	for _, key := range callbackCatalogKeys(root) {
+	for _, key := range callbackTreeKeys(root) {
 		child := root.children[key]
 		value := ""
 		if child.callback != nil {
 			value = callbackEndpointSymbol(*child.callback)
 		} else {
-			value = callbackRuntimeCatalog(child)
+			value = callbackRuntimeTreeExpression(child)
 		}
 		properties = append(properties, runtimeProperty{key: key, value: value})
 	}
@@ -470,9 +470,9 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	if err := emitInboundSecuritySchemes(&output, document); err != nil {
 		return nil, err
 	}
-	routeCatalog := buildCallbackCatalog(callbacks, false, true)
-	operationCatalog := buildCallbackCatalog(callbacks, false, false)
-	componentCatalog := buildCallbackCatalog(callbacks, true, false)
+	routeTree := buildCallbackTree(callbacks, false, true)
+	operationTree := buildCallbackTree(callbacks, false, false)
+	componentTree := buildCallbackTree(callbacks, true, false)
 	for _, callback := range callbacks {
 		fmt.Fprintf(&output, "/** Host-owned Callback endpoint for URL expression %s. No route is generated. */\n", quoteTS(callback.expression))
 		fmt.Fprintf(&output, "interface %sContext extends InboundRequestContext {\n  readonly params: %s\n", callback.typeName, callback.paramsType)
@@ -484,9 +484,9 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		output.WriteString("}\n")
 		fmt.Fprintf(&output, "type %sResponse = %s\n", callback.typeName, callback.responseType)
 	}
-	emitCallbackTypeCatalog(&output, "RouteCallbacks", routeCatalog)
-	emitCallbackTypeCatalog(&output, "Callbacks", operationCatalog)
-	emitCallbackTypeCatalog(&output, "ComponentCallbacks", componentCatalog)
+	emitCallbackTypes(&output, "RouteCallbacks", routeTree)
+	emitCallbackTypes(&output, "Callbacks", operationTree)
+	emitCallbackTypes(&output, "ComponentCallbacks", componentTree)
 	for _, callback := range callbacks {
 		security, err := runtimeJSONExpression(callback.security)
 		if err != nil {
@@ -495,23 +495,23 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 		fmt.Fprintf(&output, "const %s = { operationID: %s, method: %s, parameters: %s satisfies readonly InboundParameterDefinition[], responses: %s, security: %s } as const\n", callbackDefinitionSymbol(callback), quoteTS(callback.operationID), quoteTS(callback.method), callback.parameters, callback.responsePlan, security)
 	}
 	output.WriteString("\n/** Application handlers keyed by exact Callback identity. */\nexport interface CallbackHandlers {\n  readonly routeCallbacks?: ")
-	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogHandlers)
+	emitCallbackTree(&output, routeTree, nil, "RouteCallbacks", callbackTreeHandlers)
 	output.WriteString("\n  readonly callbacks?: ")
-	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogHandlers)
+	emitCallbackTree(&output, operationTree, nil, "Callbacks", callbackTreeHandlers)
 	output.WriteString("\n  readonly componentCallbacks?: ")
-	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogHandlers)
+	emitCallbackTree(&output, componentTree, nil, "ComponentCallbacks", callbackTreeHandlers)
 	output.WriteString("\n}\n\n/** Optional host authentication, media codecs, and host-bound path parameters for generated Callback endpoints. */\nexport interface CallbackHandlerOptions {\n  readonly authenticate?: Authenticate | undefined\n  readonly codecs?: Readonly<Record<string, MediaCodec<unknown>>> | undefined\n  readonly maxStreamItemBytes?: number | undefined\n  readonly pathParams?: {\n    readonly routeCallbacks?: ")
-	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogPathParams)
+	emitCallbackTree(&output, routeTree, nil, "RouteCallbacks", callbackTreePathParams)
 	output.WriteString("\n    readonly callbacks?: ")
-	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogPathParams)
+	emitCallbackTree(&output, operationTree, nil, "Callbacks", callbackTreePathParams)
 	output.WriteString("\n    readonly componentCallbacks?: ")
-	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogPathParams)
+	emitCallbackTree(&output, componentTree, nil, "ComponentCallbacks", callbackTreePathParams)
 	output.WriteString("\n  } | undefined\n}\n\n/** Fetch-compatible endpoint for one host-mounted Callback route. */\nexport interface CallbackEndpoint {\n  fetch(request: Request): Promise<Response>\n}\n\n/** Callback endpoints preserving every exact source identity dimension. */\nexport interface CallbackEndpoints {\n  readonly routeCallbacks: ")
-	emitCallbackCatalogObject(&output, routeCatalog, nil, "RouteCallbacks", callbackCatalogEndpoints)
+	emitCallbackTree(&output, routeTree, nil, "RouteCallbacks", callbackTreeEndpoints)
 	output.WriteString("\n  readonly callbacks: ")
-	emitCallbackCatalogObject(&output, operationCatalog, nil, "Callbacks", callbackCatalogEndpoints)
+	emitCallbackTree(&output, operationTree, nil, "Callbacks", callbackTreeEndpoints)
 	output.WriteString("\n  readonly componentCallbacks: ")
-	emitCallbackCatalogObject(&output, componentCatalog, nil, "ComponentCallbacks", callbackCatalogEndpoints)
+	emitCallbackTree(&output, componentTree, nil, "ComponentCallbacks", callbackTreeEndpoints)
 	output.WriteString("\n}\n\n/**\n * Creates Fetch-native endpoints for dynamic OpenAPI Callback URLs.\n * The host chooses each concrete route and mounts the matching endpoint.\n */\nexport function createCallbackHandlers(handlers: CallbackHandlers, options: CallbackHandlerOptions = {}): CallbackEndpoints {\n  const inboundCodecs = normalizeInboundMediaCodecs(options.codecs)\n")
 	for _, callback := range callbacks {
 		definition := callbackDefinitionSymbol(callback)
@@ -550,9 +550,9 @@ func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byt
 	fmt.Fprintf(
 		&output,
 		"  return { routeCallbacks: %s as unknown as CallbackEndpoints[\"routeCallbacks\"], callbacks: %s as unknown as CallbackEndpoints[\"callbacks\"], componentCallbacks: %s as unknown as CallbackEndpoints[\"componentCallbacks\"] }\n}\n",
-		callbackRuntimeCatalog(routeCatalog),
-		callbackRuntimeCatalog(operationCatalog),
-		callbackRuntimeCatalog(componentCatalog),
+		callbackRuntimeTreeExpression(routeTree),
+		callbackRuntimeTreeExpression(operationTree),
+		callbackRuntimeTreeExpression(componentTree),
 	)
 	return output.Bytes(), nil
 }
@@ -932,7 +932,7 @@ func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, 
 		output.WriteString("}\n")
 		fmt.Fprintf(&output, "type %sResponse = %s\n\n", webhook.typeName, webhook.responseType)
 	}
-	output.WriteString("/** Type catalog keyed by exact root Webhook Object name and HTTP method. */\n")
+	output.WriteString("/** Webhook types keyed by exact root Webhook Object name and HTTP method. */\n")
 	output.WriteString("export interface Webhooks {\n")
 	for _, name := range webhookHandlerProperties(webhooks) {
 		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(name))

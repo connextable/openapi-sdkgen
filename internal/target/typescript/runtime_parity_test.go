@@ -798,7 +798,7 @@ func TestGeneratedResourceCollisionFallbackMatrixCompilesAndDispatches(t *testin
 	} {
 		start := strings.Index(client, `readonly `+quoteTS(routesByID[operationID])+`: {`)
 		if start < 0 {
-			t.Fatalf("operation %q missing from catalog:\n%s", operationID, client)
+			t.Fatalf("operation %q missing from route contracts:\n%s", operationID, client)
 		}
 		entry := client[start:]
 		if end := strings.Index(entry, "\n  }"); end >= 0 {

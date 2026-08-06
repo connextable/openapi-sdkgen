@@ -14,18 +14,18 @@ import (
 
 type requestInputSectionDescriptor struct {
 	suffix             string
-	catalogKey         string
+	sectionKey         string
 	publicHelperSuffix string
 	parameterLocation  bool
 }
 
 var requestInputSectionDescriptors = []requestInputSectionDescriptor{
-	{suffix: "PathInput", catalogKey: "path", publicHelperSuffix: "Path", parameterLocation: true},
-	{suffix: "QueryInput", catalogKey: "query", publicHelperSuffix: "Query", parameterLocation: true},
-	{suffix: "QuerystringInput", catalogKey: "querystring", publicHelperSuffix: "Querystring", parameterLocation: true},
-	{suffix: "HeaderInput", catalogKey: "header", publicHelperSuffix: "Headers", parameterLocation: true},
-	{suffix: "CookieInput", catalogKey: "cookie", publicHelperSuffix: "Cookies", parameterLocation: true},
-	{suffix: "BodyInput", catalogKey: "body", publicHelperSuffix: "Body"},
+	{suffix: "PathInput", sectionKey: "path", publicHelperSuffix: "Path", parameterLocation: true},
+	{suffix: "QueryInput", sectionKey: "query", publicHelperSuffix: "Query", parameterLocation: true},
+	{suffix: "QuerystringInput", sectionKey: "querystring", publicHelperSuffix: "Querystring", parameterLocation: true},
+	{suffix: "HeaderInput", sectionKey: "header", publicHelperSuffix: "Headers", parameterLocation: true},
+	{suffix: "CookieInput", sectionKey: "cookie", publicHelperSuffix: "Cookies", parameterLocation: true},
+	{suffix: "BodyInput", sectionKey: "body", publicHelperSuffix: "Body"},
 }
 
 func requestInputSection(operationName, inputType string) (requestInputSectionDescriptor, error) {
@@ -116,7 +116,7 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		}
 	}
 
-	output.WriteString("/** Canonical operation catalog keyed by HTTP method and exact OpenAPI path. */\n")
+	output.WriteString("/** Generated route contracts keyed by HTTP method and exact OpenAPI path. */\n")
 	output.WriteString("export interface Routes {\n")
 	for _, operation := range manifest.Operations {
 		if operation.Visibility == "hidden" {
@@ -168,7 +168,7 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 				resourceCallType = operationCallWithCapabilities(resourceCallType, routeKey, hasPagination, hasLinks, hasStream)
 			}
 		}
-		emitOperationCatalogJSDoc(&output, "  ", operation)
+		emitOperationEntryJSDoc(&output, "  ", operation)
 		fmt.Fprintf(&output, "  readonly %s: {\n", quoteTS(routeKey))
 		fmt.Fprintf(&output, "    /** Complete generated input type. */\n")
 		fmt.Fprintf(&output, "    readonly input: %s\n", inputType)
@@ -301,7 +301,7 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		if operation.Visibility == "hidden" || operation.OperationID == "" {
 			continue
 		}
-		emitOperationCatalogJSDoc(&output, "  ", operation)
+		emitOperationEntryJSDoc(&output, "  ", operation)
 		fmt.Fprintf(&output, "  readonly %s: Routes[%s]\n", quoteTS(operation.OperationID), quoteTS(manifestRouteKey(operation)))
 	}
 	output.WriteString("}\n\n")
@@ -493,8 +493,8 @@ func emitOperationTypeHelpers(output *bytes.Buffer, manifest Manifest) error {
 			if err != nil {
 				return fmt.Errorf("operation %s: %w", routeKey, err)
 			}
-			fmt.Fprintf(output, "    /** Generated %s request section. */\n", descriptor.catalogKey)
-			fmt.Fprintf(output, "    readonly %s: %s\n", descriptor.catalogKey, inputType)
+			fmt.Fprintf(output, "    /** Generated %s request section. */\n", descriptor.sectionKey)
+			fmt.Fprintf(output, "    readonly %s: %s\n", descriptor.sectionKey, inputType)
 		}
 		output.WriteString("  }\n")
 	}
@@ -575,16 +575,16 @@ func emitOperationTypeHelpers(output *bytes.Buffer, manifest Manifest) error {
 	output.WriteString("  Section extends keyof SelectedOperationSections<Source> ? SelectedOperationSections<Source>[Section] : never\n\n")
 
 	for _, descriptor := range requestInputSectionDescriptors {
-		fmt.Fprintf(output, "/** Generated %s request section for one exact route. */\n", descriptor.catalogKey)
-		fmt.Fprintf(output, "export type Route%s<Route extends RouteSourceForSection<%s>> = PublicType<SelectedRouteSection<Route, %s>>\n\n", descriptor.publicHelperSuffix, quoteTS(descriptor.catalogKey), quoteTS(descriptor.catalogKey))
-		fmt.Fprintf(output, "/** Generated %s request section selected by operation ID or generated method type. */\n", descriptor.catalogKey)
-		fmt.Fprintf(output, "export type Operation%s<Source extends OperationSourceForSection<%s>> = PublicType<SelectedOperationSection<Source, %s>>\n\n", descriptor.publicHelperSuffix, quoteTS(descriptor.catalogKey), quoteTS(descriptor.catalogKey))
+		fmt.Fprintf(output, "/** Generated %s request section for one exact route. */\n", descriptor.sectionKey)
+		fmt.Fprintf(output, "export type Route%s<Route extends RouteSourceForSection<%s>> = PublicType<SelectedRouteSection<Route, %s>>\n\n", descriptor.publicHelperSuffix, quoteTS(descriptor.sectionKey), quoteTS(descriptor.sectionKey))
+		fmt.Fprintf(output, "/** Generated %s request section selected by operation ID or generated method type. */\n", descriptor.sectionKey)
+		fmt.Fprintf(output, "export type Operation%s<Source extends OperationSourceForSection<%s>> = PublicType<SelectedOperationSection<Source, %s>>\n\n", descriptor.publicHelperSuffix, quoteTS(descriptor.sectionKey), quoteTS(descriptor.sectionKey))
 	}
 
 	parameterLocations := make([]string, 0, len(requestInputSectionDescriptors)-1)
 	for _, descriptor := range requestInputSectionDescriptors {
 		if descriptor.parameterLocation {
-			parameterLocations = append(parameterLocations, quoteTS(descriptor.catalogKey))
+			parameterLocations = append(parameterLocations, quoteTS(descriptor.sectionKey))
 		}
 	}
 	output.WriteString("type RequestParameterLocation = " + strings.Join(parameterLocations, " | ") + "\n\n")
@@ -2106,7 +2106,7 @@ func inlineJSDocType(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func emitOperationCatalogJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
+func emitOperationEntryJSDoc(output *bytes.Buffer, indent string, operation ManifestOperation) {
 	comment := operation.Summary
 	if comment == "" {
 		comment = manifestRouteKey(operation)

@@ -100,7 +100,7 @@ func TestEmitTypesPreservesNormalizedAndProjectionComponentNameCollisions(t *tes
 			}
 			for component := range schema {
 				if !strings.Contains(string(source), "readonly "+quoteTS(component)+": {") {
-					t.Fatalf("component %q missing from exact-key catalog:\n%s", component, source)
+					t.Fatalf("component %q missing from exact-key type map:\n%s", component, source)
 				}
 			}
 			if strings.Contains(string(source), "export type ProductInput =") || strings.Contains(string(source), "export type FooBar =") {
@@ -436,7 +436,7 @@ func TestTemplatedResourcePathValidationPreservesRawPathShape(t *testing.T) {
 	}
 }
 
-func TestEmbeddedPathTemplateFallsBackToExactOperationCatalog(t *testing.T) {
+func TestEmbeddedPathTemplateFallsBackToExactRoute(t *testing.T) {
 	operation := pathOperation("getJSONFile", "GET", "/files/{id}.json", "id", map[string]any{"type": "string"})
 	document := &ir.Document{
 		Raw:        map[string]any{"paths": map[string]any{operation.Path: map[string]any{}}},
@@ -455,7 +455,7 @@ func TestEmbeddedPathTemplateFallsBackToExactOperationCatalog(t *testing.T) {
 	}
 }
 
-func TestRepeatedPathParameterFallsBackToExactOperationCatalog(t *testing.T) {
+func TestRepeatedPathParameterFallsBackToExactRoute(t *testing.T) {
 	operation := pathOperation("getAlias", "GET", "/users/{id}/aliases/{id}", "id", map[string]any{"type": "string"})
 	operation.PathParameterOrder = []string{"id", "id"}
 	document := &ir.Document{Operations: []ir.Operation{
@@ -511,7 +511,7 @@ func TestBuildResourceTreeOmitsOperationShortcutBeforeCallableParameterChild(t *
 	source := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	start := strings.Index(source, `readonly "GET /users": {`)
 	if start < 0 {
-		t.Fatalf("listUsers catalog entry missing:\n%s", source)
+		t.Fatalf("listUsers operation entry missing:\n%s", source)
 	}
 	entry := source[start:]
 	if end := strings.Index(entry, "\n  }"); end >= 0 {

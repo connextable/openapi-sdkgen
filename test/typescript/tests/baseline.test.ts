@@ -55,7 +55,7 @@ describe("extension-free version conformance", () => {
     expect(api.get).toBe(api.$routes["GET /"]);
   });
 
-  it("keeps ID-less OpenAPI 3.1 links and callbacks on exact route catalogs", async () => {
+  it("keeps ID-less OpenAPI 3.1 links and callbacks on exact route surfaces", async () => {
     const calls: string[] = [];
     const api = createOpenAPI31Client({
       baseURL: "https://api.example.test",
@@ -91,7 +91,7 @@ describe("extension-free version conformance", () => {
     expect(Object.keys(callbacks.callbacks)).toEqual([]);
   });
 
-  it("keeps OpenAPI 3.2 QUERY and stream operations on exact route catalogs", async () => {
+  it("keeps OpenAPI 3.2 QUERY and stream operations on exact route surfaces", async () => {
     const api = createOpenAPI32Client({
       baseURL: "https://api.example.test",
       fetch: async (input, init) => {

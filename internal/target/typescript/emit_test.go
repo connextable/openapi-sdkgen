@@ -98,14 +98,14 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		t.Fatalf("hidden-only component leaked:\n%s", typesSource)
 	}
 	for _, expected := range []string{
-		"Catalog product values.",
+		"Product values.",
 		"Stable product identifier.",
 		"Present in responses; omitted from generated input projections.",
 		"Legacy product note.",
 		"Format: `opaque-id`.",
 		"@default \"legacy\"",
 		"@deprecated This OpenAPI value is deprecated.",
-		"Type catalog keyed by exact OpenAPI component schema names",
+		"Component types keyed by exact OpenAPI schema names",
 		`readonly "id": ComponentOutput<"Identifier">`,
 	} {
 		if !strings.Contains(typesSource, expected) {
@@ -193,7 +193,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"@returns Decoded response body.",
 		"Sends the request and returns the decoded body with HTTP response metadata.",
 		"@returns Decoded response body with HTTP metadata.",
-		"Creates one catalog product from the supplied body.",
+		"Creates one product from the supplied body.",
 		"Product values accepted during creation.",
 		"Product identifier.",
 		"Opaque continuation cursor.",
@@ -203,7 +203,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Status- and media-aware raw response for `createProduct`",
 		"`201 application/json` — Created",
 		"Creates a generated API client.",
-		"Canonical operation catalog keyed by HTTP method and exact OpenAPI path.",
+		"Generated route contracts keyed by HTTP method and exact OpenAPI path.",
 		"Lazily iterates every item from",
 		"@deprecated This operation is deprecated.",
 	} {
@@ -257,7 +257,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	if manifest.Operations[2].CallExpression != "api.products.create({ headerParams, body })" || manifest.Operations[2].OutputType != `ComponentOutput<"Product">` {
 		t.Fatalf("create manifest = %#v", manifest.Operations[2])
 	}
-	if manifest.Operations[2].Description != "Creates one catalog product from the supplied body." {
+	if manifest.Operations[2].Description != "Creates one product from the supplied body." {
 		t.Fatalf("manifest JSDoc metadata = %#v", manifest.Operations[2])
 	}
 	if manifest.Operations[3].CallExpression != "api.products(productID).get()" {
@@ -594,7 +594,7 @@ func TestSourceArtifactsGenerateRootPathOperation(t *testing.T) {
 	}
 }
 
-func TestSourceArtifactsGenerateRouteCatalogWithoutOperationID(t *testing.T) {
+func TestSourceArtifactsGenerateExactRouteWithoutOperationID(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.1.0",
   "info": {"title": "Route identities", "version": "1"},
@@ -620,7 +620,7 @@ func TestSourceArtifactsGenerateRouteCatalogWithoutOperationID(t *testing.T) {
 		`$operations: /* @__PURE__ */ Object.fromEntries([["getHealth",`,
 	} {
 		if !strings.Contains(client, expected) {
-			t.Fatalf("route catalog missing %q:\n%s", expected, client)
+			t.Fatalf("route contract missing %q:\n%s", expected, client)
 		}
 	}
 	if strings.Contains(client, `readonly "":`) || strings.Contains(client, `["", __sdkgen_`) {
@@ -635,7 +635,7 @@ func TestSourceArtifactsGenerateRouteCatalogWithoutOperationID(t *testing.T) {
 	}
 }
 
-func TestRouteCatalogCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
+func TestExactRouteCarriesIDLessLinkAndStreamCapabilities(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.2.0",
   "info": {"title": "Route capabilities", "version": "1"},
@@ -748,7 +748,7 @@ const emitterFixture = `{
         "operationId": "createProduct",
 		"security": [],
         "summary": "Create a product",
-        "description": "Creates one catalog product from the supplied body.",
+        "description": "Creates one product from the supplied body.",
         "parameters": [
           {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string"}}
         ],
@@ -793,7 +793,7 @@ const emitterFixture = `{
 	  "Identifier": {"type": "string", "description": "Stable opaque identifier."},
       "Product": {
         "type": "object",
-		"description": "Catalog product values.",
+		"description": "Product values.",
 		"required": ["id", "secret"],
         "properties": {
 		  "id": {"$ref": "#/components/schemas/Identifier", "description": "Stable product identifier.", "format": "opaque-id", "readOnly": true},

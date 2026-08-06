@@ -72,7 +72,7 @@ func TestSourceArtifactsEmitsBooleanSchemaFromAnOpenAPI31Document(t *testing.T) 
 	}
 }
 
-func TestSourceArtifactsCatalogsNamedBooleanSchemas(t *testing.T) {
+func TestSourceArtifactsIncludeNamedBooleanSchemas(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.1",
   "info":{"title":"Named booleans","version":"1"},
@@ -95,13 +95,13 @@ func TestSourceArtifactsCatalogsNamedBooleanSchemas(t *testing.T) {
 		`readonly output: never`,
 	} {
 		if !strings.Contains(source, expected) {
-			t.Fatalf("named boolean component catalog missing %q:\n%s", expected, source)
+			t.Fatalf("named boolean component type missing %q:\n%s", expected, source)
 		}
 	}
 	client := string(artifactByPath(t, artifacts, "generated/client.ts"))
 	for _, expected := range []string{`Contract.ComponentInput<"Always">`, `Contract.ComponentOutput<"Never">`} {
 		if !strings.Contains(client, expected) {
-			t.Fatalf("named boolean operation bypassed catalog projection %q:\n%s", expected, client)
+			t.Fatalf("named boolean operation bypassed component projection %q:\n%s", expected, client)
 		}
 	}
 }

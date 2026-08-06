@@ -260,7 +260,7 @@ if ((await denied.callbacks.createOrder.orderStatus["{$request.body#/callbackURL
 	}
 }
 
-func TestGeneratedCallbacksSupportIDLessSourceThroughRouteCatalog(t *testing.T) {
+func TestGeneratedCallbacksSupportIDLessSourceThroughExactRoute(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi": "3.1.0",
   "info": {"title": "ID-less callback source", "version": "1"},
@@ -509,7 +509,7 @@ func TestWebhookWithMultipleMethodsUsesOneUnionHandler(t *testing.T) {
 	}
 }
 
-func TestServerPublicCatalogsPreserveExactAndPrototypeSensitiveKeys(t *testing.T) {
+func TestServerPublicMapsPreserveExactAndPrototypeSensitiveKeys(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
   "openapi":"3.1.1", "info":{"title":"Exact server identities","version":"1"},
   "paths":{"/source":{"post":{
@@ -664,7 +664,7 @@ func TestServerAddOnDeduplicatesReferencedComponentCallbacks(t *testing.T) {
 		`readonly "OrderStatus": {`,
 	} {
 		if !strings.Contains(callbacks, expected) {
-			t.Fatalf("callback catalog missing %q:\n%s", expected, callbacks)
+			t.Fatalf("callback map missing %q:\n%s", expected, callbacks)
 		}
 	}
 }
@@ -882,9 +882,9 @@ for (const [name, parameters] of [["operation", operationHeaders], ["callback", 
 	}
 }
 
-func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t *testing.T) {
+func TestServerMapsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t *testing.T) {
 	document, err := sdkgen.Compile([]byte(`{
-  "openapi":"3.2.0","info":{"title":"Server catalog","version":"1"},
+  "openapi":"3.2.0","info":{"title":"Server mappings","version":"1"},
   "paths":{
     "/source":{"post":{"operationId":"createSource","responses":{"204":{"description":"OK"}},"callbacks":{
       "copied":{"{$request.body#/callback}":{"$ref":"#/components/pathItems/CopyCallback"}}
@@ -975,12 +975,12 @@ func TestServerCatalogsCoverAdditionalOperationsRefsExactParamsAndJSONEquality(t
 		`readonly params: Readonly<{ readonly path: Readonly<{ readonly "id": string }>`,
 	} {
 		if !strings.Contains(webhooks, expected) {
-			t.Fatalf("webhook catalog missing %q:\n%s", expected, webhooks)
+			t.Fatalf("webhook map missing %q:\n%s", expected, webhooks)
 		}
 	}
 	for _, expected := range []string{`readonly "Copy": { readonly context:`, `readonly handler:`, `readonly endpoint:`} {
 		if !strings.Contains(callbacks, expected) {
-			t.Fatalf("callback catalog missing %q:\n%s", expected, callbacks)
+			t.Fatalf("callback map missing %q:\n%s", expected, callbacks)
 		}
 	}
 
@@ -1017,10 +1017,10 @@ void [handler, context, response, endpoint]
 	}
 	tsc := filepath.Join("..", "..", "..", "test", "typescript", "node_modules", "typescript", "lib", "tsc.js")
 	if _, err := os.Stat(tsc); err != nil {
-		t.Skipf("TypeScript compiler unavailable for server catalog test: %v", err)
+		t.Skipf("TypeScript compiler unavailable for server mapping test: %v", err)
 	}
 	if output, err := exec.Command("node", tsc, "--project", filepath.Join(source, "tsconfig.json")).CombinedOutput(); err != nil {
-		t.Fatalf("compile generated server catalog: %v\n%s", err, output)
+		t.Fatalf("compile generated server mappings: %v\n%s", err, output)
 	}
 	outputDirectory := filepath.Join(directory, "output")
 	if err := os.WriteFile(filepath.Join(outputDirectory, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
@@ -1153,7 +1153,7 @@ if ((await endpoints.callbacks.createSource.copied["{$request.body#/callback}"].
 `
 	command := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(outputDirectory, "server", "webhooks.js"), filepath.Join(outputDirectory, "server", "callbacks.js"))
 	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("execute generated server catalog runtime test: %v\n%s", err, output)
+		t.Fatalf("execute generated server mapping runtime test: %v\n%s", err, output)
 	}
 }
 

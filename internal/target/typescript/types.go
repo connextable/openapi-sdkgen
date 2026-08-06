@@ -40,7 +40,7 @@ func emitTypes(document *ir.Document) ([]byte, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	output.WriteString("/** Type catalog keyed by exact OpenAPI component schema names. */\n")
+	output.WriteString("/** Component types keyed by exact OpenAPI schema names. */\n")
 	output.WriteString("export interface Components {\n")
 	for _, schemaName := range names {
 		schema := componentSchemaValue(document, schemaName)
