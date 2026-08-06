@@ -98,11 +98,11 @@ const results: Record<string, BundleResult> = {};
 beforeAll(async () => {
   const cases = {
     rootError: rootValue("isAPIError"),
-    directError: directValue("isAPIError", "runtime"),
+    directError: directValue("isAPIError", "runtime/errors"),
     rootClient: rootValue("createClient"),
     directClient: directValue("createClient", "client"),
     rootSort: rootValue("SortDirection"),
-    directSort: directValue("SortDirection", "constants"),
+    directSort: directValue("SortDirection", "runtime/constants"),
     rootEnums: rootValue("Enums"),
     directEnums: directValue("Enums", "enums"),
     rootType: `import type { Client } from "sdkgen-fixture:index"; export type BundledClient = Client`,
@@ -129,7 +129,9 @@ describe("generated public entry bundle isolation", () => {
   it("keeps the runtime error guard independent", () => {
     const result = results.rootError;
     expect(result).toBeDefined();
-    expect(internalModules(result!), bundleEvidence(result!)).toEqual(["internal/runtime.ts"]);
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual([
+      "internal/runtime/errors.ts",
+    ]);
     expect(result!.code).not.toContain("bundle-enum-sentinel-01");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
     expect(result!.code).not.toContain("bundle-isolation-sentinel");
@@ -140,7 +142,12 @@ describe("generated public entry bundle isolation", () => {
     expect(result).toBeDefined();
     expect(internalModules(result!), bundleEvidence(result!)).toEqual([
       "internal/client.ts",
-      "internal/runtime.ts",
+      "internal/runtime/callables.ts",
+      "internal/runtime/codecs.ts",
+      "internal/runtime/errors.ts",
+      "internal/runtime/http.ts",
+      "internal/runtime/objects.ts",
+      "internal/runtime/operation.ts",
     ]);
     expect(result!.code).not.toContain("Symbol.iterator");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
@@ -149,7 +156,9 @@ describe("generated public entry bundle isolation", () => {
   it("keeps the sort constant independent", () => {
     const result = results.rootSort;
     expect(result).toBeDefined();
-    expect(internalModules(result!), bundleEvidence(result!)).toEqual(["internal/constants.ts"]);
+    expect(internalModules(result!), bundleEvidence(result!)).toEqual([
+      "internal/runtime/constants.ts",
+    ]);
     expect(result!.code).not.toContain("bundle-enum-sentinel-01");
     expect(result!.code).not.toContain("bundle-error-category-sentinel");
     expect(result!.code).not.toContain("bundle-isolation-sentinel");

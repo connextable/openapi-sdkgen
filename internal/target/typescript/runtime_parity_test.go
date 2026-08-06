@@ -188,7 +188,7 @@ for (const [format, value] of Object.entries(invalid)) {
   catch (error) { if (String(error).includes("accepted")) throw error; }
 }
 `
-	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "internal", "runtime.js")).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "--input-type=module", "--eval", script, filepath.Join(output, "internal", "runtime", "codecs.js")).CombinedOutput(); err != nil {
 		t.Fatalf("execute TypeScript format registry runtime test: %v\n%s", err, output)
 	}
 }

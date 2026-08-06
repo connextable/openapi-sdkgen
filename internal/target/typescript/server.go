@@ -69,10 +69,15 @@ func emitPreparedServerArtifacts(document *ir.Document, webhooks []webhookDefini
 		return nil, err
 	}
 	return []Artifact{
-		{Path: "server/runtime.ts", Data: generatedSource(serverRuntimeTemplate)},
+		{Path: "server/runtime.ts", Data: generatedSource(emittedServerRuntimeSource())},
 		{Path: "server/webhooks.ts", Data: generatedSource(webhookSource)},
 		{Path: "server/callbacks.ts", Data: generatedSource(callbackSource)},
 	}, nil
+}
+
+func emittedServerRuntimeSource() []byte {
+	source := bytes.ReplaceAll(serverRuntimeTemplate, []byte(`from "../internal/codecs.js"`), []byte(`from "../internal/runtime/codecs.js"`))
+	return bytes.ReplaceAll(source, []byte(`from "../internal/objects.js"`), []byte(`from "../internal/runtime/objects.js"`))
 }
 
 func collectCallbacks(document *ir.Document) ([]callbackDefinition, error) {
@@ -453,7 +458,7 @@ func inboundResponseHeaderValuesType(document *ir.Document, response map[string]
 func emitCallbacks(document *ir.Document, callbacks []callbackDefinition) ([]byte, error) {
 	var output bytes.Buffer
 	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
-	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime.js\"\n")
+	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime/codecs.js\"\n")
 	if len(callbacks) > 0 {
 		output.WriteString("import type * as Contract from \"../internal/types.js\"\n")
 	}
@@ -905,7 +910,7 @@ func emitInboundSecuritySchemes(output *bytes.Buffer, document *ir.Document) err
 func emitWebhooks(document *ir.Document, webhooks []webhookDefinition) ([]byte, error) {
 	var output bytes.Buffer
 	output.WriteString("import { collectInboundSecurityCandidates, decodeInboundBody, decodeInboundParameters, matchInboundRoute, InboundRequestError, normalizeInboundMediaCodecs, requiresInboundAuthentication, responseFromHandler, type Authenticate, type InboundParameterValues, type InboundRequestContext, type InboundResponse, type InboundParameterDefinition, type InboundSchemas, type InboundSecuritySchemes } from \"./runtime.js\"\n")
-	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime.js\"\n")
+	output.WriteString("import type { MediaCodec, WireSchemas } from \"../internal/runtime/codecs.js\"\n")
 	if len(webhooks) > 0 {
 		output.WriteString("import type * as Contract from \"../internal/types.js\"\n")
 	}

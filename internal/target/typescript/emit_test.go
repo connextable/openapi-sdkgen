@@ -52,8 +52,8 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 			t.Fatalf("%s does not start with generated-file suppressions:\n%s", artifactPath, source)
 		}
 	}
-	if len(artifacts) != 10 {
-		t.Fatalf("source artifact count = %d, want exactly ten TypeScript files", len(artifacts))
+	if len(artifacts) != 22 {
+		t.Fatalf("source artifact count = %d, want exactly 22 TypeScript files", len(artifacts))
 	}
 	for _, forbidden := range []string{"package.json", "tsconfig.json", "manifest.json", "README.md"} {
 		if _, exists := artifacts[forbidden]; exists {
@@ -118,7 +118,14 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 
 	clientSource := string(artifacts["internal/client.ts"])
 	errorsSource := string(artifacts["internal/errors.ts"])
-	runtimeSource := string(artifacts["internal/runtime.ts"])
+	var runtimeSource strings.Builder
+	for artifactPath, source := range artifacts {
+		if strings.HasPrefix(artifactPath, "internal/runtime/") {
+			runtimeSource.Write(source)
+			runtimeSource.WriteByte('\n')
+		}
+	}
+	runtimeModules := runtimeSource.String()
 	publicIndex := string(artifacts["index.ts"])
 	publicEnums := string(artifacts["enums.ts"])
 	metadataSource := string(artifacts["metadata.ts"])
@@ -139,22 +146,21 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`export type * from "./types.js"`,
-		`export type * from "./constants.js"`,
 		`export type * from "./enums.js"`,
 		`export type * from "./errors.js"`,
 		`export type * from "./client.js"`,
-		`export { SortDirection } from "./constants.js"`,
+		`export { SortDirection } from "./runtime/constants.js"`,
 		`export { Enums, isEnumValue } from "./enums.js"`,
 		`export { isErrorCategory } from "./errors.js"`,
 		`export { createClient } from "./client.js"`,
-		`from "./runtime.js"`,
+		`from "./runtime/errors.js"`,
 	} {
 		if !strings.Contains(generatedIndex, expected) {
 			t.Fatalf("generated entrypoint missing %q:\n%s", expected, generatedIndex)
 		}
 	}
-	if !strings.HasPrefix(runtimeSource, generatedFileHeader) || !strings.Contains(runtimeSource, "export function createRequest") {
-		t.Fatalf("generated runtime missing or invalid:\n%s", runtimeSource)
+	if !strings.Contains(runtimeModules, generatedFileHeader) || !strings.Contains(runtimeModules, "export function createRequest") {
+		t.Fatalf("generated runtime missing or invalid:\n%s", runtimeModules)
 	}
 	for _, expected := range []string{
 		"Stable error codes for failures produced by the SDK transport layer.",
@@ -164,14 +170,14 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 		"Creates the endpoint-neutral Fetch API request executor",
 		"@param options Client-wide base URL and transport defaults.",
 	} {
-		if !strings.Contains(runtimeSource, expected) {
-			t.Fatalf("runtime JSDoc missing %q:\n%s", expected, runtimeSource)
+		if !strings.Contains(runtimeModules, expected) {
+			t.Fatalf("runtime JSDoc missing %q:\n%s", expected, runtimeModules)
 		}
 	}
-	if strings.Contains(clientSource, "../../runtime") || !strings.Contains(clientSource, `from "./runtime.js"`) {
+	if strings.Contains(clientSource, "../../runtime") || !strings.Contains(clientSource, `from "./runtime/http.js"`) {
 		t.Fatalf("client does not use its generated source runtime:\n%s", clientSource)
 	}
-	if strings.Contains(errorsSource, "../../runtime") || !strings.Contains(errorsSource, `from "./runtime.js"`) {
+	if strings.Contains(errorsSource, "../../runtime") || !strings.Contains(errorsSource, `from "./runtime/errors.js"`) {
 		t.Fatalf("errors do not use the generated source runtime:\n%s", errorsSource)
 	}
 	if strings.Contains(errorsSource, "Contract.") != strings.Contains(errorsSource, `import type * as Contract from "./types.js"`) {
@@ -269,7 +275,7 @@ func TestSourceArtifactsStayConsistentAndDeterministic(t *testing.T) {
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "types", source: typesSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "client", source: clientSource, nestedReadonly: true})
 	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "errors", source: errorsSource, nestedReadonly: true})
-	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeSource})
+	assertGeneratedJSDocCoverage(t, generatedJSDocCoverage{name: "runtime", source: runtimeModules})
 }
 
 func TestRootReachableRuntimeInitializersAreOptimizerVisible(t *testing.T) {
@@ -286,7 +292,9 @@ func TestRootReachableRuntimeInitializersAreOptimizerVisible(t *testing.T) {
 		"internal/client.ts",
 		"internal/enums.ts",
 		"internal/errors.ts",
-		"internal/runtime.ts",
+		"internal/runtime/codecs.ts",
+		"internal/runtime/constants.ts",
+		"internal/runtime/http.ts",
 	} {
 		source := string(artifactByPath(t, artifacts, path))
 		for lineNumber, line := range strings.Split(source, "\n") {
@@ -342,8 +350,7 @@ func TestPathBoundPaginationImportsRuntimeHelpers(t *testing.T) {
 	}
 	client := string(artifactByPath(t, artifacts, "internal/client.ts"))
 	for _, expected := range []string{
-		"  createPaginator,",
-		"  type PaginateInput,",
+		"import { createPaginator, type PaginateInput } from \"./runtime/pagination.js\"",
 		`readonly "GET /orders/{orderID}/items": {`,
 		" = createPaginator<",
 	} {

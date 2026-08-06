@@ -1,23 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  TransportErrorCode,
   bindOperation,
   bindPathOperation,
-  createPaginator,
-  createRequest,
+  type RequestFunction,
+} from "../fixtures/generated/client/internal/runtime/callables.js";
+import {
+  TransportErrorCode,
   getErrorCode,
   isAPIError,
   isErrorCode,
+} from "../fixtures/generated/client/internal/runtime/errors.js";
+import { createRequest } from "../fixtures/generated/client/internal/runtime/http.js";
+import {
   mergeLinkInput,
   resolveLinkInput,
-} from "../fixtures/generated/client/internal/runtime.js";
+} from "../fixtures/generated/client/internal/runtime/links.js";
+import type { OperationDefinition } from "../fixtures/generated/client/internal/runtime/operation.js";
+import { createPaginator } from "../fixtures/generated/client/internal/runtime/pagination.js";
 import type {
-  OperationDefinition,
   RawResponse,
-  RequestFunction,
   RequestOptions,
-} from "../fixtures/generated/client/internal/runtime.js";
+} from "../fixtures/generated/client/internal/runtime/request.js";
 
 const operation = (overrides: Partial<OperationDefinition> = {}): OperationDefinition => ({
   route: "POST /items/{itemID}",

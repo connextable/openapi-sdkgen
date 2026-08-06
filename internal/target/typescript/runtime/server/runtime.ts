@@ -1,7 +1,6 @@
 import {
   decodeWireValue,
   decodeXML,
-  defineOwnDataProperty,
   encodeWireValue,
   encodeXML,
   validateWireValue,
@@ -12,7 +11,8 @@ import {
   type WireProperty,
   type WireSchema,
   type WireSchemas,
-} from "../internal/runtime.js";
+} from "../internal/codecs.js";
+import { defineOwnDataProperty } from "../internal/objects.js";
 
 /** Metadata provided to host-owned inbound authentication policy. */
 export interface InboundRequestContext {

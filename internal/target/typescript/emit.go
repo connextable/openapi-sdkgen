@@ -1,7 +1,7 @@
 package typescript
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,11 +12,53 @@ import (
 	"openapi-sdkgen/internal/generator"
 )
 
-//go:embed runtime/internal/runtime.ts
-var runtimeTemplate []byte
+//go:embed runtime/internal/*.ts
+var runtimeTemplates embed.FS
 
 //go:embed runtime/server/runtime.ts
 var serverRuntimeTemplate []byte
+
+type runtimeTemplateArtifact struct {
+	source string
+	path   string
+}
+
+var runtimeTemplateArtifacts = []runtimeTemplateArtifact{
+	{source: "objects.ts", path: "internal/runtime/objects.ts"},
+	{source: "identity.ts", path: "internal/runtime/identity.ts"},
+	{source: "request.ts", path: "internal/runtime/request.ts"},
+	{source: "errors.ts", path: "internal/runtime/errors.ts"},
+	{source: "transport.ts", path: "internal/runtime/transport.ts"},
+	{source: "security.ts", path: "internal/runtime/security.ts"},
+	{source: "operation.ts", path: "internal/runtime/operation.ts"},
+	{source: "configuration.ts", path: "internal/runtime/configuration.ts"},
+	{source: "links.ts", path: "internal/runtime/links.ts"},
+	{source: "callables.ts", path: "internal/runtime/callables.ts"},
+	{source: "pagination.ts", path: "internal/runtime/pagination.ts"},
+	{source: "codecs.ts", path: "internal/runtime/codecs.ts"},
+	{source: "http.ts", path: "internal/runtime/http.ts"},
+	{source: "constants.ts", path: "internal/runtime/constants.ts"},
+}
+
+func readRuntimeTemplate(name string) ([]byte, error) {
+	source, err := runtimeTemplates.ReadFile("runtime/internal/" + name)
+	if err != nil {
+		return nil, fmt.Errorf("read TypeScript runtime template %q: %w", name, err)
+	}
+	return source, nil
+}
+
+func emitRuntimeTemplateArtifacts() ([]Artifact, error) {
+	artifacts := make([]Artifact, 0, len(runtimeTemplateArtifacts))
+	for _, template := range runtimeTemplateArtifacts {
+		source, err := readRuntimeTemplate(template.source)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, Artifact{Path: template.path, Data: generatedSource(source)})
+	}
+	return artifacts, nil
+}
 
 // Artifact is a generated TypeScript source file.
 type Artifact = generator.Artifact
@@ -239,7 +281,10 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	constantsSource := emitConstants()
+	constantsSource, err := readRuntimeTemplate("constants.ts")
+	if err != nil {
+		return nil, err
+	}
 	enumsSource, err := emitEnums(document)
 	if err != nil {
 		return nil, err
@@ -267,19 +312,22 @@ func emitSourcePlan(plan *sourcePlan) ([]Artifact, error) {
 		return nil, err
 	}
 	indexSource := generatedIndexSource(enumsSource)
+	runtimeArtifacts, err := emitRuntimeTemplateArtifacts()
+	if err != nil {
+		return nil, err
+	}
 
 	artifacts := []Artifact{
 		{Path: "index.ts", Data: generatedSource([]byte("export * from \"./internal/index.js\"\n"))},
 		{Path: "internal/client.ts", Data: generatedSource(clientSource)},
-		{Path: "internal/constants.ts", Data: generatedSource(constantsSource)},
 		{Path: "internal/enums.ts", Data: generatedSource(enumsSource)},
 		{Path: "internal/errors.ts", Data: generatedSource(errorsSource)},
 		{Path: "internal/index.ts", Data: generatedSource(indexSource)},
-		{Path: "internal/runtime.ts", Data: generatedSource(runtimeTemplate)},
 		{Path: "internal/types.ts", Data: generatedSource(typesSource)},
 		{Path: "enums.ts", Data: generatedSource([]byte("export * from \"./internal/enums.js\"\n"))},
 		{Path: "metadata.ts", Data: generatedSource(metadataSource)},
 	}
+	artifacts = append(artifacts, runtimeArtifacts...)
 	if includeServer {
 		serverArtifacts, err := emitPreparedServerArtifacts(document, plan.webhooks, plan.callbacks)
 		if err != nil {
@@ -314,10 +362,10 @@ func artifactEmissionOrder(path string) string {
 
 func generatedIndexSource(enumsSource []byte) []byte {
 	var output strings.Builder
-	for _, module := range []string{"types", "constants", "enums", "errors", "client"} {
+	for _, module := range []string{"types", "enums", "errors", "client"} {
 		fmt.Fprintf(&output, "export type * from %s\n", quoteTS("./"+module+".js"))
 	}
-	output.WriteString("export { SortDirection } from \"./constants.js\"\n")
+	output.WriteString("export { SortDirection } from \"./runtime/constants.js\"\n")
 	if exportedSymbols(string(enumsSource))["isEnumValue"] {
 		output.WriteString("export { Enums, isEnumValue } from \"./enums.js\"\n")
 	} else {
@@ -325,7 +373,7 @@ func generatedIndexSource(enumsSource []byte) []byte {
 	}
 	output.WriteString("export { isErrorCategory } from \"./errors.js\"\n")
 	output.WriteString("export { createClient } from \"./client.js\"\n")
-	output.WriteString("export { APIError, TransportErrorCode, getErrorCode, getRequestID, isAPIError, isErrorCode } from \"./runtime.js\"\n")
+	output.WriteString("export { APIError, TransportErrorCode, getErrorCode, getRequestID, isAPIError, isErrorCode } from \"./runtime/errors.js\"\n")
 	return []byte(output.String())
 }
 

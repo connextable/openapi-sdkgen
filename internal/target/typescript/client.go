@@ -55,27 +55,20 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	if hasPathOperations {
 		output.WriteString("  bindPathOperation,\n")
 	}
+	output.WriteString("} from \"./runtime/callables.js\"\n")
 	if hasPagination {
-		output.WriteString("  createPaginator,\n")
+		output.WriteString("import { createPaginator, type PaginateInput } from \"./runtime/pagination.js\"\n")
 	}
-	output.WriteString("  createRequest,\n")
+	output.WriteString("import { createRequest } from \"./runtime/http.js\"\n")
 	if len(links) > 0 {
-		output.WriteString("  mergeLinkInput,\n")
-		output.WriteString("  resolveLinkInput,\n")
-		output.WriteString("  type APIError,\n")
-		output.WriteString("  type LinkInvocation,\n")
-		output.WriteString("  type RequiredLinkInvocation,\n")
+		output.WriteString("import { mergeLinkInput, resolveLinkInput, type LinkInvocation, type RequiredLinkInvocation } from \"./runtime/links.js\"\n")
+		output.WriteString("import type { APIError } from \"./runtime/errors.js\"\n")
 	}
-	output.WriteString("  type ClientOptions,\n")
-	output.WriteString("  type BinaryBody,\n")
-	if hasPagination {
-		output.WriteString("  type PaginateInput,\n")
-	}
-	output.WriteString("  type RequestOptions,\n")
-	output.WriteString("  type RawResponseFor,\n")
-	output.WriteString("  type TransportError,\n")
-	output.WriteString("  type WireSchemas,\n")
-	output.WriteString("} from \"./runtime.js\"\n")
+	output.WriteString("import type { ClientOptions } from \"./runtime/configuration.js\"\n")
+	output.WriteString("import type { BinaryBody, RawResponseFor, RequestOptions } from \"./runtime/request.js\"\n")
+	output.WriteString("import type { TransportError } from \"./runtime/errors.js\"\n")
+	output.WriteString("import type { WireSchemas } from \"./runtime/codecs.js\"\n")
+	output.WriteString("import type { OperationSurface, OperationTypeIdentity, RouteTypeIdentity } from \"./runtime/identity.js\"\n")
 	output.WriteString("import type * as Contract from \"./types.js\"\n\n")
 	output.WriteString("import type * as Errors from \"./errors.js\"\n\n")
 	if hasVisibleInputSchemas(document) {
@@ -95,8 +88,16 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 	output.WriteString("  getRequestID,\n")
 	output.WriteString("  isAPIError,\n")
 	output.WriteString("  isErrorCode,\n")
-	output.WriteString("} from \"./runtime.js\"\n")
-	output.WriteString("export type { APIKeyCredential, ClientOptions, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, MediaCodec, MediaStreamReader, MutualTLSCredential, OAuthCredential, OperationCall, PaginateInput, PaginationPlan, PaginationProfile, RawResponse, RawResponseFor, RequestMetadata, RequestOptions, RequiredLinkInvocation, SecurityCredential, SecurityCredentialContext, SecurityCredentialProvider, SecurityCredentials, SecurityRequirementDefinition, SecuritySchemeDefinition, Transport, TransportCapabilities, TransportError } from \"./runtime.js\"\n\n")
+	output.WriteString("} from \"./runtime/errors.js\"\n")
+	output.WriteString("export type { MediaCodec, MediaStreamReader } from \"./runtime/codecs.js\"\n")
+	output.WriteString("export type { ClientOptions, SecurityCredentialContext, SecurityCredentialProvider } from \"./runtime/configuration.js\"\n")
+	output.WriteString("export type { TransportError } from \"./runtime/errors.js\"\n")
+	output.WriteString("export type { LinkDefinition, LinkInputOverride, LinkInvocation, LinkParameterDefinition, RequiredLinkInvocation } from \"./runtime/links.js\"\n")
+	output.WriteString("export type { OperationCall } from \"./runtime/callables.js\"\n")
+	output.WriteString("export type { PaginateInput, PaginationPlan, PaginationProfile } from \"./runtime/pagination.js\"\n")
+	output.WriteString("export type { RawResponse, RawResponseFor, RequestMetadata, RequestOptions } from \"./runtime/request.js\"\n")
+	output.WriteString("export type { APIKeyCredential, HTTPBasicCredential, HTTPBearerCredential, HTTPCredential, MutualTLSCredential, OAuthCredential, SecurityCredential, SecurityCredentials, SecurityRequirementDefinition, SecuritySchemeDefinition } from \"./runtime/security.js\"\n")
+	output.WriteString("export type { Transport, TransportCapabilities } from \"./runtime/transport.js\"\n\n")
 
 	operationsByRoute := make(map[string]ir.Operation, len(document.Operations))
 	for _, operation := range document.Operations {
@@ -229,11 +230,6 @@ func emitClient(document *ir.Document, manifest Manifest, links []generatedLink,
 		fmt.Fprintf(&output, "  readonly %s: %s\n", quoteTS(routeKey), rawCallType)
 	}
 	output.WriteString("}\n\n")
-	output.WriteString("declare const routeTypeBrand: unique symbol\n")
-	output.WriteString("interface RouteTypeIdentity<Route extends keyof Routes> { readonly [routeTypeBrand]?: Route }\n\n")
-	output.WriteString("type OperationSurface = \"exact\" | \"resource\"\n")
-	output.WriteString("declare const operationTypeBrand: unique symbol\n")
-	output.WriteString("interface OperationTypeIdentity<Route extends keyof Routes, Surface extends OperationSurface> { readonly [operationTypeBrand]?: { readonly route: Route; readonly surface: Surface } }\n\n")
 	output.WriteString("/** Raw-call member shared by resource-oriented operation contracts. */\n")
 	output.WriteString("export interface ResourceRawCapability<Route extends keyof Routes> { readonly raw: RawCall<Route> }\n\n")
 	output.WriteString("type PublicType<Value> = Value extends BinaryBody\n")
