@@ -147,11 +147,11 @@ compare_tree \
 
 # These revision-local suites are the shared public export, type, QuickInfo,
 # diagnostic, runtime, callable-identity, accepted/rejected-input, and bundle probes.
-agent_run "baseline TypeScript compatibility probes" just -d "$baseline_root" agent ts-test
-agent_run "candidate TypeScript compatibility probes" just -d "$ROOT" agent ts-test
+agent_run "baseline TypeScript compatibility probes" just --working-directory "$baseline_root" agent ts-test
+agent_run "candidate TypeScript compatibility probes" just --working-directory "$ROOT" agent ts-test
 
 # Candidate Go tests own the new semantic import-direction, runtime DAG, artifact
 # ordering, duplicate rejection, and client-map structural assertions.
-agent_run "candidate semantic module probes" just -d "$ROOT" agent test
+agent_run "candidate semantic module probes" just --working-directory "$ROOT" agent test
 
 agent_note "ok TypeScript split differential against $baseline_commit"
