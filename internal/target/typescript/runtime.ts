@@ -542,7 +542,7 @@ export interface WireMultipartHeaderDefinition {
 export interface WireResponseDefinition extends WireBodyDefinition {
   /** Exact status code, `default`, or wildcard status such as `2XX`. */
   readonly status: string;
-	readonly headers?: readonly WireHeaderDefinition[];
+  readonly headers?: readonly WireHeaderDefinition[];
 }
 
 /** Generated response-header decoding metadata. */
@@ -592,7 +592,7 @@ export interface RawResponse<Output, HeaderValues = Readonly<Record<string, unkn
   /** Decoded, typed response body. */
   readonly data: Output;
   /** Response headers. */
-	readonly headers: HeaderValues;
+  readonly headers: HeaderValues;
   /** Request metadata extracted from the response. */
   readonly request: RequestMetadata;
   /** Original Fetch API response. Its body has already been consumed unless streamed. */
@@ -681,16 +681,16 @@ export function mergeLinkInput<Input>(defaults: Input, override: LinkInputOverri
 }
 
 function evaluateLinkValue(response: RawResponse<unknown>, value: unknown, sourceInput: unknown): unknown {
-	if (isRecord(value) && isRecord(value["x-sdkgen-link-request-parameter"])) {
-		const parameter = value["x-sdkgen-link-request-parameter"];
-		const section = typeof parameter.section === "string" ? parameter.section : undefined;
-		const property = typeof parameter.property === "string" ? parameter.property : undefined;
-		const pointer = typeof parameter.pointer === "string" ? parameter.pointer : undefined;
-		if (section === undefined || property === undefined || pointer === undefined) throw new TypeError("invalid generated Link request parameter expression");
-		const input = isRecord(sourceInput) && isRecord(sourceInput[section]) ? sourceInput[section] : undefined;
-		const item = input?.[property];
-		return pointer === "" ? item : jsonPointerValue(item, pointer);
-	}
+  if (isRecord(value) && isRecord(value["x-sdkgen-link-request-parameter"])) {
+    const parameter = value["x-sdkgen-link-request-parameter"];
+    const section = typeof parameter.section === "string" ? parameter.section : undefined;
+    const property = typeof parameter.property === "string" ? parameter.property : undefined;
+    const pointer = typeof parameter.pointer === "string" ? parameter.pointer : undefined;
+    if (section === undefined || property === undefined || pointer === undefined) throw new TypeError("invalid generated Link request parameter expression");
+    const input = isRecord(sourceInput) && isRecord(sourceInput[section]) ? sourceInput[section] : undefined;
+    const item = input?.[property];
+    return pointer === "" ? item : jsonPointerValue(item, pointer);
+  }
   if (typeof value !== "string" || !value.startsWith("$")) return value;
   if (value === "$url") return response.response.url;
   if (value === "$statusCode" || value === "$response.statusCode") return response.status;
@@ -699,16 +699,16 @@ function evaluateLinkValue(response: RawResponse<unknown>, value: unknown, sourc
   if (value.startsWith(bodyPrefix + "#")) return jsonPointerValue(response.data, value.slice(bodyPrefix.length + 1));
   const header = /^\$response\.header\.([A-Za-z0-9!#$%&'*+.^_`|~-]+)$/i.exec(value);
   if (header !== null) return response.response.headers.get(header[1]!);
-	const requestBodyPrefix = "$request.body";
-	if (value === requestBodyPrefix) return isRecord(sourceInput) ? sourceInput.body : undefined;
-	if (value.startsWith(requestBodyPrefix + "#")) return jsonPointerValue(isRecord(sourceInput) ? sourceInput.body : undefined, value.slice(requestBodyPrefix.length + 1));
-	const requestParameter = /^\$request\.(path|query|header|cookie)\.([^#]+)(#.*)?$/.exec(value);
-	if (requestParameter !== null) {
-		const section = requestParameter[1] === "header" ? "headerParams" : requestParameter[1] === "cookie" ? "cookieParams" : requestParameter[1]!;
-		const input = isRecord(sourceInput) && isRecord(sourceInput[section]) ? sourceInput[section] : undefined;
-		const item = input?.[requestParameter[2]!];
-		return requestParameter[3] === undefined ? item : jsonPointerValue(item, requestParameter[3]!.slice(1));
-	}
+  const requestBodyPrefix = "$request.body";
+  if (value === requestBodyPrefix) return isRecord(sourceInput) ? sourceInput.body : undefined;
+  if (value.startsWith(requestBodyPrefix + "#")) return jsonPointerValue(isRecord(sourceInput) ? sourceInput.body : undefined, value.slice(requestBodyPrefix.length + 1));
+  const requestParameter = /^\$request\.(path|query|header|cookie)\.([^#]+)(#.*)?$/.exec(value);
+  if (requestParameter !== null) {
+    const section = requestParameter[1] === "header" ? "headerParams" : requestParameter[1] === "cookie" ? "cookieParams" : requestParameter[1]!;
+    const input = isRecord(sourceInput) && isRecord(sourceInput[section]) ? sourceInput[section] : undefined;
+    const item = input?.[requestParameter[2]!];
+    return requestParameter[3] === undefined ? item : jsonPointerValue(item, requestParameter[3]!.slice(1));
+  }
   throw new TypeError(`unsupported OpenAPI Link runtime expression ${value}`);
 }
 
@@ -1111,7 +1111,7 @@ export function createRequest(options: ClientOptions): RequestFunction {
   if (typeof fetchImplementation !== "function") {
     throw new TypeError("fetch is unavailable; pass ClientOptions.fetch");
   }
-	const codecs = normalizeCodecs(options.codecs);
+  const codecs = normalizeCodecs(options.codecs);
 
   const execute = async <Output>(
     operation: OperationDefinition,
@@ -1122,10 +1122,10 @@ export function createRequest(options: ClientOptions): RequestFunction {
     const credentials = requestOptions.credentials ?? options.credentials;
     let encoded: EncodedRequest;
     try {
-		const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
-		encoded = isPromise(pending) ? await pending : pending;
-		const secured = applyOperationSecurity(options, operation, encoded, requestOptions, credentials);
-		encoded = isPromise(secured) ? await secured : secured;
+    const pending = encodeRequest(baseURL, options, codecs, operation, input, requestOptions);
+    encoded = isPromise(pending) ? await pending : pending;
+    const secured = applyOperationSecurity(options, operation, encoded, requestOptions, credentials);
+    encoded = isPromise(secured) ? await secured : secured;
     } catch (cause) {
       if (isAPIError(cause)) {
         throw cause;
@@ -1156,18 +1156,18 @@ export function createRequest(options: ClientOptions): RequestFunction {
       const response = await awaitAbortable(fetchImplementation(encoded.url, init), abort.signal);
       const request = requestMetadata(response);
       responseMetadata = { request, status: response.status, response };
-		const responseDefinition = selectResponseDefinition(operation, response, true);
-		if (raw && response.ok && responseDefinition?.itemSchema !== undefined) {
-			const contentType = responseContentType(response);
-			let headerValues: Readonly<Record<string, unknown>>;
-			try {
-				headerValues = await decodeResponseHeaders(operation, response, codecs);
-			} catch (cause) {
-				await response.body?.cancel().catch(() => undefined);
-				throw transportErrorFromCause(TransportErrorCode.RESPONSE_DECODE_FAILED, "Failed to decode response headers", cause, responseMetadata);
-			}
-			return { status: response.status, ...(contentType === undefined ? {} : { contentType }), data: undefined as Output, headers: headerValues, request, response };
-		}
+    const responseDefinition = selectResponseDefinition(operation, response, true);
+    if (raw && response.ok && responseDefinition?.itemSchema !== undefined) {
+      const contentType = responseContentType(response);
+      let headerValues: Readonly<Record<string, unknown>>;
+      try {
+        headerValues = await decodeResponseHeaders(operation, response, codecs);
+      } catch (cause) {
+        await response.body?.cancel().catch(() => undefined);
+        throw transportErrorFromCause(TransportErrorCode.RESPONSE_DECODE_FAILED, "Failed to decode response headers", cause, responseMetadata);
+      }
+      return { status: response.status, ...(contentType === undefined ? {} : { contentType }), data: undefined as Output, headers: headerValues, request, response };
+    }
       let body: unknown;
       try {
         const decodedBody = await awaitAbortable(decodeResponse(operation, response, request, codecs), abort.signal);
@@ -1241,8 +1241,8 @@ export function createRequest(options: ClientOptions): RequestFunction {
     input?: unknown,
     requestOptions?: RequestOptions,
   ) => execute<Output>(operation, input, requestOptions, true) as Promise<RawResponse<Output>>;
-	request.stream = <Item>(operation: OperationDefinition, input?: unknown, requestOptions: RequestOptions = {}): AsyncIterable<Item> =>
-		streamOperation<Item>(baseURL, options, codecs, fetchImplementation, operation, input, requestOptions);
+  request.stream = <Item>(operation: OperationDefinition, input?: unknown, requestOptions: RequestOptions = {}): AsyncIterable<Item> =>
+    streamOperation<Item>(baseURL, options, codecs, fetchImplementation, operation, input, requestOptions);
   return request;
 }
 
@@ -1268,7 +1268,7 @@ async function* streamOperation<Item>(
   }
   const timeoutMS = requestOptions.timeoutMS ?? options.timeoutMS;
   const abort = createAbortContext(requestOptions.signal, timeoutMS);
-	let receivedResponse = false;
+  let receivedResponse = false;
   try {
     const init: RequestInit = { method: operation.method, headers: encoded.headers, signal: abort.signal };
     if (encoded.body !== undefined) {
@@ -1279,7 +1279,7 @@ async function* streamOperation<Item>(
     if (abort.signal?.aborted) throw abort.signal.reason;
     assertReadableResponseHeaders(options.transport, operation);
     const response = await awaitAbortable(fetchImplementation(encoded.url, init), abort.signal);
-		receivedResponse = true;
+    receivedResponse = true;
     const request = requestMetadata(response);
     if (!response.ok) {
       const body = await decodeResponse(operation, response, request, codecs);
@@ -1290,7 +1290,7 @@ async function* streamOperation<Item>(
       throw new TypeError(`response for ${operationDiagnosticName(operation)} is not a declared stream`);
     }
     const contentType = response.headers.get("content-type") ?? definition.contentType;
-		const maxFrameBytes = resolveMaxStreamItemBytes(requestOptions.maxStreamItemBytes ?? options.maxStreamItemBytes);
+    const maxFrameBytes = resolveMaxStreamItemBytes(requestOptions.maxStreamItemBytes ?? options.maxStreamItemBytes);
     if (isGeneratedStreamMediaType(contentType)) {
       for await (const value of decodeStreamItems(response.body, contentType, definition.itemSchema, operation.outputSchemas ?? {}, codecs, definition.itemEncoding, maxFrameBytes)) {
         yield transformWireValue(value, definition.itemSchema, operation.outputSchemas ?? {}, "decode") as Item;
@@ -1311,7 +1311,7 @@ async function* streamOperation<Item>(
     if (isAPIError(cause)) throw cause;
     if (abort.timedOut()) throw transportError(TransportErrorCode.REQUEST_TIMEOUT, `Request timed out after ${timeoutMS}ms`, cause);
     if (abort.aborted()) throw transportError(TransportErrorCode.REQUEST_ABORTED, "Request was aborted", cause);
-		if (!receivedResponse) throw transportError(TransportErrorCode.NETWORK_ERROR, "Network request failed", cause);
+    if (!receivedResponse) throw transportError(TransportErrorCode.NETWORK_ERROR, "Network request failed", cause);
     throw transportError(TransportErrorCode.RESPONSE_DECODE_FAILED, `Failed to decode ${operationDiagnosticName(operation)} stream`, cause);
   } finally {
     abort.cleanup();
@@ -1376,7 +1376,7 @@ async function* decodeStreamItems(
     return;
   }
   const decoder = new TextDecoder();
-	const encoder = new TextEncoder();
+  const encoder = new TextEncoder();
   let pending = "";
   const reader = body.getReader();
   try {
@@ -1403,7 +1403,7 @@ async function* decodeStreamItems(
           if (line.trim() !== "") yield parseStreamJSON(line);
         }
       }
-		if (encoder.encode(pending).byteLength > maxFrameBytes) throw new TypeError(`stream item exceeds ${maxFrameBytes} bytes`);
+    if (encoder.encode(pending).byteLength > maxFrameBytes) throw new TypeError(`stream item exceeds ${maxFrameBytes} bytes`);
       if (done) break;
     }
     if (pending.trim() !== "") {
@@ -1589,7 +1589,7 @@ async function decodeResponseHeaders(operation: OperationDefinition, response: R
 }
 
 function applyOperationSecurity(
-	options: ClientOptions,
+  options: ClientOptions,
   operation: OperationDefinition,
   encoded: EncodedRequest,
   requestOptions: OperationRequestOptions,
@@ -1634,7 +1634,7 @@ function applyOperationSecurity(
     requirement: selected,
     origin: new URL(encoded.url).origin,
   };
-	const suppliedCredentials = options.securityProvider(context);
+  const suppliedCredentials = options.securityProvider(context);
   const apply = (resolved: SecurityCredentials): EncodedRequest =>
     applySelectedSecurityRequirement(options, requestOptions, encoded, credentials, selected, resolved, true);
   return isPromise(suppliedCredentials) ? suppliedCredentials.then(apply) : apply(suppliedCredentials);
@@ -1764,8 +1764,8 @@ function applySelectedSecurityRequirement(
 }
 
 function applySecurityCredential(
-	transport: Transport | undefined,
-	scheme: SecuritySchemeDefinition,
+  transport: Transport | undefined,
+  scheme: SecuritySchemeDefinition,
   credential: SecurityCredential,
   headers: Headers,
   url: URL,
@@ -1784,22 +1784,22 @@ function applySecurityCredential(
         url.searchParams.set(scheme.parameterName!, apiKey.value);
         return;
       }
-		if (!transport?.capabilities?.cookieJar) {
-			throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a cookie-jar transport`, undefined);
-		}
-		if (headers.has("Cookie")) throw securityCollision(scheme.name, "Cookie header");
-		headers.set("Cookie", `${encodeURIComponent(scheme.parameterName!)}=${encodeURIComponent(apiKey.value)}`);
-		return;
+    if (!transport?.capabilities?.cookieJar) {
+      throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a cookie-jar transport`, undefined);
+    }
+    if (headers.has("Cookie")) throw securityCollision(scheme.name, "Cookie header");
+    headers.set("Cookie", `${encodeURIComponent(scheme.parameterName!)}=${encodeURIComponent(apiKey.value)}`);
+    return;
     }
     case "http":
     case "oauth2":
     case "openIdConnect":
       return;
     case "mutualTLS":
-		if (!transport?.capabilities?.mutualTLS) {
-			throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a mutual-TLS transport`, undefined);
-		}
-		return;
+    if (!transport?.capabilities?.mutualTLS) {
+      throw transportError(TransportErrorCode.TRANSPORT_CAPABILITY_REQUIRED, `Security scheme ${scheme.name} requires a mutual-TLS transport`, undefined);
+    }
+    return;
   }
 }
 
@@ -2067,11 +2067,11 @@ function encodeRequestSynchronous(
     headers.set("Content-Type", encoded.contentType);
     return { url: url.href, headers, body: encoded.body };
   }
-	if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && !isGeneratedStreamMediaType(contentType)) {
-		const stream = encodeCustomStreamingRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, codecs, options.signal);
-		const finishStream = (body: ReadableStream<Uint8Array>): EncodedRequest => { headers.set("Content-Type", contentType); return { url: url.href, headers, body }; };
-		return isPromise(stream) ? stream.then(finishStream) : finishStream(stream);
-	}
+  if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && !isGeneratedStreamMediaType(contentType)) {
+    const stream = encodeCustomStreamingRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, codecs, options.signal);
+    const finishStream = (body: ReadableStream<Uint8Array>): EncodedRequest => { headers.set("Content-Type", contentType); return { url: url.href, headers, body }; };
+    return isPromise(stream) ? stream.then(finishStream) : finishStream(stream);
+  }
   const body = definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) ? encodeSequentialRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}) : encodeRequestBody(contentType, encodeRequestWireValue(operation, contentType, bodyValue), codecs, definition?.schema, operation.inputSchemas ?? {}, definition, options.multipartHeaders, options.multipartContentTypes);
   const finish = (resolved: BodyInit | ReadableStream<Uint8Array>): EncodedRequest => {
     if (!(resolved instanceof FormData)) headers.set("Content-Type", normalizeMediaType(contentType).startsWith("multipart/") && resolved instanceof Blob ? resolved.type : contentType);
@@ -2083,7 +2083,7 @@ function encodeRequestSynchronous(
 async function encodeRequestAsync(
   baseURL: string | undefined,
   client: ClientOptions,
-	codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  codecs: ReadonlyMap<string, MediaCodec<unknown>>,
   operation: OperationDefinition,
   input: unknown,
   options: RequestOptions,
@@ -2159,7 +2159,7 @@ async function encodeRequestAsync(
   }
 
   if (!Object.hasOwn(values, "body") || values.body === undefined) {
-	if (operation.requestBodyRequired) throw new TypeError("Missing required request body");
+  if (operation.requestBodyRequired) throw new TypeError("Missing required request body");
     return { url: url.href, headers };
   }
   rejectUndefinedArrayValues(values.body);
@@ -2174,28 +2174,28 @@ async function encodeRequestAsync(
     contentType = values.body.contentType;
     bodyValue = values.body.value;
   }
-	const definition = requestBodies === undefined ? undefined : selectRequestBodyDefinition(requestBodies, contentType);
-	if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && normalizeMediaType(contentType).startsWith("multipart/")) {
-		const encoded = encodeStreamingMultipartBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, definition.itemEncoding, options.multipartHeaders, options.multipartContentTypes, codecs);
-		headers.set("Content-Type", encoded.contentType);
-		return { url: url.href, headers, body: encoded.body };
-	}
-	if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && !isGeneratedStreamMediaType(contentType)) {
-		const stream = await encodeCustomStreamingRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, codecs, options.signal);
-		headers.set("Content-Type", contentType);
-		return { url: url.href, headers, body: stream };
-	}
-	const body = definition?.itemSchema !== undefined && isAsyncIterable(bodyValue)
-		? encodeSequentialRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {})
-		: encodeRequestBody(contentType, encodeRequestWireValue(operation, contentType, bodyValue), codecs, definition?.schema, operation.inputSchemas ?? {}, definition, options.multipartHeaders, options.multipartContentTypes);
-	const finish = (resolved: BodyInit | ReadableStream<Uint8Array>): EncodedRequest => {
-		if (!(resolved instanceof FormData)) {
-			const resolvedContentType = normalizeMediaType(contentType).startsWith("multipart/") && resolved instanceof Blob ? resolved.type : contentType;
-			headers.set("Content-Type", resolvedContentType);
-		}
-		return { url: url.href, headers, body: resolved };
-	};
-	return finish(await body);
+  const definition = requestBodies === undefined ? undefined : selectRequestBodyDefinition(requestBodies, contentType);
+  if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && normalizeMediaType(contentType).startsWith("multipart/")) {
+    const encoded = encodeStreamingMultipartBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, definition.itemEncoding, options.multipartHeaders, options.multipartContentTypes, codecs);
+    headers.set("Content-Type", encoded.contentType);
+    return { url: url.href, headers, body: encoded.body };
+  }
+  if (definition?.itemSchema !== undefined && isAsyncIterable(bodyValue) && !isGeneratedStreamMediaType(contentType)) {
+    const stream = await encodeCustomStreamingRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {}, codecs, options.signal);
+    headers.set("Content-Type", contentType);
+    return { url: url.href, headers, body: stream };
+  }
+  const body = definition?.itemSchema !== undefined && isAsyncIterable(bodyValue)
+    ? encodeSequentialRequestBody(contentType, bodyValue, definition.itemSchema, operation.inputSchemas ?? {})
+    : encodeRequestBody(contentType, encodeRequestWireValue(operation, contentType, bodyValue), codecs, definition?.schema, operation.inputSchemas ?? {}, definition, options.multipartHeaders, options.multipartContentTypes);
+  const finish = (resolved: BodyInit | ReadableStream<Uint8Array>): EncodedRequest => {
+    if (!(resolved instanceof FormData)) {
+      const resolvedContentType = normalizeMediaType(contentType).startsWith("multipart/") && resolved instanceof Blob ? resolved.type : contentType;
+      headers.set("Content-Type", resolvedContentType);
+    }
+    return { url: url.href, headers, body: resolved };
+  };
+  return finish(await body);
 }
 
 function assertRequiredParameters(
@@ -2227,26 +2227,26 @@ function encodeRequestBody(
   schemas: WireSchemas,
   definition: WireBodyDefinition | undefined,
   multipartHeaders: Readonly<Record<string, HeadersInit>> | undefined,
-	multipartContentTypes: Readonly<Record<string, string>> | undefined,
+  multipartContentTypes: Readonly<Record<string, string>> | undefined,
 ): BodyInit | Promise<BodyInit> {
   const normalizedContentType = contentType.toLowerCase();
-	if (isJSONMediaType(normalizedContentType)) return JSON.stringify(value);
+  if (isJSONMediaType(normalizedContentType)) return JSON.stringify(value);
   if (normalizedContentType === "application/x-www-form-urlencoded") {
     if (!isRecord(value)) throw new TypeError("form body must be an object");
     const form = new URLSearchParams();
     for (const [name, item] of formEntries(value, definition?.encoding)) form.append(name, item);
     return form;
   }
-	if (normalizedContentType.startsWith("multipart/")) {
-		if (definition?.prefixEncoding !== undefined || definition?.itemEncoding !== undefined) {
-			if (!Array.isArray(value)) throw new TypeError("positional multipart body must be an array");
+  if (normalizedContentType.startsWith("multipart/")) {
+    if (definition?.prefixEncoding !== undefined || definition?.itemEncoding !== undefined) {
+      if (!Array.isArray(value)) throw new TypeError("positional multipart body must be an array");
       return encodePositionalMultipartBody(contentType, value, definition.prefixEncoding, definition.itemEncoding, multipartHeaders, multipartContentTypes, schema, schemas, codecs);
-		}
-		if (normalizedContentType !== "multipart/form-data") throw new TypeError(`named multipart encoding requires multipart/form-data, got ${contentType}`);
+    }
+    if (normalizedContentType !== "multipart/form-data") throw new TypeError(`named multipart encoding requires multipart/form-data, got ${contentType}`);
     if (!isRecord(value)) throw new TypeError("multipart body must be an object");
-	if (definition?.encoding?.some((entry) => (entry.headers?.length ?? 0) > 0) || multipartHeaders !== undefined) {
-		return encodeMultipartBody(value, definition?.encoding, multipartHeaders, schema, schemas, codecs);
-	}
+  if (definition?.encoding?.some((entry) => (entry.headers?.length ?? 0) > 0) || multipartHeaders !== undefined) {
+    return encodeMultipartBody(value, definition?.encoding, multipartHeaders, schema, schemas, codecs);
+  }
     const form = new FormData();
     const append = (name: string, item: unknown, definition: WireEncodingDefinition | undefined): void => {
       if (item instanceof Blob) form.append(name, item);
@@ -2256,15 +2256,15 @@ function encodeRequestBody(
         bytes.set(new Uint8Array(item.buffer, item.byteOffset, item.byteLength));
         form.append(name, new Blob([bytes.buffer]));
       } else if (isRecord(item) || Array.isArray(item)) {
-		form.append(name, new Blob([JSON.stringify(item)], { type: definition?.contentType ?? "application/json" }));
+    form.append(name, new Blob([JSON.stringify(item)], { type: definition?.contentType ?? "application/json" }));
       } else if (definition?.contentType !== undefined) form.append(name, new Blob([String(item)], { type: definition.contentType }));
       else form.append(name, String(item));
     };
     for (const [name, item] of Object.entries(value)) {
       if (item === undefined) continue;
-		const encoding = definition?.encoding?.find((entry) => entry.name === name);
-		if (Array.isArray(item) && encoding?.explode !== false) for (const entry of item) append(name, entry, encoding);
-		else append(name, item, encoding);
+    const encoding = definition?.encoding?.find((entry) => entry.name === name);
+    if (Array.isArray(item) && encoding?.explode !== false) for (const entry of item) append(name, entry, encoding);
+    else append(name, item, encoding);
     }
     return form;
   }
@@ -2273,9 +2273,9 @@ function encodeRequestBody(
   if (value instanceof Blob || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
     return value as BodyInit;
   }
-	const codec = codecs.get(normalizeMediaType(contentType));
-	if (codec?.encode === undefined) throw new TypeError(`missing encode codec for ${contentType}`);
-	return codec.encode(value, { contentType });
+  const codec = codecs.get(normalizeMediaType(contentType));
+  if (codec?.encode === undefined) throw new TypeError(`missing encode codec for ${contentType}`);
+  return codec.encode(value, { contentType });
 }
 
 async function encodePositionalMultipartBody(
@@ -2285,9 +2285,9 @@ async function encodePositionalMultipartBody(
   itemEncoding: WireEncodingDefinition | undefined,
   suppliedHeaders: Readonly<Record<string, HeadersInit>> | undefined,
   suppliedContentTypes: Readonly<Record<string, string>> | undefined,
-	schema: WireSchema | undefined,
-	schemas: WireSchemas,
-	codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  schema: WireSchema | undefined,
+  schemas: WireSchemas,
+  codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<Blob> {
   const boundary = `----openapi-sdkgen-${multipartBoundaryToken()}`;
   const chunks: BlobPart[] = [];
@@ -2295,7 +2295,7 @@ async function encodePositionalMultipartBody(
     const definition = prefixEncoding?.[index] ?? itemEncoding;
     const itemSchema = schema?.prefixItems?.[index] ?? schema?.items ?? {};
     const selectedContentType = resolveMultipartContentType(definition?.contentType, suppliedContentTypes?.[String(index)], defaultMultipartContentType(itemSchema), value);
-		const { body, contentType: partContentType } = await multipartPartValue(value, selectedContentType, itemSchema, definition, schemas, codecs);
+    const { body, contentType: partContentType } = await multipartPartValue(value, selectedContentType, itemSchema, definition, schemas, codecs);
     const headers = await multipartPartHeaders(undefined, definition, suppliedHeaders?.[String(index)], partContentType, undefined, schemas, codecs);
     chunks.push(`--${boundary}\r\n${headers}\r\n\r\n`, body, "\r\n");
   }
@@ -2360,10 +2360,10 @@ function encodeStreamingMultipartBody(
   values: AsyncIterable<unknown>,
   itemSchema: WireSchema,
   schemas: WireSchemas,
-	itemEncoding: WireEncodingDefinition | undefined,
+  itemEncoding: WireEncodingDefinition | undefined,
   suppliedHeaders: Readonly<Record<string, HeadersInit>> | undefined,
-	suppliedContentTypes: Readonly<Record<string, string>> | undefined,
-	codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  suppliedContentTypes: Readonly<Record<string, string>> | undefined,
+  codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): { readonly body: ReadableStream<Uint8Array>; readonly contentType: string } {
   const boundary = `----openapi-sdkgen-${multipartBoundaryToken()}`;
   const iterator = values[Symbol.asyncIterator]();
@@ -2380,7 +2380,7 @@ function encodeStreamingMultipartBody(
         }
         const value = transformWireValue(next.value, itemSchema, schemas, "encode");
         const selectedContentType = resolveMultipartContentType(itemEncoding?.contentType, suppliedContentTypes?.[String(index)], defaultMultipartContentType(itemSchema), value);
-		const part = await multipartPartValue(value, selectedContentType, itemSchema, itemEncoding, schemas, codecs);
+    const part = await multipartPartValue(value, selectedContentType, itemSchema, itemEncoding, schemas, codecs);
         const headers = await multipartPartHeaders(undefined, itemEncoding, suppliedHeaders?.[String(index)], part.contentType, undefined, schemas, codecs);
         index++;
         const bytes = await new Blob([`--${boundary}\r\n${headers}\r\n\r\n`, part.body, "\r\n"]).arrayBuffer();
@@ -2424,8 +2424,8 @@ async function encodeMultipartBody(
   encoding: readonly WireEncodingDefinition[] | undefined,
   suppliedHeaders: Readonly<Record<string, HeadersInit>> | undefined,
   schema: WireSchema | undefined,
-	schemas: WireSchemas,
-	codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  schemas: WireSchemas,
+  codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<Blob> {
   const boundary = `----openapi-sdkgen-${multipartBoundaryToken()}`;
   const chunks: BlobPart[] = [];
@@ -2435,7 +2435,7 @@ async function encodeMultipartBody(
     const definition = definitions.get(name);
     const values = Array.isArray(fieldValue) && definition?.explode !== false ? fieldValue : [fieldValue];
     for (const item of values) {
-			const propertySchema = schema?.properties?.[name]?.schema ?? {};
+      const propertySchema = schema?.properties?.[name]?.schema ?? {};
       const { body, contentType, filename } = await multipartPartValue(item, definition?.contentType, propertySchema, definition, schemas, codecs);
       const headers = await multipartPartHeaders(name, definition, suppliedHeaders?.[name], contentType, filename, schemas, codecs);
       chunks.push(`--${boundary}\r\n${headers}\r\n\r\n`, body, "\r\n");
@@ -2446,11 +2446,11 @@ async function encodeMultipartBody(
 }
 
 async function multipartPartValue(value: unknown, declaredContentType: string | undefined, schema: WireSchema = {}, definition: WireEncodingDefinition | undefined = undefined, schemas: WireSchemas = {}, codecs: ReadonlyMap<string, MediaCodec<unknown>> = new Map()): Promise<{ body: BlobPart; contentType?: string; filename?: string }> {
-	if (declaredContentType !== undefined && normalizeMediaType(declaredContentType).startsWith("multipart/")) {
-		if (!Array.isArray(value)) throw new TypeError("nested multipart part must be an array");
-		const nested = await encodePositionalMultipartBody(declaredContentType, value, definition?.prefixEncoding, definition?.itemEncoding, undefined, undefined, schema, schemas, codecs);
-		return { body: nested, contentType: nested.type };
-	}
+  if (declaredContentType !== undefined && normalizeMediaType(declaredContentType).startsWith("multipart/")) {
+    if (!Array.isArray(value)) throw new TypeError("nested multipart part must be an array");
+    const nested = await encodePositionalMultipartBody(declaredContentType, value, definition?.prefixEncoding, definition?.itemEncoding, undefined, undefined, schema, schemas, codecs);
+    return { body: nested, contentType: nested.type };
+  }
   if (value instanceof Blob) {
     const file = typeof File !== "undefined" && value instanceof File ? value : undefined;
     return { body: value, contentType: (declaredContentType ?? value.type) || undefined, filename: file?.name };
@@ -2461,14 +2461,14 @@ async function multipartPartValue(value: unknown, declaredContentType: string | 
     bytes.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
     return { body: bytes.buffer, contentType: declaredContentType ?? "application/octet-stream" };
   }
-	if (declaredContentType !== undefined && requiresMultipartPartCodec(declaredContentType)) {
-		const codec = codecs.get(normalizeMediaType(declaredContentType));
-		if (codec?.encode === undefined) throw new TypeError(`missing encode codec for multipart part ${declaredContentType}`);
-		return { body: multipartCodecBody(await codec.encode(value, { contentType: declaredContentType })), contentType: declaredContentType };
-	}
-	if (declaredContentType !== undefined && isXMLMediaType(declaredContentType)) {
-		return { body: encodeXML(value, schema, schemas), contentType: declaredContentType };
-	}
+  if (declaredContentType !== undefined && requiresMultipartPartCodec(declaredContentType)) {
+    const codec = codecs.get(normalizeMediaType(declaredContentType));
+    if (codec?.encode === undefined) throw new TypeError(`missing encode codec for multipart part ${declaredContentType}`);
+    return { body: multipartCodecBody(await codec.encode(value, { contentType: declaredContentType })), contentType: declaredContentType };
+  }
+  if (declaredContentType !== undefined && isXMLMediaType(declaredContentType)) {
+    return { body: encodeXML(value, schema, schemas), contentType: declaredContentType };
+  }
   if (isRecord(value) || Array.isArray(value)) {
     return { body: JSON.stringify(value), contentType: declaredContentType ?? "application/json" };
   }
@@ -2476,15 +2476,15 @@ async function multipartPartValue(value: unknown, declaredContentType: string | 
 }
 
 function requiresMultipartPartCodec(contentType: string): boolean {
-	const normalized = normalizeMediaType(contentType);
-	return !isJSONMediaType(normalized) && !isXMLMediaType(normalized) && !normalized.startsWith("text/") && normalized !== "application/x-www-form-urlencoded" && !isBinaryMediaType(normalized);
+  const normalized = normalizeMediaType(contentType);
+  return !isJSONMediaType(normalized) && !isXMLMediaType(normalized) && !normalized.startsWith("text/") && normalized !== "application/x-www-form-urlencoded" && !isBinaryMediaType(normalized);
 }
 
 function multipartCodecBody(value: BodyInit): BlobPart {
-	if (typeof value === "string" || value instanceof Blob || value instanceof ArrayBuffer) return value;
-	if (ArrayBuffer.isView(value)) return value;
-	if (value instanceof URLSearchParams) return value.toString();
-	throw new TypeError("multipart part codec must return a string, Blob, ArrayBuffer, ArrayBufferView, or URLSearchParams");
+  if (typeof value === "string" || value instanceof Blob || value instanceof ArrayBuffer) return value;
+  if (ArrayBuffer.isView(value)) return value;
+  if (value instanceof URLSearchParams) return value.toString();
+  throw new TypeError("multipart part codec must return a string, Blob, ArrayBuffer, ArrayBufferView, or URLSearchParams");
 }
 
 async function multipartPartHeaders(
@@ -2493,8 +2493,8 @@ async function multipartPartHeaders(
   supplied: HeadersInit | undefined,
   contentType: string | undefined,
   filename: string | undefined,
-	schemas: WireSchemas,
-	codecs: ReadonlyMap<string, MediaCodec<unknown>>,
+  schemas: WireSchemas,
+  codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<string> {
   const headers = new Headers(supplied);
   const declared = new Map((definition?.headers ?? []).map((header) => [header.name.toLowerCase(), header]));
@@ -2506,10 +2506,10 @@ async function multipartPartHeaders(
   for (const [headerName] of headers) {
     const normalized = headerName.toLowerCase();
     if (normalized === "content-type" || (name !== undefined && normalized === "content-disposition") || !declared.has(normalized)) {
-	  throw new TypeError(`multipart header ${name ?? "position"}.${headerName} is not declared by the Encoding Object`);
+    throw new TypeError(`multipart header ${name ?? "position"}.${headerName} is not declared by the Encoding Object`);
     }
   }
-	const lines = name === undefined ? [] : [`Content-Disposition: form-data; name="${escapeMultipartToken(name)}"${filename === undefined ? "" : `; filename="${escapeMultipartToken(filename)}"`}`];
+  const lines = name === undefined ? [] : [`Content-Disposition: form-data; name="${escapeMultipartToken(name)}"${filename === undefined ? "" : `; filename="${escapeMultipartToken(filename)}"`}`];
   if (contentType !== undefined && contentType !== "") lines.push(`Content-Type: ${contentType}`);
   for (const [headerName, value] of headers) lines.push(`${headerName}: ${value}`);
   return lines.join("\r\n");
@@ -2597,9 +2597,9 @@ export function encodeXML(value: unknown, schema: WireSchema, schemas: WireSchem
 }
 
 function encodeXMLElement(value: unknown, schema: WireSchema, schemas: WireSchemas, fallbackName: string, root: boolean, dynamicScope: DynamicScope): string {
-	const scope = extendDynamicScope(dynamicScope, schema);
-	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) return encodeXMLElement(value, dynamicTarget, schemas, fallbackName, root, scope);
+  const scope = extendDynamicScope(dynamicScope, schema);
+  const dynamicTarget = resolveDynamicReference(schema, scope);
+  if (dynamicTarget !== undefined) return encodeXMLElement(value, dynamicTarget, schemas, fallbackName, root, scope);
   if (schema.reference !== undefined) {
     const referenced = schemas[schema.reference];
     if (referenced === undefined) throw new TypeError(`XML schema references missing component ${schema.reference}`);
@@ -2778,9 +2778,9 @@ function parseXMLAttributes(source: string): Readonly<Record<string, string>> {
 }
 
 function decodeXMLNode(node: XMLNode, schema: WireSchema, components: WireSchemas, dynamicScope: DynamicScope): unknown {
-	const scope = extendDynamicScope(dynamicScope, schema);
-	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) return decodeXMLNode(node, dynamicTarget, components, scope);
+  const scope = extendDynamicScope(dynamicScope, schema);
+  const dynamicTarget = resolveDynamicReference(schema, scope);
+  if (dynamicTarget !== undefined) return decodeXMLNode(node, dynamicTarget, components, scope);
   if (schema.reference !== undefined) {
     const referenced = components[schema.reference];
     if (referenced === undefined) throw new TypeError(`XML schema references missing component ${schema.reference}`);
@@ -2877,25 +2877,25 @@ function statusMatchScore(pattern: string, status: number): number {
 }
 
 function mediaTypeMatches(pattern: string, actual: string): boolean {
-	const expected = pattern.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-	const received = actual.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-	if (expected === received || expected === "*/*") return true;
-	const [expectedType, expectedSubtype] = expected.split("/", 2);
-	const [receivedType, receivedSubtype] = received.split("/", 2);
-	if (expectedType === undefined || expectedSubtype === undefined || receivedType === undefined || receivedSubtype === undefined) return false;
-	if (expectedType !== "*" && expectedType !== receivedType) return false;
-	if (expectedSubtype === "*") return true;
-	if (expectedSubtype.startsWith("*+")) return receivedSubtype.endsWith(expectedSubtype.slice(1));
-	return false;
+  const expected = pattern.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const received = actual.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (expected === received || expected === "*/*") return true;
+  const [expectedType, expectedSubtype] = expected.split("/", 2);
+  const [receivedType, receivedSubtype] = received.split("/", 2);
+  if (expectedType === undefined || expectedSubtype === undefined || receivedType === undefined || receivedSubtype === undefined) return false;
+  if (expectedType !== "*" && expectedType !== receivedType) return false;
+  if (expectedSubtype === "*") return true;
+  if (expectedSubtype.startsWith("*+")) return receivedSubtype.endsWith(expectedSubtype.slice(1));
+  return false;
 }
 
 function mediaTypeMatchScore(pattern: string, actual: string | undefined): number {
-	if (actual === undefined) return 0;
-	const normalized = pattern.toLowerCase();
-	if (normalized === actual) return 3;
-	if (normalized.includes("*+")) return 2;
-	if (normalized.includes("*")) return 1;
-	return 0;
+  if (actual === undefined) return 0;
+  const normalized = pattern.toLowerCase();
+  if (normalized === actual) return 3;
+  if (normalized.includes("*+")) return 2;
+  if (normalized.includes("*")) return 1;
+  return 0;
 }
 
 type DynamicScope = readonly WireSchema[];
@@ -2978,15 +2978,15 @@ function transformWireValue(
   for (const branch of schema.allOf ?? []) {
     transformed = transformWireValue(transformed, branch, components, direction, scope);
   }
-	if (schema.if !== undefined) {
-		const branch = schemaMatches(transformed, schema.if, components, direction, scope) ? schema.then : schema.else;
-		if (branch !== undefined) transformed = transformWireValue(transformed, branch, components, direction, scope);
-	}
-	for (const variants of [schema.oneOf, schema.anyOf]) {
+  if (schema.if !== undefined) {
+    const branch = schemaMatches(transformed, schema.if, components, direction, scope) ? schema.then : schema.else;
+    if (branch !== undefined) transformed = transformWireValue(transformed, branch, components, direction, scope);
+  }
+  for (const variants of [schema.oneOf, schema.anyOf]) {
     if (variants === undefined) continue;
-		const selected = schema.discriminator !== undefined
-			? discriminatorVariant(transformed, schema, components, direction) ?? variants.find((variant) => schemaMatches(transformed, variant, components, direction, scope))
-			: variants.find((variant) => schemaMatches(transformed, variant, components, direction, scope));
+    const selected = schema.discriminator !== undefined
+      ? discriminatorVariant(transformed, schema, components, direction) ?? variants.find((variant) => schemaMatches(transformed, variant, components, direction, scope))
+      : variants.find((variant) => schemaMatches(transformed, variant, components, direction, scope));
     if (selected !== undefined) transformed = transformWireValue(transformed, selected, components, direction, scope);
   }
   return transformed;
@@ -3062,14 +3062,14 @@ export function validateWireValue(
   if (schema.not !== undefined && schemaMatches(value, schema.not, components, direction, scope)) {
     throw new TypeError("must not match negated schema");
   }
-	if (schema.if !== undefined) {
-		const branch = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
-		if (branch !== undefined) validateWireValue(value, branch, components, direction, scope);
-	}
-	for (const branch of schema.allOf ?? []) validateWireValue(value, branch, components, direction, scope);
-	if (schema.contentSchema !== undefined && typeof value === "string") {
-		validateWireValue(decodeSchemaContent(value, schema, components), schema.contentSchema, components, direction, scope);
-	}
+  if (schema.if !== undefined) {
+    const branch = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
+    if (branch !== undefined) validateWireValue(value, branch, components, direction, scope);
+  }
+  for (const branch of schema.allOf ?? []) validateWireValue(value, branch, components, direction, scope);
+  if (schema.contentSchema !== undefined && typeof value === "string") {
+    validateWireValue(decodeSchemaContent(value, schema, components), schema.contentSchema, components, direction, scope);
+  }
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index++) {
       if (!Object.hasOwn(value, index)) throw new TypeError("must not contain sparse items");
@@ -3077,29 +3077,29 @@ export function validateWireValue(
     if (schema.minItems !== undefined && value.length < schema.minItems) throw new TypeError(`must contain at least ${schema.minItems} items`);
     if (schema.maxItems !== undefined && value.length > schema.maxItems) throw new TypeError(`must contain at most ${schema.maxItems} items`);
     if (schema.uniqueItems && !hasUniqueWireValues(value)) throw new TypeError("must contain unique items");
-		if (schema.contains !== undefined) {
-			const matches = value.filter((item) => schemaMatches(item, schema.contains!, components, direction, scope)).length;
-			const minimum = schema.minContains ?? 1;
-			if (matches < minimum) throw new TypeError(`must contain at least ${minimum} matching items`);
-			if (schema.maxContains !== undefined && matches > schema.maxContains) throw new TypeError(`must contain at most ${schema.maxContains} matching items`);
-		}
+    if (schema.contains !== undefined) {
+      const matches = value.filter((item) => schemaMatches(item, schema.contains!, components, direction, scope)).length;
+      const minimum = schema.minContains ?? 1;
+      if (matches < minimum) throw new TypeError(`must contain at least ${minimum} matching items`);
+      if (schema.maxContains !== undefined && matches > schema.maxContains) throw new TypeError(`must contain at most ${schema.maxContains} matching items`);
+    }
     for (const [index, item] of value.entries()) {
       const itemSchema = schema.prefixItems?.[index] ?? schema.items;
       if (itemSchema !== undefined) validateWireValue(item, itemSchema, components, direction, scope);
     }
-		if (schema.unevaluatedItems !== undefined) {
-			const evaluated = evaluatedArrayIndexes(value, schema, components, direction, scope);
-			for (const [index, item] of value.entries()) {
-				if (evaluated.has(index)) continue;
-				if (schema.unevaluatedItems === false) throw new TypeError(`unexpected unevaluated item ${index}`);
-				validateWireValue(item, schema.unevaluatedItems, components, direction, scope);
-			}
-		}
+    if (schema.unevaluatedItems !== undefined) {
+      const evaluated = evaluatedArrayIndexes(value, schema, components, direction, scope);
+      for (const [index, item] of value.entries()) {
+        if (evaluated.has(index)) continue;
+        if (schema.unevaluatedItems === false) throw new TypeError(`unexpected unevaluated item ${index}`);
+        validateWireValue(item, schema.unevaluatedItems, components, direction, scope);
+      }
+    }
     return;
   }
   if (!isRecord(value)) return;
-	if (schema.minProperties !== undefined && Object.keys(value).length < schema.minProperties) throw new TypeError(`must contain at least ${schema.minProperties} properties`);
-	if (schema.maxProperties !== undefined && Object.keys(value).length > schema.maxProperties) throw new TypeError(`must contain at most ${schema.maxProperties} properties`);
+  if (schema.minProperties !== undefined && Object.keys(value).length < schema.minProperties) throw new TypeError(`must contain at least ${schema.minProperties} properties`);
+  if (schema.maxProperties !== undefined && Object.keys(value).length > schema.maxProperties) throw new TypeError(`must contain at most ${schema.maxProperties} properties`);
   const properties = schema.properties ?? {};
   const allowed = new Set<string>();
   for (const [wireName, definition] of Object.entries(properties)) {
@@ -3117,49 +3117,49 @@ export function validateWireValue(
       throw new TypeError(`missing required property ${required}`);
     }
   }
-	for (const [property, required] of Object.entries(schema.dependentRequired ?? {})) {
-		const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
-		if (!Object.hasOwn(value, sourceProperty) || value[sourceProperty] === undefined) continue;
-		for (const dependency of required) {
-			const sourceDependency = direction === "encode" && properties[dependency] !== undefined ? properties[dependency].property : dependency;
-			if (!Object.hasOwn(value, sourceDependency) || value[sourceDependency] === undefined) {
-				throw new TypeError(`property ${property} requires property ${dependency}`);
-			}
-		}
-	}
-	for (const [property, dependency] of Object.entries(schema.dependentSchemas ?? {})) {
-		const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
-		if (Object.hasOwn(value, sourceProperty) && value[sourceProperty] !== undefined) validateWireValue(value, dependency, components, direction, scope);
-	}
-	for (const [pattern, propertySchema] of Object.entries(schema.patternProperties ?? {})) {
-		const expression = new RegExp(pattern, "u");
-		for (const [key, item] of Object.entries(value)) {
-			if (expression.test(key)) {
-				allowed.add(key);
-				validateWireValue(item, propertySchema, components, direction, scope);
-			}
-		}
-	}
-	if (schema.propertyNames !== undefined) {
-		for (const key of Object.keys(value)) validateWireValue(key, schema.propertyNames, components, direction, scope);
-	}
+  for (const [property, required] of Object.entries(schema.dependentRequired ?? {})) {
+    const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
+    if (!Object.hasOwn(value, sourceProperty) || value[sourceProperty] === undefined) continue;
+    for (const dependency of required) {
+      const sourceDependency = direction === "encode" && properties[dependency] !== undefined ? properties[dependency].property : dependency;
+      if (!Object.hasOwn(value, sourceDependency) || value[sourceDependency] === undefined) {
+        throw new TypeError(`property ${property} requires property ${dependency}`);
+      }
+    }
+  }
+  for (const [property, dependency] of Object.entries(schema.dependentSchemas ?? {})) {
+    const sourceProperty = direction === "encode" && properties[property] !== undefined ? properties[property].property : property;
+    if (Object.hasOwn(value, sourceProperty) && value[sourceProperty] !== undefined) validateWireValue(value, dependency, components, direction, scope);
+  }
+  for (const [pattern, propertySchema] of Object.entries(schema.patternProperties ?? {})) {
+    const expression = new RegExp(pattern, "u");
+    for (const [key, item] of Object.entries(value)) {
+      if (expression.test(key)) {
+        allowed.add(key);
+        validateWireValue(item, propertySchema, components, direction, scope);
+      }
+    }
+  }
+  if (schema.propertyNames !== undefined) {
+    for (const key of Object.keys(value)) validateWireValue(key, schema.propertyNames, components, direction, scope);
+  }
   if (schema.additionalProperties === false) {
     for (const key of Object.keys(value)) {
       if (!allowed.has(key)) throw new TypeError(`unexpected property ${key}`);
     }
   } else if (schema.additionalProperties !== undefined) {
     for (const [key, item] of Object.entries(value)) {
-		if (!allowed.has(key)) validateWireValue(item, schema.additionalProperties, components, direction, scope);
+    if (!allowed.has(key)) validateWireValue(item, schema.additionalProperties, components, direction, scope);
     }
   }
-	if (schema.unevaluatedProperties !== undefined) {
-		const evaluated = evaluatedPropertyNames(value, schema, components, direction, scope);
-		for (const [key, item] of Object.entries(value)) {
-			if (evaluated.has(key)) continue;
-			if (schema.unevaluatedProperties === false) throw new TypeError(`unexpected unevaluated property ${key}`);
-			validateWireValue(item, schema.unevaluatedProperties, components, direction, scope);
-		}
-	}
+  if (schema.unevaluatedProperties !== undefined) {
+    const evaluated = evaluatedPropertyNames(value, schema, components, direction, scope);
+    for (const [key, item] of Object.entries(value)) {
+      if (evaluated.has(key)) continue;
+      if (schema.unevaluatedProperties === false) throw new TypeError(`unexpected unevaluated property ${key}`);
+      validateWireValue(item, schema.unevaluatedProperties, components, direction, scope);
+    }
+  }
 }
 
 /** Implements the standard JSON Schema 2020-12 format-assertion registry. Unknown formats remain application-defined annotations. */
@@ -3269,98 +3269,98 @@ function decodeSchemaContent(value: string, schema: WireSchema, components: Wire
       throw new TypeError(`contentMediaType ${mediaType} cannot decode JSON`, { cause });
     }
   }
-	if (isXMLMediaType(mediaType)) return decodeXML(decoded, schema.contentSchema ?? {}, components);
+  if (isXMLMediaType(mediaType)) return decodeXML(decoded, schema.contentSchema ?? {}, components);
   throw new TypeError(`unsupported contentMediaType ${mediaType}`);
 }
 
 function discriminatorVariant(
-	value: unknown,
-	schema: WireSchema,
-	components: WireSchemas,
-	direction: "encode" | "decode",
+  value: unknown,
+  schema: WireSchema,
+  components: WireSchemas,
+  direction: "encode" | "decode",
 ): WireSchema | undefined {
-	if (!isRecord(value) || schema.discriminator === undefined) return undefined;
-	const property = schema.discriminator.property;
-	const candidate = value[property];
-	if (typeof candidate !== "string") return schema.discriminator.defaultMapping;
-	return schema.discriminator.mapping?.[candidate] ?? schema.discriminator.defaultMapping;
+  if (!isRecord(value) || schema.discriminator === undefined) return undefined;
+  const property = schema.discriminator.property;
+  const candidate = value[property];
+  if (typeof candidate !== "string") return schema.discriminator.defaultMapping;
+  return schema.discriminator.mapping?.[candidate] ?? schema.discriminator.defaultMapping;
 }
 
 function evaluatedArrayIndexes(
-	value: readonly unknown[],
-	schema: WireSchema,
-	components: WireSchemas,
-	direction: "encode" | "decode",
-	dynamicScope: DynamicScope,
-	seen = new Set<WireSchema>(),
+  value: readonly unknown[],
+  schema: WireSchema,
+  components: WireSchemas,
+  direction: "encode" | "decode",
+  dynamicScope: DynamicScope,
+  seen = new Set<WireSchema>(),
 ): Set<number> {
-	if (seen.has(schema)) return new Set();
-	seen.add(schema);
-	const result = new Set<number>();
-	const scope = extendDynamicScope(dynamicScope, schema);
-	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, dynamicTarget, components, direction, scope, seen));
-	if (schema.reference !== undefined) {
-		const referenced = components[schema.reference];
-		if (referenced !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, referenced, components, direction, scope, seen));
-	}
-	for (let index = 0; index < Math.min(value.length, schema.prefixItems?.length ?? 0); index++) result.add(index);
-	if (schema.items !== undefined) {
-		for (let index = schema.prefixItems?.length ?? 0; index < value.length; index++) result.add(index);
-	}
-	if (schema.contains !== undefined) {
-		value.forEach((item, index) => { if (schemaMatches(item, schema.contains!, components, direction, scope)) result.add(index); });
-	}
-	for (const child of schema.allOf ?? []) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
-	for (const variants of [schema.oneOf, schema.anyOf]) {
-		for (const child of variants ?? []) if (schemaMatches(value, child, components, direction, scope)) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
-	}
-	if (schema.if !== undefined) {
-		const child = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
-		if (child !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
-	}
-	return result;
+  if (seen.has(schema)) return new Set();
+  seen.add(schema);
+  const result = new Set<number>();
+  const scope = extendDynamicScope(dynamicScope, schema);
+  const dynamicTarget = resolveDynamicReference(schema, scope);
+  if (dynamicTarget !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, dynamicTarget, components, direction, scope, seen));
+  if (schema.reference !== undefined) {
+    const referenced = components[schema.reference];
+    if (referenced !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, referenced, components, direction, scope, seen));
+  }
+  for (let index = 0; index < Math.min(value.length, schema.prefixItems?.length ?? 0); index++) result.add(index);
+  if (schema.items !== undefined) {
+    for (let index = schema.prefixItems?.length ?? 0; index < value.length; index++) result.add(index);
+  }
+  if (schema.contains !== undefined) {
+    value.forEach((item, index) => { if (schemaMatches(item, schema.contains!, components, direction, scope)) result.add(index); });
+  }
+  for (const child of schema.allOf ?? []) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
+  for (const variants of [schema.oneOf, schema.anyOf]) {
+    for (const child of variants ?? []) if (schemaMatches(value, child, components, direction, scope)) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
+  }
+  if (schema.if !== undefined) {
+    const child = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
+    if (child !== undefined) mergeIndexes(result, evaluatedArrayIndexes(value, child, components, direction, scope, seen));
+  }
+  return result;
 }
 
 function evaluatedPropertyNames(
-	value: Readonly<Record<string, unknown>>,
-	schema: WireSchema,
-	components: WireSchemas,
-	direction: "encode" | "decode",
-	dynamicScope: DynamicScope,
-	seen = new Set<WireSchema>(),
+  value: Readonly<Record<string, unknown>>,
+  schema: WireSchema,
+  components: WireSchemas,
+  direction: "encode" | "decode",
+  dynamicScope: DynamicScope,
+  seen = new Set<WireSchema>(),
 ): Set<string> {
-	if (seen.has(schema)) return new Set();
-	seen.add(schema);
-	const result = new Set<string>();
-	const scope = extendDynamicScope(dynamicScope, schema);
-	const dynamicTarget = resolveDynamicReference(schema, scope);
-	if (dynamicTarget !== undefined) mergeProperties(result, evaluatedPropertyNames(value, dynamicTarget, components, direction, scope, seen));
-	if (schema.reference !== undefined) {
-		const referenced = components[schema.reference];
-		if (referenced !== undefined) mergeProperties(result, evaluatedPropertyNames(value, referenced, components, direction, scope, seen));
-	}
-	for (const [wireName, definition] of Object.entries(schema.properties ?? {})) {
-		const name = direction === "encode" ? definition.property : wireName;
-		if (Object.hasOwn(value, name)) result.add(name);
-	}
-	for (const pattern of Object.keys(schema.patternProperties ?? {})) {
-		const expression = new RegExp(pattern, "u");
-		for (const key of Object.keys(value)) if (expression.test(key)) result.add(key);
-	}
-	if (schema.additionalProperties !== undefined) for (const key of Object.keys(value)) result.add(key);
-	for (const child of schema.allOf ?? []) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
-	for (const variants of [schema.oneOf, schema.anyOf]) {
-		for (const child of variants ?? []) if (schemaMatches(value, child, components, direction, scope)) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
-	}
-	if (schema.if !== undefined) {
-		const child = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
-		if (child !== undefined) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
-	}
-	for (const [property, child] of Object.entries(schema.dependentSchemas ?? {})) {
-		if (Object.hasOwn(value, property)) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
-	}
-	return result;
+  if (seen.has(schema)) return new Set();
+  seen.add(schema);
+  const result = new Set<string>();
+  const scope = extendDynamicScope(dynamicScope, schema);
+  const dynamicTarget = resolveDynamicReference(schema, scope);
+  if (dynamicTarget !== undefined) mergeProperties(result, evaluatedPropertyNames(value, dynamicTarget, components, direction, scope, seen));
+  if (schema.reference !== undefined) {
+    const referenced = components[schema.reference];
+    if (referenced !== undefined) mergeProperties(result, evaluatedPropertyNames(value, referenced, components, direction, scope, seen));
+  }
+  for (const [wireName, definition] of Object.entries(schema.properties ?? {})) {
+    const name = direction === "encode" ? definition.property : wireName;
+    if (Object.hasOwn(value, name)) result.add(name);
+  }
+  for (const pattern of Object.keys(schema.patternProperties ?? {})) {
+    const expression = new RegExp(pattern, "u");
+    for (const key of Object.keys(value)) if (expression.test(key)) result.add(key);
+  }
+  if (schema.additionalProperties !== undefined) for (const key of Object.keys(value)) result.add(key);
+  for (const child of schema.allOf ?? []) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
+  for (const variants of [schema.oneOf, schema.anyOf]) {
+    for (const child of variants ?? []) if (schemaMatches(value, child, components, direction, scope)) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
+  }
+  if (schema.if !== undefined) {
+    const child = schemaMatches(value, schema.if, components, direction, scope) ? schema.then : schema.else;
+    if (child !== undefined) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
+  }
+  for (const [property, child] of Object.entries(schema.dependentSchemas ?? {})) {
+    if (Object.hasOwn(value, property)) mergeProperties(result, evaluatedPropertyNames(value, child, components, direction, scope, seen));
+  }
+  return result;
 }
 
 function mergeIndexes(target: Set<number>, source: ReadonlySet<number>): void { for (const value of source) target.add(value); }
@@ -3450,23 +3450,23 @@ async function appendQuery(
   codecs: ReadonlyMap<string, MediaCodec<unknown>>,
   location: "query" | "querystring",
 ): Promise<QueryPart[]> {
-	const result: QueryPart[] = [];
+  const result: QueryPart[] = [];
   for (const [property, value] of Object.entries(query)) {
     if (value === undefined) continue;
     const parameter = findParameterByProperty(operation, location, property);
-		if (parameter?.location === "querystring") {
-			await appendQuerystring(result, encodeParameterWireValue(operation, parameter, value), parameter, operation.inputSchemas ?? {}, codecs);
-			continue;
-		}
-		await appendQueryParameter(
-		result,
+    if (parameter?.location === "querystring") {
+      await appendQuerystring(result, encodeParameterWireValue(operation, parameter, value), parameter, operation.inputSchemas ?? {}, codecs);
+      continue;
+    }
+    await appendQueryParameter(
+    result,
       parameter?.name ?? property,
       encodeParameterWireValue(operation, parameter, value),
       parameter,
-			operation.inputSchemas ?? {}, codecs,
+      operation.inputSchemas ?? {}, codecs,
     );
   }
-	return result;
+  return result;
 }
 
 async function appendQueryParameter(
@@ -3474,43 +3474,43 @@ async function appendQueryParameter(
   name: string,
   value: unknown,
   parameter: ParameterDefinition | undefined,
-	components: WireSchemas,
+  components: WireSchemas,
   codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<void> {
   if (parameter?.contentType !== undefined) {
-		appendQueryValue(query, name, await serializeContentParameter(value, parameter.contentType, parameter.schema, components, codecs), parameter?.allowReserved ?? false);
+    appendQueryValue(query, name, await serializeContentParameter(value, parameter.contentType, parameter.schema, components, codecs), parameter?.allowReserved ?? false);
     return;
   }
   const style = parameter?.style ?? "form";
   const explode = parameter?.explode ?? true;
   if (style === "deepObject" && isRecord(value)) {
     for (const [key, item] of Object.entries(value)) {
-			if (item !== undefined) appendQueryValue(query, `${name}[${key}]`, item, parameter?.allowReserved ?? false);
+      if (item !== undefined) appendQueryValue(query, `${name}[${key}]`, item, parameter?.allowReserved ?? false);
     }
     return;
   }
   if (Array.isArray(value)) {
-		if (style === "spaceDelimited") appendQueryValue(query, name, value.map(String).join(" "), parameter?.allowReserved ?? false);
-		else if (style === "pipeDelimited") appendQueryValue(query, name, value.map(String).join("|"), parameter?.allowReserved ?? false);
-		else if (explode) for (const item of value) appendQueryValue(query, name, item, parameter?.allowReserved ?? false);
-		else appendQueryValue(query, name, value.map(String).join(","), parameter?.allowReserved ?? false);
+    if (style === "spaceDelimited") appendQueryValue(query, name, value.map(String).join(" "), parameter?.allowReserved ?? false);
+    else if (style === "pipeDelimited") appendQueryValue(query, name, value.map(String).join("|"), parameter?.allowReserved ?? false);
+    else if (explode) for (const item of value) appendQueryValue(query, name, item, parameter?.allowReserved ?? false);
+    else appendQueryValue(query, name, value.map(String).join(","), parameter?.allowReserved ?? false);
     return;
   }
   if (isRecord(value) && style === "form") {
     const entries = Object.entries(value).filter((entry) => entry[1] !== undefined);
-		if (explode) for (const [key, item] of entries) appendQueryValue(query, key, item, parameter?.allowReserved ?? false);
-		else appendQueryValue(query, name, entries.flatMap(([key, item]) => [key, String(item)]).join(","), parameter?.allowReserved ?? false);
+    if (explode) for (const [key, item] of entries) appendQueryValue(query, key, item, parameter?.allowReserved ?? false);
+    else appendQueryValue(query, name, entries.flatMap(([key, item]) => [key, String(item)]).join(","), parameter?.allowReserved ?? false);
     return;
   }
-	if (isRecord(value) && (style === "spaceDelimited" || style === "pipeDelimited")) {
-		const separator = style === "spaceDelimited" ? " " : "|";
-		const entries = Object.entries(value).filter((entry) => entry[1] !== undefined);
-		const serialized = explode
-			? entries.map(([key, item]) => `${key}=${String(item)}`).join(separator)
-			: entries.flatMap(([key, item]) => [key, String(item)]).join(separator);
-		appendQueryValue(query, name, serialized, parameter?.allowReserved ?? false);
-		return;
-	}
+  if (isRecord(value) && (style === "spaceDelimited" || style === "pipeDelimited")) {
+    const separator = style === "spaceDelimited" ? " " : "|";
+    const entries = Object.entries(value).filter((entry) => entry[1] !== undefined);
+    const serialized = explode
+      ? entries.map(([key, item]) => `${key}=${String(item)}`).join(separator)
+      : entries.flatMap(([key, item]) => [key, String(item)]).join(separator);
+    appendQueryValue(query, name, serialized, parameter?.allowReserved ?? false);
+    return;
+  }
   appendQueryValue(query, name, value, parameter?.allowReserved ?? false);
 }
 
@@ -3566,42 +3566,42 @@ function appendQuerystringSync(query: QueryPart[], value: unknown, parameter: Pa
 
 function appendQueryValue(query: QueryPart[], name: string, value: unknown, allowReserved: boolean): void {
   if (isRecord(value) && typeof value.field === "string" && typeof value.direction === "string") {
-		query.push({ name, value: `${value.field}:${value.direction}`, allowReserved });
+    query.push({ name, value: `${value.field}:${value.direction}`, allowReserved });
     return;
   }
   if (typeof value === "object" && value !== null) {
-		query.push({ name, value: JSON.stringify(value), allowReserved });
+    query.push({ name, value: JSON.stringify(value), allowReserved });
     return;
   }
   query.push({ name, value: String(value), allowReserved });
 }
 
 function serializeQuery(query: readonly QueryPart[]): string {
-	return query.map((part) => part.raw ?? `${encodeURIComponent(part.name ?? "")}=${part.allowReserved ? encodeReservedQueryValue(part.value ?? "") : encodeURIComponent(part.value ?? "")}`).join("&");
+  return query.map((part) => part.raw ?? `${encodeURIComponent(part.name ?? "")}=${part.allowReserved ? encodeReservedQueryValue(part.value ?? "") : encodeURIComponent(part.value ?? "")}`).join("&");
 }
 
 async function appendQuerystring(query: QueryPart[], value: unknown, parameter: ParameterDefinition, components: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>>): Promise<void> {
-	const contentType = parameter.contentType?.toLowerCase();
-	if (contentType === "application/x-www-form-urlencoded") {
-		if (!isRecord(value)) throw new TypeError("querystring form content must be an object");
-		for (const [name, item] of Object.entries(value)) {
-			if (item === undefined) continue;
-			if (Array.isArray(item)) for (const entry of item) query.push({ name, value: String(entry) });
-			else query.push({ name, value: String(item) });
-		}
-		return;
-	}
-	if (contentType === "application/json") {
-		query.push({ raw: encodeURIComponent(JSON.stringify(value)) });
-		return;
-	}
-	query.push({ raw: encodeURIComponent(await serializeContentParameter(value, parameter.contentType ?? "text/plain", parameter.schema, components, codecs)) });
+  const contentType = parameter.contentType?.toLowerCase();
+  if (contentType === "application/x-www-form-urlencoded") {
+    if (!isRecord(value)) throw new TypeError("querystring form content must be an object");
+    for (const [name, item] of Object.entries(value)) {
+      if (item === undefined) continue;
+      if (Array.isArray(item)) for (const entry of item) query.push({ name, value: String(entry) });
+      else query.push({ name, value: String(item) });
+    }
+    return;
+  }
+  if (contentType === "application/json") {
+    query.push({ raw: encodeURIComponent(JSON.stringify(value)) });
+    return;
+  }
+  query.push({ raw: encodeURIComponent(await serializeContentParameter(value, parameter.contentType ?? "text/plain", parameter.schema, components, codecs)) });
 }
 
 function encodeReservedQueryValue(value: string): string {
-	return encodeURIComponent(value)
-		.replace(/%25([0-9a-f]{2})/gi, "%$1")
-		.replace(/%3A|%2F|%3F|%40|%21|%24|%27|%28|%29|%2A|%2C|%3B|%3D/gi, (encoded) => decodeURIComponent(encoded));
+  return encodeURIComponent(value)
+    .replace(/%25([0-9a-f]{2})/gi, "%$1")
+    .replace(/%3A|%2F|%3F|%40|%21|%24|%27|%28|%29|%2A|%2C|%3B|%3D/gi, (encoded) => decodeURIComponent(encoded));
 }
 
 function findParameter(
@@ -3628,11 +3628,11 @@ async function serializePathParameter(
   parameter: ParameterDefinition | undefined,
   name: string,
   value: unknown,
-	components: WireSchemas,
+  components: WireSchemas,
   codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<string> {
   if (parameter?.contentType !== undefined) {
-		return encodeURIComponent(await serializeContentParameter(value, parameter.contentType, parameter.schema, components, codecs));
+    return encodeURIComponent(await serializeContentParameter(value, parameter.contentType, parameter.schema, components, codecs));
   }
   const style = parameter?.style ?? "simple";
   const explode = parameter?.explode ?? false;
@@ -3692,21 +3692,21 @@ function serializeSimpleValue(value: unknown, explode: boolean): string {
 }
 
 async function serializeContentParameter(value: unknown, contentType: string, schema: WireSchema | undefined = undefined, components: WireSchemas = {}, codecs: ReadonlyMap<string, MediaCodec<unknown>> = new Map()): Promise<string> {
-	if (isJSONMediaType(contentType)) return JSON.stringify(value);
-	if (isXMLMediaType(contentType)) return encodeXML(value, schema ?? {}, components);
-	if (contentType.toLowerCase() === "application/x-www-form-urlencoded") {
-		if (!isRecord(value)) return String(value);
-		const form = new URLSearchParams();
-		for (const [name, item] of Object.entries(value)) {
-			if (item === undefined) continue;
-			if (Array.isArray(item)) for (const entry of item) form.append(name, String(entry));
-			else form.append(name, String(item));
-		}
-		return form.toString();
-	}
-	const codec = codecs.get(normalizeMediaType(contentType));
-	if (codec?.encodeParameter === undefined) throw new TypeError(`missing parameter encode codec for ${contentType}`);
-	return await codec.encodeParameter(value, { contentType });
+  if (isJSONMediaType(contentType)) return JSON.stringify(value);
+  if (isXMLMediaType(contentType)) return encodeXML(value, schema ?? {}, components);
+  if (contentType.toLowerCase() === "application/x-www-form-urlencoded") {
+    if (!isRecord(value)) return String(value);
+    const form = new URLSearchParams();
+    for (const [name, item] of Object.entries(value)) {
+      if (item === undefined) continue;
+      if (Array.isArray(item)) for (const entry of item) form.append(name, String(entry));
+      else form.append(name, String(item));
+    }
+    return form.toString();
+  }
+  const codec = codecs.get(normalizeMediaType(contentType));
+  if (codec?.encodeParameter === undefined) throw new TypeError(`missing parameter encode codec for ${contentType}`);
+  return await codec.encodeParameter(value, { contentType });
 }
 
 function serializeContentParameterSync(value: unknown, contentType: string, schema: WireSchema | undefined = undefined, components: WireSchemas = {}): string {
@@ -3725,12 +3725,12 @@ function serializeContentParameterSync(value: unknown, contentType: string, sche
 async function serializeCookie(
   operation: OperationDefinition,
   property: string,
-	value: unknown,
+  value: unknown,
   codecs: ReadonlyMap<string, MediaCodec<unknown>>,
 ): Promise<string[]> {
   const parameter = findParameterByProperty(operation, "cookie", property);
   const name = parameter?.name ?? property;
-	const preserve = parameter?.style === "cookie";
+  const preserve = parameter?.style === "cookie";
   const pair = (key: string, item: unknown): string => `${preserve ? key : encodeURIComponent(key)}=${preserve ? String(item ?? "") : encodeURIComponent(String(item ?? ""))}`;
   value = encodeParameterWireValue(operation, parameter, value);
   if (parameter?.contentType !== undefined) {
@@ -3751,7 +3751,7 @@ async function serializeCookie(
 function serializeCookieSync(operation: OperationDefinition, property: string, value: unknown): string[] {
   const parameter = findParameterByProperty(operation, "cookie", property);
   const name = parameter?.name ?? property;
-	const preserve = parameter?.style === "cookie";
+  const preserve = parameter?.style === "cookie";
   const pair = (key: string, item: unknown): string => `${preserve ? key : encodeURIComponent(key)}=${preserve ? String(item ?? "") : encodeURIComponent(String(item ?? ""))}`;
   value = encodeParameterWireValue(operation, parameter, value);
   if (parameter?.contentType !== undefined) return [pair(name, serializeContentParameterSync(value, parameter.contentType, parameter.schema, operation.inputSchemas ?? {}))];
@@ -3913,20 +3913,20 @@ async function decodeResponse(operation: OperationDefinition, response: Response
   const contentType = responseContentType(response);
   if (contentType === undefined || response.body === null) return undefined;
   try {
-		const definition = selectResponseDefinition(operation, response, true);
-		if (normalizeMediaType(contentType).startsWith("multipart/") && definition !== undefined) {
-			return decodeMultipartResponse(response.body, response.headers.get("content-type") ?? contentType, definition, operation.outputSchemas ?? {}, codecs);
-		}
-	if (isJSONMediaType(contentType)) {
+    const definition = selectResponseDefinition(operation, response, true);
+    if (normalizeMediaType(contentType).startsWith("multipart/") && definition !== undefined) {
+      return decodeMultipartResponse(response.body, response.headers.get("content-type") ?? contentType, definition, operation.outputSchemas ?? {}, codecs);
+    }
+  if (isJSONMediaType(contentType)) {
       return await response.json();
     }
     if (contentType.startsWith("text/") || contentType.includes("xml")) {
       return await response.text();
     }
-		if (isBinaryMediaType(contentType)) return response.body;
-		const codec = codecs.get(contentType);
-		if (codec?.decode === undefined) throw new TypeError(`missing decode codec for ${contentType}`);
-		return await codec.decode(response, { contentType });
+    if (isBinaryMediaType(contentType)) return response.body;
+    const codec = codecs.get(contentType);
+    if (codec?.decode === undefined) throw new TypeError(`missing decode codec for ${contentType}`);
+    return await codec.decode(response, { contentType });
   } catch (cause) {
     throw new APIError({
       code: TransportErrorCode.RESPONSE_DECODE_FAILED,
@@ -3940,8 +3940,8 @@ async function decodeResponse(operation: OperationDefinition, response: Response
 }
 
 function isJSONMediaType(contentType: string): boolean {
-	const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-	return mediaType === "application/json" || mediaType.endsWith("+json");
+  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return mediaType === "application/json" || mediaType.endsWith("+json");
 }
 
 function isXMLMediaType(contentType: string): boolean {
@@ -3954,29 +3954,29 @@ function responseContentType(response: Response): string | undefined {
 }
 
 function normalizeCodecs(codecs: Readonly<Record<string, MediaCodec<unknown>>> | undefined): ReadonlyMap<string, MediaCodec<unknown>> {
-	const result = new Map<string, MediaCodec<unknown>>();
-	for (const [contentType, codec] of Object.entries(codecs ?? {})) {
-		const normalized = normalizeMediaType(contentType);
-		if (normalized === "" || result.has(normalized)) throw new TypeError(`duplicate or invalid media codec ${contentType}`);
-		result.set(normalized, codec);
-	}
-	return result;
+  const result = new Map<string, MediaCodec<unknown>>();
+  for (const [contentType, codec] of Object.entries(codecs ?? {})) {
+    const normalized = normalizeMediaType(contentType);
+    if (normalized === "" || result.has(normalized)) throw new TypeError(`duplicate or invalid media codec ${contentType}`);
+    result.set(normalized, codec);
+  }
+  return result;
 }
 
 function normalizeMediaType(contentType: string): string {
-	return contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
 }
 
 function isBinaryMediaType(contentType: string): boolean {
-	return contentType === "application/octet-stream" || contentType.startsWith("image/") || contentType.startsWith("audio/") || contentType.startsWith("video/");
+  return contentType === "application/octet-stream" || contentType.startsWith("image/") || contentType.startsWith("audio/") || contentType.startsWith("video/");
 }
 
 function isSequentialStreamMediaType(contentType: string): boolean {
-	return contentType.includes("event-stream") || contentType.includes("json-seq") || contentType.includes("ndjson") || contentType.includes("jsonl");
+  return contentType.includes("event-stream") || contentType.includes("json-seq") || contentType.includes("ndjson") || contentType.includes("jsonl");
 }
 
 function isPromise<Value>(value: Value | Promise<Value>): value is Promise<Value> {
-	return typeof (value as Promise<Value>)?.then === "function";
+  return typeof (value as Promise<Value>)?.then === "function";
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

@@ -382,6 +382,12 @@ func TestGeneratorAddsServerArtifactsWithoutChangingClientLayout(t *testing.T) {
 	for _, artifact := range withServer {
 		serverSources[artifact.Path] = artifact.Data
 	}
+	for path, source := range serverSources {
+		if index := bytes.IndexByte(source, '\t'); index >= 0 {
+			line := bytes.Count(source[:index], []byte{'\n'}) + 1
+			t.Fatalf("generated TypeScript %s:%d contains a tab", path, line)
+		}
+	}
 	for path, source := range clientSources {
 		if generated := serverSources[path]; !bytes.Equal(generated, source) {
 			t.Fatalf("client artifact %s changed when server was selected", path)

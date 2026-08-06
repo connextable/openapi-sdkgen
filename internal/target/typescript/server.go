@@ -1590,7 +1590,7 @@ async function decodeInboundFormValue(value: unknown, schema: InboundSchema | un
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value
   if (typeof value === "string" && contentType !== undefined) {
     const decoded = await decodeInboundFormContent(value, resolved, schemas, wireSchema, wireSchemas, contentType, codecs)
-	if (decoded !== value) return decodeInboundFormValue(decoded, resolved, schemas, wireSchema, wireSchemas, encoding, undefined, codecs)
+    if (decoded !== value) return decodeInboundFormValue(decoded, resolved, schemas, wireSchema, wireSchemas, encoding, undefined, codecs)
   }
   if (Array.isArray(value)) {
     if (wireSchema !== undefined) {
@@ -1645,9 +1645,9 @@ async function decodeInboundFormContent(value: unknown, schema: InboundSchema, s
   if (normalized.includes("xml")) {
     try { return decodeInboundXML(value, schema, schemas, wireSchema, wireSchemas) } catch { throw new InboundRequestError(new Response("Invalid form XML field", { status: 400 })) }
   }
-	const codec = codecs?.get(normalized)
-	if (codec?.decodeParameter === undefined) return value
-	try { return await codec.decodeParameter(value, { contentType }) } catch { throw new InboundRequestError(new Response("Invalid form field", { status: 400 })) }
+  const codec = codecs?.get(normalized)
+  if (codec?.decodeParameter === undefined) return value
+  try { return await codec.decodeParameter(value, { contentType }) } catch { throw new InboundRequestError(new Response("Invalid form field", { status: 400 })) }
 }
 
 /** Return void to continue or a Response to reject the inbound request. */
@@ -2430,10 +2430,10 @@ export async function responseFromHandler(value: InboundResponse, options?: Inbo
   if ((value.status === 204 || value.status === 205) && value.body !== undefined) throw new TypeError("Responses with status 204 or 205 must not include a body")
   const statusDefinitions = options?.responses.filter((definition) => inboundResponseStatusMatches(definition.status, value.status)) ?? []
   if (options !== undefined && statusDefinitions.length === 0) throw new TypeError("response status " + value.status + " is not declared by this endpoint")
-	const generatedHeaderNames = await appendInboundResponseHeaderValues(headers, value.headerValues, statusDefinitions.flatMap((definition) => definition.headers ?? []), options?.schemas ?? {}, options?.codecs)
+  const generatedHeaderNames = await appendInboundResponseHeaderValues(headers, value.headerValues, statusDefinitions.flatMap((definition) => definition.headers ?? []), options?.schemas ?? {}, options?.codecs)
   if (value.body === undefined) {
     if (options !== undefined && !statusDefinitions.some((definition) => definition.contentType === undefined)) throw new TypeError("response status " + value.status + " requires a body")
-	    await validateInboundResponseHeaders(headers, statusDefinitions.find((definition) => definition.contentType === undefined)?.headers, options?.schemas ?? {}, options?.codecs, generatedHeaderNames)
+    await validateInboundResponseHeaders(headers, statusDefinitions.find((definition) => definition.contentType === undefined)?.headers, options?.schemas ?? {}, options?.codecs, generatedHeaderNames)
     return new Response(null, { status: value.status, headers })
   }
   const contentType = value.contentType ?? headers.get("content-type") ?? "application/json"
@@ -2442,7 +2442,7 @@ export async function responseFromHandler(value: InboundResponse, options?: Inbo
   const definition = statusDefinitions.filter((entry) => entry.contentType !== undefined && inboundMediaTypeMatches(entry.contentType, normalizeInboundMediaType(contentType))).sort((left, right) => inboundMediaTypeMatchScore(right.contentType ?? "", contentType) - inboundMediaTypeMatchScore(left.contentType ?? "", contentType))[0]
   if (options !== undefined && definition === undefined) throw new TypeError("response content type " + contentType + " is not declared for status " + value.status)
   if (definition?.schema !== undefined) validateWireValue(value.body, definition.schema, options!.schemas, "encode")
-	await validateInboundResponseHeaders(headers, definition?.headers, options?.schemas ?? {}, options?.codecs, generatedHeaderNames)
+  await validateInboundResponseHeaders(headers, definition?.headers, options?.schemas ?? {}, options?.codecs, generatedHeaderNames)
   if (normalizedContentType === "application/json" || normalizedContentType.endsWith("+json")) {
     assertInboundJSONSerializable(value.body)
     return new Response(JSON.stringify(value.body), { status: value.status, headers })
@@ -2457,7 +2457,7 @@ export async function responseFromHandler(value: InboundResponse, options?: Inbo
 
 async function validateInboundResponseHeaders(headers: Headers, definitions: readonly WireHeaderDefinition[] | undefined, schemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined, generatedHeaderNames: ReadonlySet<string> = new Set()): Promise<void> {
   for (const definition of definitions ?? []) {
-	if (generatedHeaderNames.has(definition.name.toLowerCase())) continue
+    if (generatedHeaderNames.has(definition.name.toLowerCase())) continue
     const value = headers.get(definition.name)
     if (value === null) {
       if (definition.required) throw new TypeError("missing required response header " + definition.name)
@@ -2543,7 +2543,7 @@ async function appendInboundResponseHeaderValues(headers: Headers, values: Reado
     headers.set(definition.name, await encodeInboundResponseHeaderValue(value, definition, schemas, codecs))
     result.add(definition.name.toLowerCase())
   }
-	return result
+  return result
 }
 
 async function encodeInboundResponseHeaderValue(value: unknown, definition: WireHeaderDefinition, schemas: WireSchemas, codecs: ReadonlyMap<string, MediaCodec<unknown>> | undefined): Promise<string> {

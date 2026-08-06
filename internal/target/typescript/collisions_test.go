@@ -268,14 +268,14 @@ func TestRequestBodyTypeUsesRuntimeBinaryBody(t *testing.T) {
 func TestEmitEnumsUsesConstInferenceForLiteralValues(t *testing.T) {
 	source, err := emitEnums(&ir.Document{
 		ComponentSchemas: map[string]map[string]any{
-			"RequestState": {"enum": []any{"REQUESTED", "APPROVED", "REJECTED"}},
+			"TodoStatus": {"enum": []any{"TODO", "DONE"}},
 		},
 		Operations: []ir.Operation{{Raw: map[string]any{
 			"responses": map[string]any{
 				"200": map[string]any{
 					"content": map[string]any{
 						"application/json": map[string]any{
-							"schema": map[string]any{"$ref": "#/components/schemas/RequestState"},
+							"schema": map[string]any{"$ref": "#/components/schemas/TodoStatus"},
 						},
 					},
 				},
@@ -286,7 +286,7 @@ func TestEmitEnumsUsesConstInferenceForLiteralValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	generated := string(source)
-	if !strings.Contains(generated, ` = ["REQUESTED", "APPROVED", "REJECTED"] as const`) {
+	if !strings.Contains(generated, ` = ["TODO", "DONE"] as const`) {
 		t.Fatalf("literal enum values do not use const inference:\n%s", source)
 	}
 	if strings.Contains(generated, "__sdkgen_createJSONRecord") || strings.Contains(generated, "as unknown as readonly") {
